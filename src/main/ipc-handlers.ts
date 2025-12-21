@@ -1,0 +1,641 @@
+import { ipcMain, BrowserWindow } from 'electron'
+import { isConfigured, getStorageLocation, setStorageLocation, getConfig } from './config'
+import {
+  getFreeSpace,
+  createAlbumFolder,
+  ensureBaseDirectory,
+  scanImagesInFolder,
+  clearScanCache,
+  formatBytes
+} from './storage'
+import {
+  createAlbum,
+  getAlbum,
+  getAllAlbums,
+  deleteAlbum as dbDeleteAlbum,
+  createImage,
+  getAlbumImages,
+  deleteImages,
+  updateAlbum
+} from './database'
+import { albumsApi, getShareUrl } from './api-client'
+import { uploadPipeline } from './pipeline'
+import { existsSync, rmSync, copyFileSync } from 'fs'
+import { join } from 'path'
+
+export function registerIpcHandlers(mainWindow: BrowserWindow): void {
+  // ==================== Config Handlers ====================
+
+  ipcMain.handle('config:isConfigured', () => {
+    return isConfigured()
+  })
+
+  ipcMain.handle('config:getStorageLocation', () => {
+    return getStorageLocation()
+  })
+
+  ipcMain.handle('config:setStorageLocation', async (_event, path: string) => {
+    try {
+      // Validate path exists
+      if (!existsSync(path)) {
+        throw new Error('Selected path does not exist')
+      }
+
+      // Set storage location
+      setStorageLocation(path)
+
+      // Create base directory structure
+      ensureBaseDirectory(path)
+
+      return { success: true }
+    } catch (error: any) {
+      console.error('Failed to set storage location:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('config:getFreeSpace', async (_event, path: string) => {
+    try {
+      const bytes = await getFreeSpace(path)
+      return {
+        bytes,
+        formatted: formatBytes(bytes)
+      }
+    } catch (error: any) {
+      console.error('Failed to get free space:', error)
+      return { bytes: 0, formatted: '0 Bytes', error: error.message }
+    }
+  })
+
+  ipcMain.handle('config:getConfig', () => {
+    return getConfig()
+  })
+
+  // ==================== Album Handlers ====================
+
+  ipcMain.handle(
+    'album:create',
+    async (
+      _event,
+      data: {
+        title: string
+        eventDate: string | null
+        startTime: string | null
+        endTime: string | null
+        sourceFolderPath: string
+      }
+    ) => {
+      try {
+        const storageLocation = getStorageLocation()
+        if (!storageLocation) {
+          throw new Error('Storage location not configured')
+        }
+
+        // Create album on server (real API)
+        // Note: Assuming API might not support startTime/endTime yet, or we send them if supported.
+        // For now, we'll just pass what we have.
+        const apiAlbum = await albumsApi.create({
+          title: data.title,
+          eventDate: data.eventDate
+        })
+
+        // Create local album folder
+        const localFolderPath = createAlbumFolder(storageLocation, apiAlbum.id)
+
+        // Create album in local database
+        const album = createAlbum({
+          id: apiAlbum.id,
+          title: data.title,
+          eventDate: data.eventDate,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          localFolderPath,
+          sourceFolderPath: data.sourceFolderPath,
+          totalImages: 0,
+          lastSyncedAt: null,
+          needsSync: 0
+        })
+
+        // Scan source folder for images
+        const imageFiles = scanImagesInFolder(data.sourceFolderPath)
+
+        // Create image records
+        imageFiles.forEach((file, index) => {
+          const localFilePath = join(localFolderPath, file.filename)
+
+          createImage({
+            albumId: album.id,
+            serverId: null,
+            originalFilename: file.filename,
+            localFilePath,
+            fileSize: file.size,
+            width: file.width || 0,
+            height: file.height || 0,
+            mtime: file.mtime,
+            sourceFileHash: null,
+            uploadStatus: 'pending',
+            uploadOrder: index
+          })
+        })
+
+        // Update album total images count
+        updateAlbum(album.id, { totalImages: imageFiles.length })
+
+        // Start compression and upload pipeline
+        uploadPipeline.startPipeline(album.id, mainWindow).catch((error) => {
+          console.error('Pipeline failed:', error)
+        })
+
+        return { success: true, album: { ...album, totalImages: imageFiles.length } }
+      } catch (error: any) {
+        console.error('Failed to create album:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  )
+
+  ipcMain.handle('album:list', () => {
+    console.log('[IPC] album:list called')
+    try {
+      const albums = getAllAlbums()
+      const storageLocation = getStorageLocation()
+      console.log(`[IPC] Found ${albums.length} albums in database`)
+
+      if (!storageLocation) {
+        console.warn('[IPC] No storage location configured')
+        return { success: true, albums: [] }
+      }
+
+      // Verify each album's folder exists
+      const validAlbums = albums.filter((album) => {
+        const exists = existsSync(album.localFolderPath)
+        if (!exists) {
+          console.warn(`[IPC] Album folder does not exist: ${album.localFolderPath}`)
+        }
+        return exists
+      })
+      console.log(`[IPC] ${validAlbums.length} albums have valid folder paths`)
+
+      // Get thumbnail for each album and check for sync status
+      const albumsWithThumbnails = validAlbums.map((album) => {
+        const images = getAlbumImages(album.id)
+        const thumbnail = images.length > 0 ? images[0].localFilePath : null
+        console.log(`[IPC] Album ${album.id} has ${images.length} images`)
+
+        // Quick sync check: compare file counts
+        let needsSync = album.needsSync
+        if (existsSync(album.sourceFolderPath)) {
+          try {
+            console.log(`[IPC] Checking sync for album ${album.id}...`)
+            const sourceImages = scanImagesInFolder(album.sourceFolderPath)
+            const dbImageCount = images.length
+
+            // If counts don't match, mark as needing sync
+            if (sourceImages.length !== dbImageCount) {
+              console.log(
+                `[IPC] Sync needed for album ${album.id}: source=${sourceImages.length}, db=${dbImageCount}`
+              )
+              needsSync = 1
+              // Update database
+              updateAlbum(album.id, { needsSync: 1 })
+            } else {
+              console.log(`[IPC] Album ${album.id} is in sync`)
+            }
+          } catch (error) {
+            console.warn(`[IPC] Failed to check sync for album ${album.id}:`, error)
+          }
+        } else {
+          console.warn(`[IPC] Source folder does not exist for album ${album.id}: ${album.sourceFolderPath}`)
+        }
+
+        return {
+          ...album,
+          needsSync,
+          thumbnail
+        }
+      })
+
+      console.log(`[IPC] Returning ${albumsWithThumbnails.length} albums with thumbnails`)
+      return { success: true, albums: albumsWithThumbnails }
+    } catch (error: any) {
+      console.error('[IPC] Failed to list albums:', error)
+      return { success: false, error: error.message, albums: [] }
+    }
+  })
+
+  ipcMain.handle('album:get', (_event, albumId: string) => {
+    console.log(`[IPC] album:get called for albumId: ${albumId}`)
+    try {
+      const album = getAlbum(albumId)
+      if (!album) {
+        console.error(`[IPC] Album not found: ${albumId}`)
+        return { success: false, error: 'Album not found' }
+      }
+      console.log(`[IPC] Album found:`, album)
+
+      // Check for sync needs
+      let needsSync = album.needsSync
+      if (existsSync(album.sourceFolderPath)) {
+        try {
+          console.log(`[IPC] Checking sync for album ${albumId}...`)
+          const sourceImages = scanImagesInFolder(album.sourceFolderPath)
+          const dbImages = getAlbumImages(albumId)
+
+          // Quick check: if counts don't match, needs sync
+          if (sourceImages.length !== dbImages.length) {
+            console.log(
+              `[IPC] Sync needed: source=${sourceImages.length}, db=${dbImages.length}`
+            )
+            needsSync = 1
+            updateAlbum(albumId, { needsSync: 1 })
+          } else {
+            console.log(`[IPC] Album ${albumId} is in sync (count match)`)
+          }
+        } catch (error) {
+          console.warn(`[IPC] Failed to check sync for album ${albumId}:`, error)
+        }
+      } else {
+        console.warn(`[IPC] Source folder does not exist: ${album.sourceFolderPath}`)
+      }
+
+      console.log(`[IPC] Returning album with needsSync=${needsSync}`)
+      return { success: true, album: { ...album, needsSync } }
+    } catch (error: any) {
+      console.error('[IPC] Failed to get album:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('album:delete', async (_event, albumId: string) => {
+    try {
+      const album = getAlbum(albumId)
+      if (!album) {
+        return { success: false, error: 'Album not found' }
+      }
+
+      // Delete from cloud first
+      console.log(`[IPC] Deleting album ${albumId} from cloud...`)
+      await albumsApi.delete(albumId)
+      console.log(`[IPC] Cloud deletion successful`)
+
+      // Delete local folder
+      if (existsSync(album.localFolderPath)) {
+        console.log(`[IPC] Deleting local folder: ${album.localFolderPath}`)
+        rmSync(album.localFolderPath, { recursive: true, force: true })
+      }
+
+      // Delete from database (cascade will delete images)
+      console.log(`[IPC] Deleting from database...`)
+      dbDeleteAlbum(albumId)
+
+      return { success: true }
+    } catch (error: any) {
+      console.error('Failed to delete album:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // ==================== Image Handlers ====================
+
+  ipcMain.handle('album:getImages', async (_event, albumId: string) => {
+    console.log(`[IPC] album:getImages called for albumId: ${albumId}`)
+    try {
+      const images = getAlbumImages(albumId)
+      console.log(`[IPC] Found ${images.length} images in database for album ${albumId}`)
+
+      images.forEach((img, index) => {
+        console.log(
+          `[IPC]   Image ${index + 1}: ${img.originalFilename} - path: ${img.localFilePath}, status: ${img.uploadStatus}`
+        )
+      })
+
+      // Get favorites from API (gracefully handle if album not yet synced to server)
+      let favorites: Array<{ imageId: number; image?: { originalFilename: string } }> = []
+      console.log(`[IPC] Fetching favorites from API...`)
+      try {
+        favorites = await albumsApi.getFavorites(albumId)
+        console.log(`[IPC] Received ${favorites.length} favorites from API`)
+      } catch {
+        // Album may not exist on server yet (offline-first), just return empty favorites
+        console.log(`[IPC] Could not fetch favorites (album may not be synced to cloud yet)`)
+        favorites = []
+      }
+
+      // Debug log to understand ID mapping
+      console.log(`[IPC] Local image IDs:`, images.map((img) => img.id))
+      console.log(`[IPC] Local image serverIDs:`, images.map((img) => img.serverId))
+      console.log(`[IPC] Favorite imageIds from API:`, favorites.map((fav) => fav.imageId))
+
+      // Combine images with favorite status
+      // Match by serverId since that's what the API uses
+      const imagesWithFavorites = images.map((img) => {
+        const favorite = favorites.find((fav) => img.serverId && fav.imageId === img.serverId)
+        return {
+          ...img,
+          isFavorite: !!favorite,
+          favoriteData: favorite || null
+        }
+      })
+
+      console.log(`[IPC] Returning ${imagesWithFavorites.length} images with favorite status`)
+      console.log(
+        `[IPC] Images with favorites:`,
+        imagesWithFavorites.filter((img) => img.isFavorite).map((img) => img.originalFilename)
+      )
+      return { success: true, images: imagesWithFavorites }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[IPC] Failed to get images:', message)
+      return { success: false, error: message, images: [] }
+    }
+  })
+
+  ipcMain.handle('album:scanSourceFolder', (_event, folderPath: string) => {
+    try {
+      const images = scanImagesInFolder(folderPath)
+      return { success: true, count: images.length, images }
+    } catch (error: any) {
+      console.error('Failed to scan folder:', error)
+      return { success: false, error: error.message, count: 0, images: [] }
+    }
+  })
+
+  ipcMain.handle('album:startUpload', async (_event, albumId: string) => {
+    try {
+      uploadPipeline.startPipeline(albumId, mainWindow).catch((error) => {
+        console.error('Pipeline failed:', error)
+      })
+
+      return { success: true }
+    } catch (error: any) {
+      console.error('Failed to start upload:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('album:getProgress', (_event, albumId: string) => {
+    try {
+      const progress = uploadPipeline.getProgress(albumId)
+      return { success: true, progress }
+    } catch (error: any) {
+      console.error('Failed to get progress:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('album:retryFailed', async (_event, albumId: string) => {
+    try {
+      await uploadPipeline.retryFailed(albumId, mainWindow)
+      return { success: true }
+    } catch (error: any) {
+      console.error('Failed to retry failed uploads:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // ==================== Sync Handlers ====================
+
+  ipcMain.handle('sync:detectChanges', (_event, albumId: string) => {
+    console.log(`[Main] sync:detectChanges called for albumId: ${albumId}`)
+    try {
+      const album = getAlbum(albumId)
+      if (!album) {
+        console.error(`[Main] Album not found: ${albumId}`)
+        return { success: false, error: 'Album not found' }
+      }
+
+      // Scan source folder
+      console.log(`[Main] Scanning source folder: ${album.sourceFolderPath}`)
+      const sourceFiles = scanImagesInFolder(album.sourceFolderPath)
+      const dbImages = getAlbumImages(albumId)
+      console.log(`[Main] Source files count: ${sourceFiles.length}, DB images count: ${dbImages.length}`)
+
+      // Detect changes
+      const changes = {
+        new: [] as any[],
+        modified: [] as any[],
+        deleted: [] as any[]
+      }
+
+      // Get last sync time for optimization
+      const lastSync = album.lastSyncedAt ? new Date(album.lastSyncedAt) : null
+      if (lastSync) {
+        console.log(`[Main] Last sync time: ${lastSync.toISOString()}`)
+      } else {
+        console.log(`[Main] No previous sync - will check all files`)
+      }
+
+      // Check for new and modified files
+      sourceFiles.forEach((file) => {
+        const existing = dbImages.find((img) => img.originalFilename === file.filename)
+
+        if (!existing) {
+          changes.new.push(file)
+        } else {
+          // Only check for modifications if file mtime is after lastSyncedAt
+          const fileMtime = new Date(file.mtime)
+          if (!lastSync || fileMtime > lastSync) {
+            // Compare using Date timestamps (not string comparison) and file size
+            const existingMtime = new Date(existing.mtime).getTime()
+            const currentMtime = fileMtime.getTime()
+            const mtimeChanged = existingMtime !== currentMtime
+            const sizeChanged = existing.fileSize !== file.size
+
+            if (mtimeChanged || sizeChanged) {
+              changes.modified.push({
+                ...file,
+                existingId: existing.id,
+                serverId: existing.serverId
+              })
+            }
+          }
+        }
+      })
+
+      // Check for deleted files
+      dbImages.forEach((img) => {
+        const exists = sourceFiles.find((file) => file.filename === img.originalFilename)
+        if (!exists) {
+          // Only include serializable properties for IPC transfer
+          changes.deleted.push({
+            id: img.id,
+            serverId: img.serverId,
+            originalFilename: img.originalFilename,
+            localFilePath: img.localFilePath
+          })
+        }
+      })
+
+      console.log(`[Main] Detected changes: new=${changes.new.length}, modified=${changes.modified.length}, deleted=${changes.deleted.length}`)
+      return {
+        success: true,
+        changes,
+        summary: {
+          new: changes.new.length,
+          modified: changes.modified.length,
+          deleted: changes.deleted.length
+        }
+      }
+    } catch (error: any) {
+      console.error('[Main] Failed to detect sync changes:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('sync:execute', async (_event, albumId: string, changes: any) => {
+    console.log(`[Main] sync:execute called for albumId: ${albumId}`)
+    console.log(`[Main] Changes to process:`, JSON.stringify(changes, null, 2))
+
+    try {
+      const album = getAlbum(albumId)
+      if (!album) {
+        console.error(`[Main] Album not found for sync: ${albumId}`)
+        return { success: false, error: 'Album not found' }
+      }
+
+      console.log(`[Main] Sync: Images in DB before sync:`, getAlbumImages(albumId).length)
+
+      // Process deleted files FIRST
+      if (changes.deleted && changes.deleted.length > 0) {
+        console.log(`[Main] Sync: Processing ${changes.deleted.length} deleted images`)
+        console.log(`[Main] Sync: Deleted images:`, changes.deleted)
+        
+        // Get server IDs for API call (only synced images have serverIds)
+        const serverIds = changes.deleted
+          .filter((img: any) => img.serverId != null)
+          .map((img: any) => {
+            console.log(`[Main] Sync: Will delete from cloud - serverId: ${img.serverId}, filename: ${img.originalFilename}`)
+            return img.serverId
+          })
+        
+        // Call API only if there are server IDs to delete
+        if (serverIds.length > 0) {
+          console.log(`[Main] Sync: Calling albumsApi.deleteImages with serverIds:`, serverIds)
+          await albumsApi.deleteImages(albumId, serverIds)
+          console.log(`[Main] Sync: API deletion completed`)
+        } else {
+          console.log(`[Main] Sync: No synced images to delete from cloud`)
+        }
+        
+        // Delete from local database using local IDs
+        const localIds = changes.deleted.map((img: any) => {
+          console.log(`[Main] Sync: Will delete from DB - localId: ${img.id}: ${img.originalFilename}`)
+          return img.id
+        })
+        
+        console.log(`[Main] Sync: Deleting from local database...`)
+        deleteImages(localIds)
+        console.log(`[Main] Sync: Database deletion completed`)
+        
+        // Verify deletion
+        const remainingImages = getAlbumImages(albumId)
+        console.log(`[Main] Sync: Images in DB after deletion:`, remainingImages.length)
+        console.log(`[Main] Sync: Remaining images:`, remainingImages.map(img => img.originalFilename))
+      }
+
+      // Process new files
+      if (changes.new && changes.new.length > 0) {
+        console.log(`[Main] Sync: Adding ${changes.new.length} new images`)
+        const currentImages = getAlbumImages(albumId)
+        const maxOrder =
+          currentImages.length > 0 ? Math.max(...currentImages.map((i) => i.uploadOrder)) : -1
+
+        changes.new.forEach((file: any, index: number) => {
+          const localFilePath = join(album.localFolderPath, file.filename)
+          const sourceFilePath = join(album.sourceFolderPath, file.filename)
+
+          console.log(`[Main] Sync: Copying ${file.filename} to local storage...`)
+          try {
+            copyFileSync(sourceFilePath, localFilePath)
+            console.log(`[Main] Sync: Copy successful: ${localFilePath}`)
+          } catch (err) {
+            console.error(`[Main] Sync: Failed to copy file ${file.filename}:`, err)
+          }
+
+          console.log(`[Main] Sync: Creating DB record for ${file.filename}`)
+          const newImage = createImage({
+            albumId: album.id,
+            serverId: null,
+            originalFilename: file.filename,
+            localFilePath,
+            fileSize: file.size,
+            width: file.width || 0,
+            height: file.height || 0,
+            mtime: file.mtime,
+            sourceFileHash: null,
+            uploadStatus: 'pending',
+            uploadOrder: maxOrder + index + 1
+          })
+          console.log(`[Main] Sync: DB record created with ID: ${newImage.id}`)
+        })
+      }
+
+      // Process modified files
+      if (changes.modified && changes.modified.length > 0) {
+        console.log(`[Main] Sync: Processing ${changes.modified.length} modified files`)
+        console.log(`[Main] Sync: Modified files:`, changes.modified.map((f: any) => f.filename))
+        console.log(`[Main] Sync: Note: Modified file handling not yet implemented - skipping for now`)
+      }
+
+      // Update album metadata
+      const totalImages = getAlbumImages(albumId).length
+      console.log(`[Main] Sync: Final image count in DB: ${totalImages}`)
+      console.log(`[Main] Sync: Updating album metadata...`)
+      updateAlbum(albumId, {
+        totalImages,
+        needsSync: 0,
+        lastSyncedAt: new Date().toISOString()
+      })
+      console.log(`[Main] Sync: Album metadata updated`)
+
+      // Clear scan cache for this folder to ensure fresh data
+      clearScanCache(album.sourceFolderPath)
+
+      // Start upload for new images
+      if (changes.new && changes.new.length > 0) {
+        console.log('[Main] Sync: Triggering upload pipeline for new images...')
+        uploadPipeline.startPipeline(albumId, mainWindow).catch((error) => {
+          console.error('[Main] Sync: Pipeline trigger failed:', error)
+        })
+      }
+
+      console.log(`[Main] Sync: Execution completed successfully for album ${albumId}`)
+      console.log(`[Main] Sync: Final state - Total images: ${totalImages}`)
+      return { success: true }
+    } catch (error: any) {
+      console.error('[Main] Sync: Execution failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // ==================== API Handlers ====================
+
+  ipcMain.handle('api:generateShareLink', async (_event, albumId: string) => {
+    try {
+      console.log(`[IPC] Generating share link for album ${albumId}`)
+      const result = await albumsApi.createShareLink(albumId)
+      return {
+        success: true,
+        shareLink: {
+          shareLinkToken: result.shareLinkToken,
+          shareUrl: result.shareLink,
+          expiresAt: null
+        }
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[IPC] Failed to generate share link:', message)
+      return { success: false, error: message }
+    }
+  })
+
+  ipcMain.handle('api:getFavorites', async (_event, albumId: string) => {
+    try {
+      const favorites = await albumsApi.getFavorites(albumId)
+      return { success: true, favorites }
+    } catch (error: any) {
+      console.error('Failed to get favorites:', error)
+      return { success: false, error: error.message, favorites: [] }
+    }
+  })
+}

@@ -1,0 +1,276 @@
+@import 'tailwindcss';
+
+@theme {
+  /* === Brand Colors === */
+  --color-turquoise: #00e0c6;
+  --color-turquoise-dark: #00b39f;
+  --color-deep-teal: #005f73;
+  --color-charcoal: #262626;
+  --color-off-white: #f5f6f7;
+
+  /* === Semantic === */
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+  --color-info: #60a5fa;
+
+  /* === Album Card Colors (Pastel) === */
+  --color-card-yellow: #fef3c7;
+  --color-card-green: #d1fae5;
+  --color-card-purple: #ede9fe;
+  --color-card-pink: #fce7f3;
+  --color-card-blue: #dbeafe;
+  --color-card-peach: #ffedd5;
+
+  /* === Surface Colors === */
+  --color-sidebar-bg: rgba(30, 30, 35, 0.92);
+  --color-sidebar-border: rgba(255, 255, 255, 0.08);
+  --color-content-bg: #ffffff;
+
+  /* === Text Colors === */
+  --color-text-on-dark: #ffffff;
+  --color-text-on-dark-muted: rgba(255, 255, 255, 0.6);
+  --color-text-on-light: #1f2937;
+  --color-text-on-light-muted: #6b7280;
+
+  /* === Typography === */
+  --font-family-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* === Base Styles === */
+:root {
+  color-scheme: dark light;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-family-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* === Glassmorphism Sidebar === */
+.glass-sidebar {
+  background: var(--color-sidebar-bg);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-right: 1px solid var(--color-sidebar-border);
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.3);
+}
+
+/* === Glass Panel (for cards on dark bg) === */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+}
+
+/* === Content Area === */
+.content-area {
+  background: var(--color-content-bg);
+  border-radius: 24px 0 0 24px;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
+}
+
+/* === Album Cards (Pastel) === */
+.album-card {
+  border-radius: 12px;
+  padding: 12px;
+  transition: all 0.3s ease;
+}
+
+.album-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.album-card-yellow {
+  background: var(--color-card-yellow);
+}
+
+.album-card-green {
+  background: var(--color-card-green);
+}
+
+.album-card-purple {
+  background: var(--color-card-purple);
+}
+
+.album-card-pink {
+  background: var(--color-card-pink);
+}
+
+.album-card-blue {
+  background: var(--color-card-blue);
+}
+
+.album-card-peach {
+  background: var(--color-card-peach);
+}
+
+/* === Mini Calendar === */
+.mini-calendar-cell {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: white;
+}
+
+.mini-calendar-cell:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mini-calendar-cell.today {
+  background: var(--color-turquoise);
+  color: white;
+  font-weight: 600;
+}
+
+.mini-calendar-cell.selected {
+  border: 2px solid var(--color-turquoise);
+}
+
+.mini-calendar-cell.muted {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* === Week Day Column === */
+.week-day-header {
+  text-align: center;
+  padding: 16px 8px;
+}
+
+.week-day-header.today {
+  background: var(--color-turquoise);
+  border-radius: 12px;
+}
+
+.week-day-header.today .day-name {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.week-day-header.today .day-number {
+  color: white;
+}
+
+/* === View Toggle (Pill) === */
+.view-toggle {
+  display: inline-flex;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 9999px;
+  padding: 4px;
+}
+
+.view-toggle-btn {
+  padding: 8px 16px;
+  border-radius: 9999px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--color-text-on-light-muted);
+}
+
+.view-toggle-btn.active {
+  background: white;
+  color: var(--color-text-on-light);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* === Scrollbar (for content area) === */
+.content-scrollable::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 3px;
+}
+
+.content-scrollable::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* === Sidebar Scrollbar === */
+.sidebar-scrollable::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+/* === Avatar Stack === */
+.avatar-stack {
+  display: flex;
+}
+
+.avatar-stack > * {
+  margin-left: -8px;
+  border: 2px solid white;
+  border-radius: 50%;
+}
+
+.avatar-stack > *:first-child {
+  margin-left: 0;
+}
+
+/* === Time Badge === */
+.time-badge {
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: white;
+}
+
+/* === Category Indicator === */
+.category-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* === Progress Bar === */
+.progress-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
