@@ -17,8 +17,6 @@ export interface UploadProgress {
 class UploadPipeline {
   private compressionConcurrency = 4
   private uploadBatchSize = 100
-  private activeCompressions = 0
-  private activeUploads = 0
   private isRunning = false
 
 

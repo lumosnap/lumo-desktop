@@ -18,7 +18,7 @@ import {
   deleteImages,
   updateAlbum
 } from './database'
-import { albumsApi, getShareUrl } from './api-client'
+import { albumsApi } from './api-client'
 import { uploadPipeline } from './pipeline'
 import { existsSync, rmSync, copyFileSync } from 'fs'
 import { join } from 'path'

@@ -74,8 +74,6 @@ async function createAlbum(): Promise<void> {
     const result = await window.api.albums.create({
       title: title.value,
       eventDate: eventDate,
-      startTime: startTime.value || null,
-      endTime: endTime.value || null,
       sourceFolderPath: sourceFolderPath.value
     })
 
