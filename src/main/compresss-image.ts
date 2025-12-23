@@ -213,28 +213,3 @@ export async function compressImages(
 
   return results
 }
-
-// Example usage
-if (require.main === module) {
-  const testImage = process.argv[2]
-
-  if (!testImage) {
-    console.error('Usage: ts-node compress-image.ts <inputPath>')
-    process.exit(1)
-  }
-
-  compressImage(testImage)
-    .then((result) => {
-      if (result.success) {
-        console.log('✅ Compression successful!')
-        console.log(`   Output: ${result.compressedPath}`)
-        console.log(`   Dimensions: ${result.width}x${result.height}`)
-        console.log(`   Size: ${(result.fileSize / 1024).toFixed(2)}KB`)
-      } else {
-        console.error('❌ Compression failed:', result.error)
-      }
-    })
-    .catch((err) => {
-      console.error('❌ Unexpected error:', err)
-    })
-}
