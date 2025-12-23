@@ -2,7 +2,7 @@ import { statfs } from 'fs'
 import { promisify } from 'util'
 import { existsSync, mkdirSync, readdirSync, statSync } from 'fs'
 import { join, extname } from 'path'
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+
 const imageSize = require('image-size')
 
 const statfsAsync = promisify(statfs)
@@ -69,7 +69,9 @@ export function scanImagesInFolder(folderPath: string, useCache = true): FileSta
   if (useCache) {
     const cached = scanCache.get(folderPath)
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-      console.log(`[Storage] Using cached scan result for: ${folderPath} (${cached.result.length} images)`)
+      console.log(
+        `[Storage] Using cached scan result for: ${folderPath} (${cached.result.length} images)`
+      )
       return cached.result
     }
   }

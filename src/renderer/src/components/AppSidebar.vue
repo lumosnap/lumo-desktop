@@ -143,14 +143,14 @@ const categories = ref([
             >
             <div class="flex gap-1">
               <button
-                @click="prevMonth"
                 class="rounded-lg p-1 text-white/60 hover:bg-white/10 hover:text-white"
+                @click="prevMonth"
               >
                 <ChevronLeft class="h-4 w-4" />
               </button>
               <button
-                @click="nextMonth"
                 class="rounded-lg p-1 text-white/60 hover:bg-white/10 hover:text-white"
+                @click="nextMonth"
               >
                 <ChevronRight class="h-4 w-4" />
               </button>
@@ -216,8 +216,8 @@ const categories = ref([
       <!-- CARD 3: My Albums -->
       <div class="sidebar-card">
         <button
-          @click="isAlbumsExpanded = !isAlbumsExpanded"
           class="mb-3 flex w-full items-center justify-between text-sm font-semibold text-white"
+          @click="isAlbumsExpanded = !isAlbumsExpanded"
         >
           <span>My Albums</span>
           <ChevronDown
@@ -255,8 +255,8 @@ const categories = ref([
       <!-- CARD 4: Categories -->
       <div class="sidebar-card">
         <button
-          @click="isCategoriesExpanded = !isCategoriesExpanded"
           class="mb-3 flex w-full items-center justify-between text-sm font-semibold text-white"
+          @click="isCategoriesExpanded = !isCategoriesExpanded"
         >
           <span>Categories</span>
           <ChevronDown

@@ -66,7 +66,7 @@ async function handleSync() {
     // Deep clone to strip Vue reactivity - IPC can't clone reactive objects
     const plainChanges = JSON.parse(JSON.stringify(props.changes))
     console.log('[SyncModal] Sending changes to sync:', plainChanges)
-    
+
     const result = await window.api.sync.execute(props.albumId, plainChanges)
     if (result.success) {
       emit('sync')

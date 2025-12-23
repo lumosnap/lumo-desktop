@@ -197,13 +197,10 @@ export const albumsApi = {
     files: Array<{ filename: string }>
   ): Promise<ApiUploadUrl[]> {
     console.log(`[API] Getting upload URLs for ${files.length} files in album ${albumId}`)
-    const response = await apiFetch<ApiResponse<ApiUploadUrl[]>>(
-      `/albums/${albumId}/upload`,
-      {
-        method: 'POST',
-        body: { files }
-      }
-    )
+    const response = await apiFetch<ApiResponse<ApiUploadUrl[]>>(`/albums/${albumId}/upload`, {
+      method: 'POST',
+      body: { files }
+    })
     console.log(`[API] Received ${response.data?.length || 0} upload URLs`)
     return response.data || []
   },
@@ -243,12 +240,13 @@ export const albumsApi = {
     imageIds: number[]
   ): Promise<{ deletedCount: number; failedCount: number }> {
     console.log(`[API] Deleting ${imageIds.length} images from album ${albumId}`)
-    const response = await apiFetch<
-      ApiResponse<{ deletedCount: number; failedCount: number }>
-    >(`/albums/${albumId}/images`, {
-      method: 'DELETE',
-      body: { imageIds }
-    })
+    const response = await apiFetch<ApiResponse<{ deletedCount: number; failedCount: number }>>(
+      `/albums/${albumId}/images`,
+      {
+        method: 'DELETE',
+        body: { imageIds }
+      }
+    )
     console.log('[API] Deletion result:', response.data)
     return response.data || { deletedCount: 0, failedCount: 0 }
   },
@@ -269,15 +267,14 @@ export const albumsApi = {
   /**
    * Create or get share link for an album
    */
-  async createShareLink(
-    albumId: string
-  ): Promise<{ shareLink: string; shareLinkToken: string }> {
+  async createShareLink(albumId: string): Promise<{ shareLink: string; shareLinkToken: string }> {
     console.log(`[API] Creating share link for album ${albumId}`)
-    const response = await apiFetch<
-      ApiResponse<{ shareLink: string; shareLinkToken: string }>
-    >(`/albums/${albumId}/share-link`, {
-      method: 'POST'
-    })
+    const response = await apiFetch<ApiResponse<{ shareLink: string; shareLinkToken: string }>>(
+      `/albums/${albumId}/share-link`,
+      {
+        method: 'POST'
+      }
+    )
     console.log('[API] Share link response:', response)
     if (!response.data) {
       throw new Error('No data in response')

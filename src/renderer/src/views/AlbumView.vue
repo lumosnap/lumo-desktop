@@ -571,10 +571,7 @@ onUnmounted(() => {
                   </div>
 
                   <!-- Album Actions Dropdown (always visible, at bottom) -->
-                  <div
-                    class="absolute bottom-1 right-1 z-20"
-                    @click.stop
-                  >
+                  <div class="absolute bottom-1 right-1 z-20" @click.stop>
                     <Dropdown align="right">
                       <template #trigger>
                         <button
@@ -754,10 +751,7 @@ onUnmounted(() => {
                   </div>
 
                   <!-- Album Actions Dropdown (always visible, at bottom) -->
-                  <div
-                    class="absolute bottom-1 right-1 z-20"
-                    @click.stop
-                  >
+                  <div class="absolute bottom-1 right-1 z-20" @click.stop>
                     <Dropdown align="right">
                       <template #trigger>
                         <button

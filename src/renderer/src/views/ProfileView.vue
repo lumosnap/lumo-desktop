@@ -30,13 +30,13 @@ const user = ref({
         <button
           v-for="tab in tabs"
           :key="tab.id"
-          @click="activeTab = tab.id"
           class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sm font-medium"
           :class="
             activeTab === tab.id
               ? 'bg-[var(--color-turquoise)] text-white shadow-lg shadow-teal-500/20'
               : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
           "
+          @click="activeTab = tab.id"
         >
           <!-- Icons would go here -->
           <span>{{ tab.label }}</span>

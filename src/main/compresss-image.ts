@@ -85,7 +85,11 @@ export async function compressImage(
     console.log(`[Compress] Loading image with Sharp...`)
     const image = sharp(inputPath, { failOnError: false })
     const metadata = await image.metadata()
-    console.log(`[Compress] Image metadata loaded:`, { width: metadata.width, height: metadata.height, format: metadata.format })
+    console.log(`[Compress] Image metadata loaded:`, {
+      width: metadata.width,
+      height: metadata.height,
+      format: metadata.format
+    })
 
     if (!metadata.width || !metadata.height) {
       console.error(`[Compress] Could not read image dimensions`)
@@ -133,7 +137,9 @@ export async function compressImage(
     }
 
     // Adaptive quality compression
-    console.log(`[Compress] Starting adaptive quality compression (${opts.qualityStart} -> ${opts.qualityMin})...`)
+    console.log(
+      `[Compress] Starting adaptive quality compression (${opts.qualityStart} -> ${opts.qualityMin})...`
+    )
     let finalBuffer: Buffer | null = null
     let finalQuality = opts.qualityStart
 
@@ -143,7 +149,9 @@ export async function compressImage(
         .webp({ ...webpBaseOpts, quality: q })
         .toBuffer()
 
-      console.log(`[Compress] Quality ${q}: ${buffer.length} bytes (target: ${opts.maxBytes} + ${opts.tolerance})`)
+      console.log(
+        `[Compress] Quality ${q}: ${buffer.length} bytes (target: ${opts.maxBytes} + ${opts.tolerance})`
+      )
 
       if (buffer.length <= opts.maxBytes + opts.tolerance) {
         finalBuffer = buffer
@@ -158,7 +166,9 @@ export async function compressImage(
       console.log(`[Compress] Target size not achieved, using minimum quality ${opts.qualityMin}`)
       finalBuffer = await pipeline.webp({ ...webpBaseOpts, quality: opts.qualityMin }).toBuffer()
       finalQuality = opts.qualityMin
-      console.log(`[Compress] Final size at quality ${opts.qualityMin}: ${finalBuffer.length} bytes`)
+      console.log(
+        `[Compress] Final size at quality ${opts.qualityMin}: ${finalBuffer.length} bytes`
+      )
     }
 
     // Write output file

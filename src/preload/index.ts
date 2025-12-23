@@ -3,6 +3,11 @@ import { electronAPI } from '@electron-toolkit/preload'
 
 // Custom APIs for renderer
 const api = {
+  auth: {
+    setSessionCookie: (cookie: string): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke('auth:setSessionCookie', cookie),
+    clearSession: (): Promise<{ success: boolean }> => ipcRenderer.invoke('auth:clearSession')
+  },
   config: {
     isConfigured: (): Promise<boolean> => ipcRenderer.invoke('config:isConfigured'),
     getStorageLocation: (): Promise<string | null> =>
@@ -45,16 +50,27 @@ const api = {
       ipcRenderer.invoke('api:generateShareLink', albumId),
     getFavorites: (albumId: string): Promise<any> => ipcRenderer.invoke('api:getFavorites', albumId)
   },
+
   // Progress events listener
   // Event listeners
   on: (channel: string, callback: (event: any, ...args: any[]) => void) => {
-    const validChannels = ['upload:progress', 'upload:batch-start', 'upload:complete', 'upload:error']
+    const validChannels = [
+      'upload:progress',
+      'upload:batch-start',
+      'upload:complete',
+      'upload:error'
+    ]
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, callback)
     }
   },
   off: (channel: string, callback: (event: any, ...args: any[]) => void) => {
-    const validChannels = ['upload:progress', 'upload:batch-start', 'upload:complete', 'upload:error']
+    const validChannels = [
+      'upload:progress',
+      'upload:batch-start',
+      'upload:complete',
+      'upload:error'
+    ]
     if (validChannels.includes(channel)) {
       ipcRenderer.removeListener(channel, callback)
     }

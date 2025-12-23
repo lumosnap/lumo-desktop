@@ -105,7 +105,7 @@ function resetForm(): void {
 
 function setInitialDates(date: Date): void {
   startTime.value = formatDateTime(date)
-  
+
   // Default end time to 1 hour later
   const endDate = new Date(date)
   endDate.setHours(endDate.getHours() + 1)
@@ -144,9 +144,9 @@ watch(
           Source Folder <span class="text-red-400">*</span>
         </label>
         <button
-          @click="selectFolder"
           :disabled="isScanning || isCreating"
           class="w-full bg-[#252525] hover:bg-[#2a2a2a] border border-[#333] rounded-xl p-4 text-left transition-all hover:border-[var(--color-turquoise)] group disabled:opacity-50 disabled:cursor-not-allowed"
+          @click="selectFolder"
         >
           <div class="flex items-start gap-3">
             <div
@@ -241,18 +241,18 @@ watch(
         <Button
           variant="secondary"
           size="md"
-          @click="handleClose"
           :disabled="isCreating"
           class="flex-1"
+          @click="handleClose"
         >
           Cancel
         </Button>
         <Button
           variant="primary"
           size="md"
-          @click="createAlbum"
           :disabled="!sourceFolderPath || !title || imageCount === 0 || isScanning || isCreating"
           class="flex-1"
+          @click="createAlbum"
         >
           <span v-if="isCreating">Creating...</span>
           <span v-else>Create Album</span>

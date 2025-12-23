@@ -73,8 +73,6 @@ app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
-
-
   // Initialize database
   console.log('[Main] Initializing database...')
   try {

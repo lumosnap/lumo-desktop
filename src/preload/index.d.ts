@@ -4,6 +4,10 @@ declare global {
   interface Window {
     electron: ElectronAPI
     api: {
+      auth: {
+        setSessionCookie: (cookie: string) => Promise<{ success: boolean }>
+        clearSession: () => Promise<{ success: boolean }>
+      }
       config: {
         isConfigured: () => Promise<boolean>
         getStorageLocation: () => Promise<string | null>

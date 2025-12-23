@@ -86,8 +86,8 @@ onMounted(async () => {
         <!-- Folder selection -->
         <div class="space-y-6">
           <button
-            @click="selectFolder"
             class="w-full bg-[#252525] hover:bg-[#2a2a2a] border border-[#333] rounded-2xl p-6 text-left transition-all hover:border-[var(--color-turquoise)] group"
+            @click="selectFolder"
           >
             <div class="flex items-start gap-4">
               <div
@@ -136,8 +136,8 @@ onMounted(async () => {
               variant="primary"
               size="lg"
               :disabled="!selectedPath || isLoading"
-              @click="confirmSetup"
               class="flex-1"
+              @click="confirmSetup"
             >
               <span v-if="isLoading">Setting up...</span>
               <span v-else>Continue</span>

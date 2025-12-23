@@ -18,12 +18,26 @@ import {
   deleteImages,
   updateAlbum
 } from './database'
-import { albumsApi } from './api-client'
+import { albumsApi, setSessionCookie } from './api-client'
 import { uploadPipeline } from './pipeline'
 import { existsSync, rmSync, copyFileSync } from 'fs'
 import { join } from 'path'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
+  // ==================== Auth Handlers ====================
+
+  ipcMain.handle('auth:setSessionCookie', (_event, cookie: string) => {
+    console.log('[IPC] Setting session cookie from renderer')
+    setSessionCookie(cookie)
+    return { success: true }
+  })
+
+  ipcMain.handle('auth:clearSession', () => {
+    console.log('[IPC] Clearing session cookie')
+    setSessionCookie('')
+    return { success: true }
+  })
+
   // ==================== Config Handlers ====================
 
   ipcMain.handle('config:isConfigured', () => {
@@ -205,7 +219,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
             console.warn(`[IPC] Failed to check sync for album ${album.id}:`, error)
           }
         } else {
-          console.warn(`[IPC] Source folder does not exist for album ${album.id}: ${album.sourceFolderPath}`)
+          console.warn(
+            `[IPC] Source folder does not exist for album ${album.id}: ${album.sourceFolderPath}`
+          )
         }
 
         return {
@@ -243,9 +259,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
           // Quick check: if counts don't match, needs sync
           if (sourceImages.length !== dbImages.length) {
-            console.log(
-              `[IPC] Sync needed: source=${sourceImages.length}, db=${dbImages.length}`
-            )
+            console.log(`[IPC] Sync needed: source=${sourceImages.length}, db=${dbImages.length}`)
             needsSync = 1
             updateAlbum(albumId, { needsSync: 1 })
           } else {
@@ -322,9 +336,18 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
 
       // Debug log to understand ID mapping
-      console.log(`[IPC] Local image IDs:`, images.map((img) => img.id))
-      console.log(`[IPC] Local image serverIDs:`, images.map((img) => img.serverId))
-      console.log(`[IPC] Favorite imageIds from API:`, favorites.map((fav) => fav.imageId))
+      console.log(
+        `[IPC] Local image IDs:`,
+        images.map((img) => img.id)
+      )
+      console.log(
+        `[IPC] Local image serverIDs:`,
+        images.map((img) => img.serverId)
+      )
+      console.log(
+        `[IPC] Favorite imageIds from API:`,
+        favorites.map((fav) => fav.imageId)
+      )
 
       // Combine images with favorite status
       // Match by serverId since that's what the API uses
@@ -408,7 +431,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       console.log(`[Main] Scanning source folder: ${album.sourceFolderPath}`)
       const sourceFiles = scanImagesInFolder(album.sourceFolderPath)
       const dbImages = getAlbumImages(albumId)
-      console.log(`[Main] Source files count: ${sourceFiles.length}, DB images count: ${dbImages.length}`)
+      console.log(
+        `[Main] Source files count: ${sourceFiles.length}, DB images count: ${dbImages.length}`
+      )
 
       // Detect changes
       const changes = {
@@ -466,7 +491,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         }
       })
 
-      console.log(`[Main] Detected changes: new=${changes.new.length}, modified=${changes.modified.length}, deleted=${changes.deleted.length}`)
+      console.log(
+        `[Main] Detected changes: new=${changes.new.length}, modified=${changes.modified.length}, deleted=${changes.deleted.length}`
+      )
       return {
         success: true,
         changes,
@@ -499,15 +526,17 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       if (changes.deleted && changes.deleted.length > 0) {
         console.log(`[Main] Sync: Processing ${changes.deleted.length} deleted images`)
         console.log(`[Main] Sync: Deleted images:`, changes.deleted)
-        
+
         // Get server IDs for API call (only synced images have serverIds)
         const serverIds = changes.deleted
           .filter((img: any) => img.serverId != null)
           .map((img: any) => {
-            console.log(`[Main] Sync: Will delete from cloud - serverId: ${img.serverId}, filename: ${img.originalFilename}`)
+            console.log(
+              `[Main] Sync: Will delete from cloud - serverId: ${img.serverId}, filename: ${img.originalFilename}`
+            )
             return img.serverId
           })
-        
+
         // Call API only if there are server IDs to delete
         if (serverIds.length > 0) {
           console.log(`[Main] Sync: Calling albumsApi.deleteImages with serverIds:`, serverIds)
@@ -516,21 +545,26 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         } else {
           console.log(`[Main] Sync: No synced images to delete from cloud`)
         }
-        
+
         // Delete from local database using local IDs
         const localIds = changes.deleted.map((img: any) => {
-          console.log(`[Main] Sync: Will delete from DB - localId: ${img.id}: ${img.originalFilename}`)
+          console.log(
+            `[Main] Sync: Will delete from DB - localId: ${img.id}: ${img.originalFilename}`
+          )
           return img.id
         })
-        
+
         console.log(`[Main] Sync: Deleting from local database...`)
         deleteImages(localIds)
         console.log(`[Main] Sync: Database deletion completed`)
-        
+
         // Verify deletion
         const remainingImages = getAlbumImages(albumId)
         console.log(`[Main] Sync: Images in DB after deletion:`, remainingImages.length)
-        console.log(`[Main] Sync: Remaining images:`, remainingImages.map(img => img.originalFilename))
+        console.log(
+          `[Main] Sync: Remaining images:`,
+          remainingImages.map((img) => img.originalFilename)
+        )
       }
 
       // Process new files
@@ -573,8 +607,13 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       // Process modified files
       if (changes.modified && changes.modified.length > 0) {
         console.log(`[Main] Sync: Processing ${changes.modified.length} modified files`)
-        console.log(`[Main] Sync: Modified files:`, changes.modified.map((f: any) => f.filename))
-        console.log(`[Main] Sync: Note: Modified file handling not yet implemented - skipping for now`)
+        console.log(
+          `[Main] Sync: Modified files:`,
+          changes.modified.map((f: any) => f.filename)
+        )
+        console.log(
+          `[Main] Sync: Note: Modified file handling not yet implemented - skipping for now`
+        )
       }
 
       // Update album metadata
