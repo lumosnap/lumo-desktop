@@ -1,9 +1,10 @@
 import chokidar from 'chokidar'
+import type { FSWatcher } from 'chokidar'
 import { updateAlbum, getAllAlbums } from './database'
 import { BrowserWindow } from 'electron'
 
 class WatcherService {
-  private watchers: Map<string, chokidar.FSWatcher> = new Map()
+  private watchers: Map<string, FSWatcher> = new Map()
   private mainWindow: BrowserWindow | null = null
 
   initialize(mainWindow: BrowserWindow): void {

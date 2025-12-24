@@ -106,9 +106,10 @@ function formatDate(dateString: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function goToAlbumDate(album: { eventDate?: string | null; createdAt: string }): void {
+function goToAlbumDate(album: { id: string; eventDate?: string | null; createdAt: string }): void {
   const date = new Date(album.eventDate || album.createdAt)
   uiStore.setSelectedDate(date)
+  uiStore.setSelectedAlbumId(album.id)
 }
 
 onMounted(() => {

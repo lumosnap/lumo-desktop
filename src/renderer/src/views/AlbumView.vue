@@ -573,7 +573,10 @@ onUnmounted(() => {
                   )"
                   :key="album.id"
                   class="album-card group/card relative z-10 rounded-lg shadow-sm transition-all hover:shadow-md hover:z-40"
-                  :class="`bg-${album.color}-500/10 border border-${album.color}-500/20`"
+                  :class="[
+                    `bg-${album.color}-500/10 border border-${album.color}-500/20`,
+                    uiStore.selectedAlbumId === album.id ? 'ring-2 ring-[var(--color-turquoise)] z-50' : ''
+                  ]"
                   :style="{
                     height: album.span * 96 - 8 + 'px'
                   }"
@@ -721,7 +724,10 @@ onUnmounted(() => {
                   v-for="album in calendarAlbums.filter((a) => isSameDay(a.date, day.date))"
                   :key="album.id"
                   class="cursor-pointer truncate rounded px-1.5 py-1 text-[10px] font-medium text-white transition-opacity hover:opacity-80"
-                  :class="`bg-${album.color}-500`"
+                  :class="[
+                    `bg-${album.color}-500`,
+                    uiStore.selectedAlbumId === album.id ? 'ring-2 ring-[var(--color-turquoise)] ring-offset-1 ring-offset-[#1e1e2d]' : ''
+                  ]"
                   :title="album.title"
                   @click="openAlbum(album.id)"
                 >
@@ -778,7 +784,10 @@ onUnmounted(() => {
                   )"
                   :key="album.id"
                   class="album-card group/card relative z-10 rounded-lg shadow-sm transition-all hover:shadow-md hover:z-40"
-                  :class="`bg-${album.color}-500/10 border border-${album.color}-500/20`"
+                  :class="[
+                    `bg-${album.color}-500/10 border border-${album.color}-500/20`,
+                    uiStore.selectedAlbumId === album.id ? 'ring-2 ring-[var(--color-turquoise)] z-50' : ''
+                  ]"
                   :style="{
                     height: album.span * 128 - 16 + 'px'
                   }"
