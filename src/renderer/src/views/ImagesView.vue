@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import Modal from '../components/ui/Modal.vue'
@@ -135,8 +135,37 @@ function formatFileSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
+const onAlbumStatusChanged = (_e: any, data: { albumId: string; needsSync: number }): void => {
+  if (data.albumId === albumId && data.needsSync) {
+    // Reload album details to show sync status if we had a UI for it, 
+    // or just show a banner/toast.
+    // For now, let's reload the album info to ensure we have latest metadata
+    // But mainly we want to inform user they might need to sync.
+    // Since this view doesn't have a "Sync" button in the header (only in AlbumView),
+    // maybe we should add one or just rely on the user going back.
+    // Actually, let's just reload the album to get the updated 'needsSync' flag if we use it.
+    // But wait, 'album' ref is just { id, title }.
+    // Let's re-fetch album details.
+    window.api.albums.get(albumId).then((result) => {
+      if (result.success) {
+        album.value = result.album
+      }
+    })
+  }
+}
+
 onMounted(() => {
   loadAlbumImages()
+
+  if (window.api && window.api.on) {
+    window.api.on('album:status-changed', onAlbumStatusChanged)
+  }
+})
+
+onUnmounted(() => {
+  if (window.api && window.api.off) {
+    window.api.off('album:status-changed', onAlbumStatusChanged)
+  }
 })
 </script>
 

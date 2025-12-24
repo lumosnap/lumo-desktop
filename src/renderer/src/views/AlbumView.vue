@@ -5,24 +5,34 @@ import AppLayout from '../layouts/AppLayout.vue'
 import CreateAlbumModal from '../components/CreateAlbumModal.vue'
 import SyncModal from '../components/SyncModal.vue'
 import Dropdown from '../components/ui/Dropdown.vue'
-import { ChevronLeft, ChevronRight, RefreshCw, Plus, Trash2, MoreHorizontal } from 'lucide-vue-next'
+import ProgressPopover from '../components/ui/ProgressPopover.vue'
+import { ChevronLeft, ChevronRight, RefreshCw, Plus, Trash2, MoreHorizontal, Loader2 } from 'lucide-vue-next'
 import type { Album } from '../stores/album'
+import { useUIStore } from '../stores/ui'
 
+const uiStore = useUIStore()
 const router = useRouter()
 const showCreateModal = ref(false)
 const albums = ref<Album[]>([])
 const loading = ref(true)
-const currentDate = ref(new Date())
+const currentDate = computed({
+  get: () => uiStore.selectedDate,
+  set: (val) => uiStore.setSelectedDate(val)
+})
 const selectedView = ref<'month' | 'week' | 'day'>('week')
 const createAlbumDate = ref<Date | undefined>(undefined)
 
 // Progress State
 const isProcessing = ref(false)
+const currentUploadingAlbumId = ref<string | null>(null)
 const uploadProgress = ref<{
+  albumId: string
   compressing: number
   uploading: number
   complete: number
   total: number
+  failed: number
+  pending: number
 } | null>(null)
 const batchInfo = ref<{ batchIndex: number; totalBatches: number } | null>(null)
 
@@ -38,11 +48,6 @@ const showSyncModal = ref(false)
 const syncAlbum = ref<Album | null>(null)
 const syncChanges = ref<any>(null)
 const isSyncLoading = ref(false)
-
-const progressPercentage = computed(() => {
-  if (!uploadProgress.value || !uploadProgress.value.total) return 0
-  return (uploadProgress.value.complete / uploadProgress.value.total) * 100
-})
 
 // Time slots for the calendar
 const timeSlots = [
@@ -374,18 +379,30 @@ const onBatchStart = (_e: any, data: any): void => {
 const onProgress = (_e: any, data: any): void => {
   isProcessing.value = true
   uploadProgress.value = data
+  if (data.albumId) {
+    currentUploadingAlbumId.value = data.albumId
+  }
 }
 
 const onComplete = (): void => {
   isProcessing.value = false
   uploadProgress.value = null
   batchInfo.value = null
+  currentUploadingAlbumId.value = null
   loadAlbums()
 }
 
 const onError = (): void => {
   isProcessing.value = false
   // Optional: show toast
+}
+
+const onAlbumStatusChanged = (_e: any, data: { albumId: string; needsSync: number }): void => {
+  console.log('Album status changed:', data)
+  const album = albums.value.find((a) => a.id === data.albumId)
+  if (album) {
+    album.needsSync = data.needsSync
+  }
 }
 
 onMounted(() => {
@@ -397,6 +414,7 @@ onMounted(() => {
     window.api.on('upload:progress', onProgress)
     window.api.on('upload:complete', onComplete)
     window.api.on('upload:error', onError)
+    window.api.on('album:status-changed', onAlbumStatusChanged)
   }
 })
 
@@ -406,6 +424,7 @@ onUnmounted(() => {
     window.api.off('upload:progress', onProgress)
     window.api.off('upload:complete', onComplete)
     window.api.off('upload:error', onError)
+    window.api.off('album:status-changed', onAlbumStatusChanged)
   }
 })
 </script>
@@ -483,6 +502,9 @@ onUnmounted(() => {
             <Plus class="h-4 w-4" />
             New Album
           </button>
+
+          <!-- Progress Popover -->
+          <ProgressPopover :progress="uploadProgress" :is-processing="isProcessing" />
         </div>
       </div>
 
@@ -570,9 +592,17 @@ onUnmounted(() => {
                     {{ album.time }}
                   </div>
 
+                  <!-- Loading Overlay -->
+                  <div
+                    v-if="currentUploadingAlbumId === album.id"
+                    class="absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-black/50 backdrop-blur-[1px]"
+                  >
+                    <Loader2 class="h-6 w-6 animate-spin text-[var(--color-turquoise)]" />
+                  </div>
+
                   <!-- Album Actions Dropdown (always visible, at bottom) -->
                   <div class="absolute bottom-1 right-1 z-20" @click.stop>
-                    <Dropdown align="right">
+                    <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
                       <template #trigger>
                         <button
                           class="rounded-full bg-black/30 p-1 text-white hover:bg-black/50 backdrop-blur-sm transition-colors"
@@ -750,9 +780,17 @@ onUnmounted(() => {
                     {{ album.totalImages }} photos
                   </div>
 
+                  <!-- Loading Overlay -->
+                  <div
+                    v-if="currentUploadingAlbumId === album.id"
+                    class="absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-black/50 backdrop-blur-[1px]"
+                  >
+                    <Loader2 class="h-8 w-8 animate-spin text-[var(--color-turquoise)]" />
+                  </div>
+
                   <!-- Album Actions Dropdown (always visible, at bottom) -->
                   <div class="absolute bottom-1 right-1 z-20" @click.stop>
-                    <Dropdown align="right">
+                    <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
                       <template #trigger>
                         <button
                           class="rounded-full bg-black/30 p-1 text-white hover:bg-black/50 backdrop-blur-sm transition-colors"
@@ -862,65 +900,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Progress Overlay -->
-    <div
-      v-if="isProcessing"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-    >
-      <div
-        class="w-full max-w-md rounded-2xl bg-[#1e1e2d] border border-[var(--color-turquoise)]/20 p-8 text-center shadow-2xl"
-      >
-        <div class="mb-6 flex justify-center">
-          <div class="relative h-24 w-24">
-            <!-- Circular Progress Spinner -->
-            <svg class="h-full w-full rotate-[-90deg]" viewBox="0 0 36 36">
-              <path
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="#333"
-                stroke-width="3"
-              />
-              <path
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="var(--color-turquoise)"
-                stroke-width="3"
-                :stroke-dasharray="`${progressPercentage}, 100`"
-                class="transition-all duration-300 ease-out"
-              />
-            </svg>
-            <div
-              class="absolute inset-0 flex items-center justify-center text-xl font-bold text-white"
-            >
-              {{ Math.round(progressPercentage) }}%
-            </div>
-          </div>
-        </div>
-
-        <h3 class="mb-2 text-xl font-bold text-white">Processing Images</h3>
-        <p v-if="batchInfo" class="mb-6 text-gray-400">
-          Batch {{ batchInfo.batchIndex }} of {{ batchInfo.totalBatches }}
-        </p>
-
-        <div class="space-y-2 text-sm text-gray-400">
-          <div class="flex justify-between">
-            <span>Compressing</span>
-            <span class="text-[var(--color-turquoise)]">{{
-              uploadProgress?.compressing || 0
-            }}</span>
-          </div>
-          <div class="flex justify-between">
-            <span>Uploading</span>
-            <span class="text-[var(--color-turquoise)]">{{ uploadProgress?.uploading || 0 }}</span>
-          </div>
-          <div class="flex justify-between">
-            <span>Completed</span>
-            <span class="text-green-500"
-              >{{ uploadProgress?.complete || 0 }} / {{ uploadProgress?.total || 0 }}</span
-            >
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- Progress Overlay Removed -->
   </AppLayout>
 </template>

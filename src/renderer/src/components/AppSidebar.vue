@@ -5,10 +5,23 @@ import { Camera, Calendar, ChevronLeft, ChevronRight, ChevronDown, Check } from 
 // --- State & Data ---
 
 // Mini Calendar
+import { useUIStore } from '../stores/ui'
+import { watch } from 'vue'
+
+const uiStore = useUIStore()
 const currentDate = new Date()
 const currentMonth = ref(currentDate.getMonth())
 const currentYear = ref(currentDate.getFullYear())
-const selectedDate = ref(currentDate.getDate())
+
+// Sync local calendar view with global selected date
+watch(
+  () => uiStore.selectedDate,
+  (newDate) => {
+    currentMonth.value = newDate.getMonth()
+    currentYear.value = newDate.getFullYear()
+  },
+  { immediate: true }
+)
 
 const monthNames = [
   'January',
@@ -52,7 +65,10 @@ const calendarDays = computed(() => {
       date: i,
       isCurrentMonth: true,
       isToday,
-      isSelected: i === selectedDate.value
+      isSelected:
+        i === uiStore.selectedDate.getDate() &&
+        currentMonth.value === uiStore.selectedDate.getMonth() &&
+        currentYear.value === uiStore.selectedDate.getFullYear()
     })
   }
 
@@ -177,7 +193,11 @@ const categories = ref([
                 selected: day.isSelected && !day.isToday,
                 muted: !day.isCurrentMonth
               }"
-              @click="day.isCurrentMonth ? (selectedDate = day.date) : null"
+              @click="
+                day.isCurrentMonth
+                  ? uiStore.setSelectedDate(new Date(currentYear, currentMonth, day.date))
+                  : null
+              "
             >
               {{ day.date || '' }}
             </div>
@@ -185,99 +205,6 @@ const categories = ref([
         </div>
       </div>
 
-      <!-- CARD 2: Upcoming Shoot Preview -->
-      <div class="sidebar-card !p-0 overflow-hidden">
-        <div class="relative bg-gradient-to-br from-amber-700/40 to-amber-900/60 p-4">
-          <div class="time-badge absolute right-3 top-3 flex items-center gap-1">
-            <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-green-400"></span>
-            <span>{{ upcomingShoot.minutesAway }} min</span>
-          </div>
-
-          <p class="mb-1 text-xs text-white/70">{{ upcomingShoot.time }}</p>
-          <h3 class="mb-3 text-sm font-semibold leading-tight text-white">
-            {{ upcomingShoot.title }}
-          </h3>
-
-          <div class="flex gap-2">
-            <button
-              class="rounded-full bg-white/10 px-4 py-1.5 text-xs font-medium text-white backdrop-blur-sm hover:bg-white/20"
-            >
-              Later
-            </button>
-            <button
-              class="rounded-full bg-[var(--color-turquoise)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[var(--color-turquoise-dark)]"
-            >
-              Details
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- CARD 3: My Albums -->
-      <div class="sidebar-card">
-        <button
-          class="mb-3 flex w-full items-center justify-between text-sm font-semibold text-white"
-          @click="isAlbumsExpanded = !isAlbumsExpanded"
-        >
-          <span>My Albums</span>
-          <ChevronDown
-            class="h-4 w-4 text-white/60 transition-transform"
-            :class="{ 'rotate-180': !isAlbumsExpanded }"
-          />
-        </button>
-
-        <div v-if="isAlbumsExpanded" class="space-y-2">
-          <div
-            v-for="album in albums"
-            :key="album.id"
-            class="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/5"
-          >
-            <div
-              class="flex h-4 w-4 items-center justify-center rounded border border-white/20 transition-colors"
-              :class="
-                album.checked
-                  ? 'bg-[var(--color-turquoise)] border-[var(--color-turquoise)]'
-                  : 'bg-transparent'
-              "
-              @click.stop="album.checked = !album.checked"
-            >
-              <Check v-if="album.checked" class="h-3 w-3 text-white" />
-            </div>
-            <span class="flex-1 text-sm text-white">{{ album.name }}</span>
-            <span
-              class="rounded-full bg-[var(--color-turquoise)] px-2 py-0.5 text-[10px] font-bold text-white"
-              >{{ album.count }}</span
-            >
-          </div>
-        </div>
-      </div>
-
-      <!-- CARD 4: Categories -->
-      <div class="sidebar-card">
-        <button
-          class="mb-3 flex w-full items-center justify-between text-sm font-semibold text-white"
-          @click="isCategoriesExpanded = !isCategoriesExpanded"
-        >
-          <span>Categories</span>
-          <ChevronDown
-            class="h-4 w-4 text-white/60 transition-transform"
-            :class="{ 'rotate-180': !isCategoriesExpanded }"
-          />
-        </button>
-
-        <div v-if="isCategoriesExpanded" class="space-y-3">
-          <div v-for="category in categories" :key="category.id" class="flex items-center gap-3">
-            <div class="category-indicator" :style="{ backgroundColor: category.color }"></div>
-            <span class="flex-1 text-sm text-white">{{ category.name }}</span>
-            <div class="progress-bar w-16">
-              <div
-                class="progress-bar-fill"
-                :style="{ width: category.progress + '%', backgroundColor: category.color }"
-              ></div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </aside>
 </template>

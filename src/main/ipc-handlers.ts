@@ -22,6 +22,7 @@ import { albumsApi, setSessionCookie } from './api-client'
 import { uploadPipeline } from './pipeline'
 import { existsSync, rmSync, copyFileSync } from 'fs'
 import { join } from 'path'
+import { watcherService } from './watcher'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ==================== Auth Handlers ====================
@@ -159,6 +160,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         uploadPipeline.startPipeline(album.id, mainWindow).catch((error) => {
           console.error('Pipeline failed:', error)
         })
+
+        // Start watching the folder
+        watcherService.watch(album.id, data.sourceFolderPath)
 
         return { success: true, album: { ...album, totalImages: imageFiles.length } }
       } catch (error: any) {
@@ -301,6 +305,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       // Delete from database (cascade will delete images)
       console.log(`[IPC] Deleting from database...`)
       dbDeleteAlbum(albumId)
+
+      // Stop watching
+      watcherService.unwatch(albumId)
 
       return { success: true }
     } catch (error: any) {

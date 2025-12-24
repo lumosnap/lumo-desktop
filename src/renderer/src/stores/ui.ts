@@ -1,0 +1,15 @@
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+
+export const useUIStore = defineStore('ui', () => {
+  const selectedDate = ref(new Date())
+
+  function setSelectedDate(date: Date): void {
+    selectedDate.value = date
+  }
+
+  return {
+    selectedDate,
+    setSelectedDate
+  }
+})

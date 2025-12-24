@@ -28,6 +28,7 @@
     "axios": "^1.13.2",
     "better-auth": "^1.4.5",
     "better-sqlite3": "^12.5.0",
+    "chokidar": "^5.0.0",
     "electron-updater": "^6.3.9",
     "image-size": "^2.0.2",
     "lucide-vue-next": "^0.555.0",

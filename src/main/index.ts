@@ -6,6 +6,7 @@ import { initDatabase, closeDatabase } from './database'
 import { initConfig } from './config'
 import { registerIpcHandlers } from './ipc-handlers'
 import { protocol } from 'electron'
+import { watcherService } from './watcher'
 
 // Register file protocol as privileged
 protocol.registerSchemesAsPrivileged([
@@ -119,6 +120,14 @@ app.whenReady().then(() => {
   if (mainWindow) {
     registerIpcHandlers(mainWindow)
     console.log('[Main] ✓ IPC handlers registered successfully')
+    
+    // Initialize Watcher Service
+    try {
+      watcherService.initialize(mainWindow)
+      console.log('[Main] ✓ Watcher service initialized')
+    } catch (error) {
+      console.error('[Main] ✗ Failed to initialize watcher service:', error)
+    }
   } else {
     console.error('[Main] ✗ Cannot register IPC handlers: mainWindow is null')
   }
@@ -130,6 +139,8 @@ app.whenReady().then(() => {
       createWindow()
       if (mainWindow) {
         registerIpcHandlers(mainWindow)
+        // Re-initialize watcher if needed
+        watcherService.initialize(mainWindow)
       }
     }
   })
@@ -140,6 +151,11 @@ app.whenReady().then(() => {
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   closeDatabase()
+  try {
+    watcherService.closeAll()
+  } catch {
+    // Ignore
+  }
   if (process.platform !== 'darwin') {
     app.quit()
   }
