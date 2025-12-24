@@ -572,74 +572,97 @@ onUnmounted(() => {
                     (a) => isSameDay(a.date, day.date) && a.timeSlot === slotIndex
                   )"
                   :key="album.id"
-                  class="album-card group/card relative z-10"
-                  :class="`album-card-${album.color}`"
-                  :style="{ height: album.span * 96 - 8 + 'px' }"
+                  class="album-card group/card relative z-10 rounded-lg shadow-sm transition-all hover:shadow-md hover:z-40"
+                  :class="`bg-${album.color}-500/10 border border-${album.color}-500/20`"
+                  :style="{
+                    height: album.span * 96 - 8 + 'px'
+                  }"
                   @click="openAlbum(album.id)"
                 >
+                  <!-- Image Wrapper (Clipped) -->
+                  <div class="absolute inset-0 rounded-lg overflow-hidden">
+                    <!-- Background Image -->
+                    <div
+                      v-if="album.thumbnail"
+                      class="absolute inset-0 bg-cover bg-top transition-transform duration-700 group-hover/card:scale-105"
+                      :style="{ backgroundImage: `url('file://${album.thumbnail}')` }"
+                    ></div>
+                    <!-- Dark Overlay for Image -->
+                    <div class="absolute inset-0 bg-black/10 transition-colors group-hover/card:bg-black/20"></div>
+                  </div>
+
+                  <!-- Header Overlay -->
+                  <div
+                    class="relative z-10 flex items-start justify-between border-b p-2 backdrop-blur-md rounded-t-lg"
+                    :class="`bg-${album.color}-500/10 border-${album.color}-500/10 bg-black/40`"
+                  >
+                    <div class="min-w-0 flex-1">
+                      <div class="truncate text-xs font-bold text-white drop-shadow-md">
+                        {{ album.title }}
+                      </div>
+                      <div class="text-[10px] font-medium text-white/80 drop-shadow-sm">
+                        {{ album.time }}
+                      </div>
+                    </div>
+
+                    <!-- Options Dropdown -->
+                    <div class="ml-2" @click.stop>
+                      <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
+                        <template #trigger>
+                          <button
+                            class="rounded-full p-1 text-white shadow-sm transition-colors"
+                            :class="`bg-${album.color}-500 hover:bg-${album.color}-600`"
+                          >
+                            <MoreHorizontal class="h-3 w-3" />
+                          </button>
+                        </template>
+                        <template #content="{ close }">
+                          <div class="py-1">
+                            <button
+                              v-if="album.needsSync"
+                              class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[var(--color-turquoise)] hover:bg-[var(--color-turquoise)]/10"
+                              @click="
+                                () => {
+                                  close()
+                                  openSyncModal(album)
+                                }
+                              "
+                            >
+                              <RefreshCw class="h-4 w-4" />
+                              Sync Album
+                            </button>
+                            <button
+                              class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                              @click="
+                                () => {
+                                  close()
+                                  openDeleteModal(album)
+                                }
+                              "
+                            >
+                              <Trash2 class="h-4 w-4" />
+                              Delete Album
+                            </button>
+                          </div>
+                        </template>
+                      </Dropdown>
+                    </div>
+                  </div>
+
                   <!-- Needs Sync Badge -->
                   <div
                     v-if="album.needsSync"
-                    class="absolute -right-1 -top-1 z-10 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
+                    class="absolute right-2 top-2 z-20 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
                   >
                     SYNC
-                  </div>
-
-                  <div class="text-xs font-semibold text-[var(--color-text-on-light)]">
-                    {{ album.title }}
-                  </div>
-                  <div class="text-[11px] text-[var(--color-text-on-light-muted)]">
-                    {{ album.time }}
                   </div>
 
                   <!-- Loading Overlay -->
                   <div
                     v-if="currentUploadingAlbumId === album.id"
-                    class="absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-black/50 backdrop-blur-[1px]"
+                    class="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-[1px]"
                   >
                     <Loader2 class="h-6 w-6 animate-spin text-[var(--color-turquoise)]" />
-                  </div>
-
-                  <!-- Album Actions Dropdown (always visible, at bottom) -->
-                  <div class="absolute bottom-1 right-1 z-20" @click.stop>
-                    <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
-                      <template #trigger>
-                        <button
-                          class="rounded-full bg-black/30 p-1 text-white hover:bg-black/50 backdrop-blur-sm transition-colors"
-                        >
-                          <MoreHorizontal class="h-3 w-3" />
-                        </button>
-                      </template>
-                      <template #content="{ close }">
-                        <div class="py-1">
-                          <button
-                            v-if="album.needsSync"
-                            class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[var(--color-turquoise)] hover:bg-[var(--color-turquoise)]/10"
-                            @click="
-                              () => {
-                                close()
-                                openSyncModal(album)
-                              }
-                            "
-                          >
-                            <RefreshCw class="h-4 w-4" />
-                            Sync Album
-                          </button>
-                          <button
-                            class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                            @click="
-                              () => {
-                                close()
-                                openDeleteModal(album)
-                              }
-                            "
-                          >
-                            <Trash2 class="h-4 w-4" />
-                            Delete Album
-                          </button>
-                        </div>
-                      </template>
-                    </Dropdown>
                   </div>
                 </div>
               </div>
@@ -754,80 +777,103 @@ onUnmounted(() => {
                     (a) => isSameDay(a.date, currentDay.date) && a.timeSlot === slotIndex
                   )"
                   :key="album.id"
-                  class="album-card group/card relative z-10"
-                  :class="`album-card-${album.color}`"
-                  :style="{ height: album.span * 128 - 16 + 'px' }"
+                  class="album-card group/card relative z-10 rounded-lg shadow-sm transition-all hover:shadow-md hover:z-40"
+                  :class="`bg-${album.color}-500/10 border border-${album.color}-500/20`"
+                  :style="{
+                    height: album.span * 128 - 16 + 'px'
+                  }"
                   @click="openAlbum(album.id)"
                 >
+                  <!-- Image Wrapper (Clipped) -->
+                  <div class="absolute inset-0 rounded-lg overflow-hidden">
+                    <!-- Background Image -->
+                    <div
+                      v-if="album.thumbnail"
+                      class="absolute inset-0 bg-cover bg-top transition-transform duration-700 group-hover/card:scale-105"
+                      :style="{ backgroundImage: `url('file://${album.thumbnail}')` }"
+                    ></div>
+                    <!-- Dark Overlay for Image -->
+                    <div class="absolute inset-0 bg-black/10 transition-colors group-hover/card:bg-black/20"></div>
+                  </div>
+
+                  <!-- Header Overlay -->
+                  <div
+                    class="relative z-10 flex items-start justify-between border-b p-3 backdrop-blur-md rounded-t-lg"
+                    :class="`bg-${album.color}-500/10 border-${album.color}-500/10 bg-black/40`"
+                  >
+                    <div class="min-w-0 flex-1">
+                      <div class="truncate text-sm font-bold text-white drop-shadow-md">
+                        {{ album.title }}
+                      </div>
+                      <div class="text-xs font-medium text-white/80 drop-shadow-sm">
+                        {{ album.time }}
+                      </div>
+                      <div
+                        v-if="album.totalImages"
+                        class="mt-1 text-[10px] text-white/70 drop-shadow-sm"
+                      >
+                        {{ album.totalImages }} photos
+                      </div>
+                    </div>
+
+                    <!-- Options Dropdown -->
+                    <div class="ml-2" @click.stop>
+                      <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
+                        <template #trigger>
+                          <button
+                            class="rounded-full p-1.5 text-white shadow-sm transition-colors"
+                            :class="`bg-${album.color}-500 hover:bg-${album.color}-600`"
+                          >
+                            <MoreHorizontal class="h-4 w-4" />
+                          </button>
+                        </template>
+                        <template #content="{ close }">
+                          <div class="py-1">
+                            <button
+                              v-if="album.needsSync"
+                              class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[var(--color-turquoise)] hover:bg-[var(--color-turquoise)]/10"
+                              @click="
+                                () => {
+                                  close()
+                                  openSyncModal(album)
+                                }
+                              "
+                            >
+                              <RefreshCw class="h-4 w-4" />
+                              Sync Album
+                            </button>
+                            <button
+                              class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                              @click="
+                                () => {
+                                  close()
+                                  openDeleteModal(album)
+                                }
+                              "
+                            >
+                              <Trash2 class="h-4 w-4" />
+                              Delete Album
+                            </button>
+                          </div>
+                        </template>
+                      </Dropdown>
+                    </div>
+                  </div>
+
                   <!-- Needs Sync Badge -->
                   <div
                     v-if="album.needsSync"
-                    class="absolute -right-1 -top-1 z-10 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
+                    class="absolute right-2 top-2 z-20 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
                   >
                     SYNC
-                  </div>
-
-                  <div class="text-sm font-semibold text-[var(--color-text-on-light)]">
-                    {{ album.title }}
-                  </div>
-                  <div class="text-xs text-[var(--color-text-on-light-muted)]">
-                    {{ album.time }}
-                  </div>
-                  <div
-                    v-if="album.totalImages"
-                    class="mt-2 text-xs text-[var(--color-text-on-light-muted)]"
-                  >
-                    {{ album.totalImages }} photos
                   </div>
 
                   <!-- Loading Overlay -->
                   <div
                     v-if="currentUploadingAlbumId === album.id"
-                    class="absolute inset-0 z-30 flex items-center justify-center rounded-lg bg-black/50 backdrop-blur-[1px]"
+                    class="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-[1px]"
                   >
                     <Loader2 class="h-8 w-8 animate-spin text-[var(--color-turquoise)]" />
-                  </div>
-
-                  <!-- Album Actions Dropdown (always visible, at bottom) -->
-                  <div class="absolute bottom-1 right-1 z-20" @click.stop>
-                    <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
-                      <template #trigger>
-                        <button
-                          class="rounded-full bg-black/30 p-1 text-white hover:bg-black/50 backdrop-blur-sm transition-colors"
-                        >
-                          <MoreHorizontal class="h-4 w-4" />
-                        </button>
-                      </template>
-                      <template #content="{ close }">
-                        <div class="py-1">
-                          <button
-                            v-if="album.needsSync"
-                            class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[var(--color-turquoise)] hover:bg-[var(--color-turquoise)]/10"
-                            @click="
-                              () => {
-                                close()
-                                openSyncModal(album)
-                              }
-                            "
-                          >
-                            <RefreshCw class="h-4 w-4" />
-                            Sync Album
-                          </button>
-                          <button
-                            class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                            @click="
-                              () => {
-                                close()
-                                openDeleteModal(album)
-                              }
-                            "
-                          >
-                            <Trash2 class="h-4 w-4" />
-                            Delete Album
-                          </button>
-                        </div>
-                      </template>
-                    </Dropdown>
                   </div>
                 </div>
               </div>

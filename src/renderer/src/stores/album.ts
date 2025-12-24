@@ -35,6 +35,7 @@ export interface Album {
   photoCount?: number
   coverPhoto?: string
   photos?: AlbumImage[]
+  thumbnail?: string
 }
 
 export const useAlbumStore = defineStore('album', () => {

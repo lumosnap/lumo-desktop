@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Camera, Calendar, ChevronLeft, ChevronRight, ChevronDown, Check } from 'lucide-vue-next'
+import { Camera, Calendar, ChevronLeft, ChevronRight, Images } from 'lucide-vue-next'
 
-// --- State & Data ---
-
-// Mini Calendar
 import { useUIStore } from '../stores/ui'
-import { watch } from 'vue'
+import { useAlbumStore } from '../stores/album'
+import { storeToRefs } from 'pinia'
+import { watch, onMounted } from 'vue'
 
 const uiStore = useUIStore()
+const albumStore = useAlbumStore()
+const { albums } = storeToRefs(albumStore)
 const currentDate = new Date()
 const currentMonth = ref(currentDate.getMonth())
 const currentYear = ref(currentDate.getFullYear())
@@ -75,7 +76,7 @@ const calendarDays = computed(() => {
   return days
 })
 
-const prevMonth = () => {
+const prevMonth = (): void => {
   if (currentMonth.value === 0) {
     currentMonth.value = 11
     currentYear.value--
@@ -84,7 +85,7 @@ const prevMonth = () => {
   }
 }
 
-const nextMonth = () => {
+const nextMonth = (): void => {
   if (currentMonth.value === 11) {
     currentMonth.value = 0
     currentYear.value++
@@ -93,29 +94,29 @@ const nextMonth = () => {
   }
 }
 
-// Upcoming Shoot
-const upcomingShoot = ref({
-  title: 'Wedding Shoot at the Grand Hotel',
-  time: '12:00 - 13:30',
-  minutesAway: 14
+// Recent Albums
+const recentAlbums = computed(() => {
+  return [...albums.value]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 5)
 })
 
-// My Albums
-const isAlbumsExpanded = ref(true)
-const albums = ref([
-  { id: 1, name: 'Weddings', count: 8, checked: true },
-  { id: 2, name: 'Portraits', count: 12, checked: true },
-  { id: 3, name: 'Product', count: 5, checked: false },
-  { id: 4, name: 'Events', count: 3, checked: false }
-])
+function formatDate(dateString: string): string {
+  const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
 
-// Categories
-const isCategoriesExpanded = ref(true)
-const categories = ref([
-  { id: 1, name: 'Personal', color: '#F87171', progress: 70 },
-  { id: 2, name: 'Work', color: '#60A5FA', progress: 45 },
-  { id: 3, name: 'Freelance', color: '#34D399', progress: 90 }
-])
+function goToAlbumDate(album: { eventDate?: string | null; createdAt: string }): void {
+  const date = new Date(album.eventDate || album.createdAt)
+  uiStore.setSelectedDate(date)
+}
+
+onMounted(() => {
+  albumStore.fetchAlbums()
+})
+
+
+
 </script>
 
 <template>
@@ -201,6 +202,66 @@ const categories = ref([
             >
               {{ day.date || '' }}
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 2: Recent Albums -->
+      <div class="sidebar-card">
+        <div class="mb-3 flex items-center justify-between">
+          <h3
+            class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-on-dark-muted)]"
+          >
+            Recent Albums
+          </h3>
+        </div>
+
+        <div class="space-y-3">
+          <div
+            v-for="album in recentAlbums"
+            :key="album.id"
+            class="group flex cursor-pointer items-center gap-3 rounded-xl p-2 transition-all duration-300 hover:bg-white/10 hover:shadow-lg hover:shadow-black/5"
+            @click="goToAlbumDate(album)"
+          >
+            <!-- Album Cover / Placeholder -->
+            <div
+              class="relative flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-[var(--color-surface-dark)] to-black/40 shadow-inner"
+            >
+              <img
+                v-if="album.coverPhoto"
+                :src="album.coverPhoto"
+                class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+                alt="Cover"
+              />
+              <Images
+                v-else
+                class="h-5 w-5 text-[var(--color-text-on-dark-muted)] transition-colors group-hover:text-[var(--color-turquoise)]"
+              />
+            </div>
+
+            <!-- Album Info -->
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center justify-between">
+                <p
+                  class="truncate text-sm font-medium text-white transition-colors group-hover:text-[var(--color-turquoise)]"
+                >
+                  {{ album.title }}
+                </p>
+                <span class="text-[10px] font-medium text-[var(--color-text-on-dark-muted)]">
+                  {{ formatDate(album.createdAt) }}
+                </span>
+              </div>
+              <p class="mt-0.5 text-xs text-[var(--color-text-on-dark-muted)]">
+                {{ album.totalImages || 0 }} photos
+              </p>
+            </div>
+          </div>
+
+          <div
+            v-if="recentAlbums.length === 0"
+            class="py-6 text-center text-xs text-[var(--color-text-on-dark-muted)]"
+          >
+            No albums yet
           </div>
         </div>
       </div>

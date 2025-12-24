@@ -197,7 +197,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       // Get thumbnail for each album and check for sync status
       const albumsWithThumbnails = validAlbums.map((album) => {
         const images = getAlbumImages(album.id)
-        const thumbnail = images.length > 0 ? images[0].localFilePath : null
+        // Select a random image for preview
+        const randomIndex = images.length > 0 ? Math.floor(Math.random() * images.length) : 0
+        const thumbnail = images.length > 0 ? images[randomIndex].localFilePath : null
         console.log(`[IPC] Album ${album.id} has ${images.length} images`)
 
         // Quick sync check: compare file counts
