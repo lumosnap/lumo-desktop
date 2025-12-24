@@ -6,6 +6,7 @@ import { loadEnv } from 'vite'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const backendUrl = env.VITE_BACKEND_BASE || env.VITE_BACKEND_URL || 'http://localhost:8787'
 
   return {
     main: {
@@ -13,7 +14,7 @@ export default defineConfig(({ mode }) => {
       define: {
         'process.env.APP_DOMAIN': JSON.stringify(env.VITE_APP_DOMAIN || 'https://lumosnap.app'),
         'process.env.API_URL': JSON.stringify(env.VITE_API_URL || 'http://localhost:8787/api/v1'),
-        'process.env.BACKEND_BASE': JSON.stringify(env.VITE_BACKEND_URL || 'http://localhost:8787')
+        'process.env.BACKEND_BASE': JSON.stringify(backendUrl)
       }
     },
     preload: {
@@ -29,7 +30,7 @@ export default defineConfig(({ mode }) => {
       server: {
         proxy: {
           '/api': {
-            target: 'http://127.0.0.1:8787',
+            target: backendUrl,
             changeOrigin: true,
             secure: false
           }
