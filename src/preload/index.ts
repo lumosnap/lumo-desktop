@@ -1,12 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
-// Custom APIs for renderer
 const api = {
   auth: {
     setSessionCookie: (cookie: string): Promise<{ success: boolean }> =>
       ipcRenderer.invoke('auth:setSessionCookie', cookie),
-    clearSession: (): Promise<{ success: boolean }> => ipcRenderer.invoke('auth:clearSession')
+    clearSession: (): Promise<{ success: boolean }> => ipcRenderer.invoke('auth:clearSession'),
+    googleOAuth: (): Promise<any> => ipcRenderer.invoke('auth:googleOAuth')
   },
   config: {
     isConfigured: (): Promise<boolean> => ipcRenderer.invoke('config:isConfigured'),

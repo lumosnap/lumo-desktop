@@ -194,17 +194,31 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
 
     try {
-      // Use better-auth social sign-in for Google
-      // For Electron with hash router, we just need origin + hash route
-      // Example: http://localhost:5173/#/albums
-      const callbackURL = `${window.location.origin}/#/albums`
+      // Use IPC to trigger OAuth flow in main process (opens system browser)
+      const result = await window.api.auth.googleOAuth()
 
-      console.log('[Auth] Starting Google OAuth with callbackURL:', callbackURL)
+      if (!result.success) {
+        throw new Error(result.error || 'Google login failed')
+      }
 
-      await authClient.signIn.social({
-        provider: 'google',
-        callbackURL
-      })
+      if (result.user) {
+        user.value = {
+          id: result.user.id,
+          email: result.user.email,
+          name: result.user.name || result.user.email.split('@')[0],
+          image: result.user.image || undefined
+        }
+        isAuthenticated.value = true
+
+        // Store in localStorage for UI persistence
+        localStorage.setItem('lumo_user', JSON.stringify(user.value))
+        localStorage.setItem('lumo_token', 'authenticated')
+
+        // Sync session token to main process if provided
+        if (result.session?.token && window.api?.auth?.setSessionCookie) {
+          await window.api.auth.setSessionCookie(result.session.token)
+        }
+      }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Google login failed. Please try again.'
       error.value = message

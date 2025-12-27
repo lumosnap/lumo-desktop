@@ -7,6 +7,12 @@ declare global {
       auth: {
         setSessionCookie: (cookie: string) => Promise<{ success: boolean }>
         clearSession: () => Promise<{ success: boolean }>
+        googleOAuth: () => Promise<{
+          success: boolean
+          user?: { id: string; email: string; name: string; image?: string }
+          session?: { token: string }
+          error?: string
+        }>
       }
       config: {
         isConfigured: () => Promise<boolean>

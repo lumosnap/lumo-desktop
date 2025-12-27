@@ -35,9 +35,11 @@ const handleGoogleLogin = async (): Promise<void> => {
 
   try {
     await authStore.loginWithGoogle()
-    // Note: Google OAuth will redirect, so this may not execute
+    // OAuth completes synchronously now via IPC, so navigate on success
+    router.push('/albums')
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'Google login failed'
+  } finally {
     googleLoading.value = false
   }
 }

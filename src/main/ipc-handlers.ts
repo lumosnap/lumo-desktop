@@ -23,6 +23,7 @@ import { uploadPipeline } from './pipeline'
 import { existsSync, rmSync, copyFileSync } from 'fs'
 import { join } from 'path'
 import { watcherService } from './watcher'
+import { startGoogleOAuth } from './oauth-handler'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ==================== Auth Handlers ====================
@@ -37,6 +38,20 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     console.log('[IPC] Clearing session cookie')
     setSessionCookie('')
     return { success: true }
+  })
+
+  ipcMain.handle('auth:googleOAuth', async () => {
+    console.log('[IPC] Starting Google OAuth flow')
+    const clientId = process.env.GOOGLE_DESKTOP_CLIENT_ID
+    const backendUrl = process.env.BACKEND_BASE || 'http://localhost:8787'
+
+    if (!clientId) {
+      console.error('[IPC] GOOGLE_DESKTOP_CLIENT_ID is not configured')
+      return { success: false, error: 'Google OAuth is not configured' }
+    }
+
+    const result = await startGoogleOAuth(clientId, backendUrl)
+    return result
   })
 
   // ==================== Config Handlers ====================
