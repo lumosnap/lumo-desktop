@@ -3,10 +3,11 @@ import { electronAPI } from '@electron-toolkit/preload'
 
 const api = {
   auth: {
-    setSessionCookie: (cookie: string): Promise<{ success: boolean }> =>
-      ipcRenderer.invoke('auth:setSessionCookie', cookie),
-    clearSession: (): Promise<{ success: boolean }> => ipcRenderer.invoke('auth:clearSession'),
-    googleOAuth: (): Promise<any> => ipcRenderer.invoke('auth:googleOAuth')
+    getStoredAuth: (): Promise<{ success: boolean; token: string | null; user: any }> =>
+      ipcRenderer.invoke('auth:getStoredAuth'),
+    startAuth: (): Promise<{ success: boolean; user?: any; error?: string }> =>
+      ipcRenderer.invoke('auth:startAuth'),
+    logout: (): Promise<{ success: boolean }> => ipcRenderer.invoke('auth:logout')
   },
   config: {
     isConfigured: (): Promise<boolean> => ipcRenderer.invoke('config:isConfigured'),

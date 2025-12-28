@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => {
         'process.env.API_URL': JSON.stringify(env.VITE_API_URL || 'http://localhost:8787/api/v1'),
         'process.env.BACKEND_BASE': JSON.stringify(backendUrl),
         'process.env.GOOGLE_DESKTOP_CLIENT_ID': JSON.stringify(env.VITE_GOOGLE_DESKTOP_CLIENT_ID || ''),
+        'process.env.AUTH_URL': JSON.stringify(env.VITE_AUTH_URL || 'https://lumosnap.app/auth/desktop'),
       }
     },
     preload: {

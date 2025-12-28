@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import Button from '../components/ui/Button.vue'
+import { useAuthStore } from '../stores/auth'
+
+const router = useRouter()
+const authStore = useAuthStore()
 
 const activeTab = ref('profile')
 
@@ -12,34 +17,56 @@ const tabs = [
   { id: 'notifications', label: 'Notifications', icon: 'BellIcon' }
 ]
 
-const user = ref({
-  name: 'Alex Photographer',
-  email: 'alex@lumosnap.com',
-  company: 'Alex Shots Studio',
-  website: 'www.alexshots.com'
-})
+// Use auth store user data with fallbacks for editable fields
+const user = computed(() => ({
+  name: authStore.user?.name || '',
+  email: authStore.user?.email || '',
+  company: '',
+  website: ''
+}))
+
+async function handleLogout(): Promise<void> {
+  await authStore.logout()
+  router.push('/login')
+}
 </script>
 
 <template>
   <AppLayout>
     <div class="flex h-full">
       <!-- Internal Sidebar -->
-      <div class="w-64 border-r border-gray-200 p-6 flex flex-col gap-2">
+      <div class="w-64 border-r border-gray-200 p-6 flex flex-col">
         <h2 class="text-xl font-bold text-gray-900 mb-6">Settings</h2>
 
+        <div class="flex flex-col gap-2">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sm font-medium"
+            :class="
+              activeTab === tab.id
+                ? 'bg-[var(--color-turquoise)] text-white shadow-lg shadow-teal-500/20'
+                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
+            "
+            @click="activeTab = tab.id"
+          >
+            <!-- Icons would go here -->
+            <span>{{ tab.label }}</span>
+          </button>
+        </div>
+
+        <!-- Spacer -->
+        <div class="flex-1"></div>
+
+        <!-- Logout Button -->
         <button
-          v-for="tab in tabs"
-          :key="tab.id"
-          class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sm font-medium"
-          :class="
-            activeTab === tab.id
-              ? 'bg-[var(--color-turquoise)] text-white shadow-lg shadow-teal-500/20'
-              : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
-          "
-          @click="activeTab = tab.id"
+          class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sm font-medium text-red-500 hover:bg-red-50 hover:text-red-600"
+          @click="handleLogout"
         >
-          <!-- Icons would go here -->
-          <span>{{ tab.label }}</span>
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          <span>Logout</span>
         </button>
       </div>
 

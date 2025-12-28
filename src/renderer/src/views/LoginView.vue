@@ -1,128 +1,101 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import AuthLayout from '../layouts/AuthLayout.vue'
-import Input from '../components/ui/Input.vue'
-import Button from '../components/ui/Button.vue'
+import { ExternalLink, Loader2 } from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
-const email = ref('')
-const password = ref('')
-const loading = ref(false)
-const googleLoading = ref(false)
-const error = ref('')
-
-const handleLogin = async (): Promise<void> => {
-  loading.value = true
-  error.value = ''
-
+const handleConnect = async (): Promise<void> => {
   try {
-    await authStore.login({ email: email.value, password: password.value })
+    await authStore.startAuth()
     router.push('/albums')
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : 'Failed to login'
-  } finally {
-    loading.value = false
+    // Error is already set in the store
+    console.error('Auth failed:', e)
   }
 }
 
-const handleGoogleLogin = async (): Promise<void> => {
-  googleLoading.value = true
-  error.value = ''
-
-  try {
-    await authStore.loginWithGoogle()
-    // OAuth completes synchronously now via IPC, so navigate on success
-    router.push('/albums')
-  } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : 'Google login failed'
-  } finally {
-    googleLoading.value = false
-  }
+const handleCancel = (): void => {
+  // Reset the loading state - the server will timeout on its own
+  authStore.loading = false
+  authStore.error = 'Authentication cancelled. You can try again.'
 }
 </script>
 
 <template>
   <AuthLayout>
-    <div class="text-center mb-8">
-      <h1 class="text-3xl font-bold text-white mb-2">Welcome Back</h1>
-      <p class="text-gray-400">Sign in to manage your albums</p>
+    <div class="text-center mb-12">
+      <!-- Logo -->
+      <div class="mb-8">
+        <div
+          class="w-20 h-20 mx-auto bg-gradient-to-br from-[#2DD4BF] to-[#14B8A6] rounded-2xl flex items-center justify-center shadow-lg shadow-[#2DD4BF]/20"
+        >
+          <svg
+            class="w-10 h-10 text-white"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+            />
+          </svg>
+        </div>
+      </div>
+
+      <h1 class="text-3xl font-bold text-white mb-3">LumoSnap Desktop</h1>
+      <p class="text-gray-400 max-w-xs mx-auto">
+        Compress and share thousands of photos with your clients effortlessly.
+      </p>
     </div>
 
-    <!-- Google Login Button -->
+    <!-- Loading State -->
+    <div v-if="authStore.loading" class="space-y-4">
+      <div
+        class="w-full flex items-center justify-center gap-3 px-6 py-4 bg-gray-800 text-gray-300 font-semibold rounded-xl"
+      >
+        <Loader2 class="w-5 h-5 animate-spin" />
+        <span>Waiting for browser authentication...</span>
+      </div>
+      <button
+        type="button"
+        class="w-full px-4 py-3 text-gray-400 hover:text-white hover:bg-gray-800 rounded-xl transition-colors text-sm"
+        @click="handleCancel"
+      >
+        Cancel
+      </button>
+      <p class="text-center text-gray-500 text-xs">
+        Complete the sign-in in your browser, then return here.
+      </p>
+    </div>
+
+    <!-- Connect Button -->
     <button
+      v-else
       type="button"
-      class="w-full flex items-center justify-center gap-3 px-4 py-3 bg-white hover:bg-gray-100 text-gray-800 font-medium rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      :disabled="googleLoading || loading"
-      @click="handleGoogleLogin"
+      class="w-full flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-[#2DD4BF] to-[#14B8A6] hover:from-[#14B8A6] hover:to-[#0D9488] text-white font-semibold rounded-xl transition-all duration-200 shadow-lg shadow-[#2DD4BF]/20 hover:shadow-xl hover:shadow-[#2DD4BF]/30"
+      @click="handleConnect"
     >
-      <svg class="w-5 h-5" viewBox="0 0 24 24">
-        <path
-          fill="#4285F4"
-          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-        />
-        <path
-          fill="#34A853"
-          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-        />
-        <path
-          fill="#FBBC05"
-          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-        />
-        <path
-          fill="#EA4335"
-          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-        />
-      </svg>
-      <span v-if="googleLoading">Signing in...</span>
-      <span v-else>Continue with Google</span>
+      <ExternalLink class="w-5 h-5" />
+      <span>Connect to LumoSnap</span>
     </button>
 
-    <!-- Divider -->
-    <div class="relative my-6">
-      <div class="absolute inset-0 flex items-center">
-        <div class="w-full border-t border-gray-700"></div>
-      </div>
-      <div class="relative flex justify-center text-sm">
-        <span class="px-4 bg-[#1a1a1f] text-gray-500">or continue with email</span>
-      </div>
+    <!-- Error Message -->
+    <div
+      v-if="authStore.error"
+      class="mt-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center"
+    >
+      {{ authStore.error }}
     </div>
 
-    <form class="space-y-6" @submit.prevent="handleLogin">
-      <Input
-        v-model="email"
-        type="email"
-        label="Email Address"
-        placeholder="you@example.com"
-        :error="error && !email ? 'Email is required' : ''"
-      />
-
-      <Input v-model="password" type="password" label="Password" placeholder="••••••••" />
-
-      <div
-        v-if="error"
-        class="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm text-center"
-      >
-        {{ error }}
-      </div>
-
-      <Button type="submit" variant="primary" class="w-full" :loading="loading"> Sign In </Button>
-
-      <div class="text-center mt-6">
-        <p class="text-sm text-gray-400">
-          Don't have an account?
-          <router-link
-            to="/signup"
-            class="text-[#2DD4BF] hover:text-[#14B8A6] font-medium transition-colors"
-          >
-            Create account
-          </router-link>
-        </p>
-      </div>
-    </form>
+    <!-- Info Text -->
+    <p v-if="!authStore.loading" class="text-center text-gray-500 text-sm mt-8">
+      You'll be redirected to your browser to sign in securely.
+    </p>
   </AuthLayout>
 </template>
-

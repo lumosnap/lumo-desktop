@@ -5,14 +5,17 @@ declare global {
     electron: ElectronAPI
     api: {
       auth: {
-        setSessionCookie: (cookie: string) => Promise<{ success: boolean }>
-        clearSession: () => Promise<{ success: boolean }>
-        googleOAuth: () => Promise<{
+        getStoredAuth: () => Promise<{
+          success: boolean
+          token: string | null
+          user: { id: string; email: string; name: string; image?: string } | null
+        }>
+        startAuth: () => Promise<{
           success: boolean
           user?: { id: string; email: string; name: string; image?: string }
-          session?: { token: string }
           error?: string
         }>
+        logout: () => Promise<{ success: boolean }>
       }
       config: {
         isConfigured: () => Promise<boolean>

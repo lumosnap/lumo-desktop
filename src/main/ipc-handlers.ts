@@ -18,40 +18,36 @@ import {
   deleteImages,
   updateAlbum
 } from './database'
-import { albumsApi, setSessionCookie } from './api-client'
+import { albumsApi } from './api-client'
 import { uploadPipeline } from './pipeline'
 import { existsSync, rmSync, copyFileSync } from 'fs'
 import { join } from 'path'
 import { watcherService } from './watcher'
-import { startGoogleOAuth } from './oauth-handler'
+import { startAuth } from './oauth-handler'
+import { getAuth, clearAuth } from './auth-storage'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ==================== Auth Handlers ====================
 
-  ipcMain.handle('auth:setSessionCookie', (_event, cookie: string) => {
-    console.log('[IPC] Setting session cookie from renderer')
-    setSessionCookie(cookie)
-    return { success: true }
-  })
-
-  ipcMain.handle('auth:clearSession', () => {
-    console.log('[IPC] Clearing session cookie')
-    setSessionCookie('')
-    return { success: true }
-  })
-
-  ipcMain.handle('auth:googleOAuth', async () => {
-    console.log('[IPC] Starting Google OAuth flow')
-    const clientId = process.env.GOOGLE_DESKTOP_CLIENT_ID
-    const backendUrl = process.env.BACKEND_BASE || 'http://localhost:8787'
-
-    if (!clientId) {
-      console.error('[IPC] GOOGLE_DESKTOP_CLIENT_ID is not configured')
-      return { success: false, error: 'Google OAuth is not configured' }
+  ipcMain.handle('auth:getStoredAuth', () => {
+    console.log('[IPC] Getting stored auth')
+    const auth = getAuth()
+    if (auth) {
+      return { success: true, token: auth.token, user: auth.user }
     }
+    return { success: false, token: null, user: null }
+  })
 
-    const result = await startGoogleOAuth(clientId, backendUrl)
+  ipcMain.handle('auth:startAuth', async () => {
+    console.log('[IPC] Starting auth flow')
+    const result = await startAuth()
     return result
+  })
+
+  ipcMain.handle('auth:logout', () => {
+    console.log('[IPC] Logging out')
+    clearAuth()
+    return { success: true }
   })
 
   // ==================== Config Handlers ====================

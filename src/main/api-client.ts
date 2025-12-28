@@ -2,11 +2,12 @@
  * API Client for LumoSnap Desktop
  *
  * Handles all communication with the LumoSnap API server.
- * Uses cookie-based authentication from better-auth.
+ * Uses Bearer token authentication stored in auth-storage.
  */
 
 import { net } from 'electron'
 import { readFileSync } from 'fs'
+import { getToken } from './auth-storage'
 
 // Get API URL from environment (set in electron.vite.config.ts)
 const API_URL = process.env.API_URL || 'http://localhost:8787/api/v1'
@@ -14,18 +15,6 @@ const APP_DOMAIN = process.env.APP_DOMAIN || 'https://lumosnap.app'
 
 console.log('[API] Initialized with URL:', API_URL)
 console.log('[API] App domain:', APP_DOMAIN)
-
-// Cookie storage for auth session
-let sessionCookie: string | null = null
-
-export function setSessionCookie(cookie: string): void {
-  sessionCookie = cookie
-  console.log('[API] Session cookie set')
-}
-
-export function getSessionCookie(): string | null {
-  return sessionCookie
-}
 
 // Generic fetch wrapper
 async function apiFetch<T>(
@@ -42,15 +31,18 @@ async function apiFetch<T>(
   return new Promise((resolve, reject) => {
     const request = net.request({
       method: options.method || 'GET',
-      url,
-      credentials: 'include'
+      url
     })
 
     // Set headers
     request.setHeader('Content-Type', 'application/json')
-    if (sessionCookie) {
-      request.setHeader('Cookie', sessionCookie)
+
+    // Use Bearer token authentication
+    const token = getToken()
+    if (token) {
+      request.setHeader('Authorization', `Bearer ${token}`)
     }
+
     if (options.headers) {
       Object.entries(options.headers).forEach(([key, value]) => {
         request.setHeader(key, value)
@@ -61,12 +53,6 @@ async function apiFetch<T>(
 
     request.on('response', (response) => {
       console.log(`[API] Response status: ${response.statusCode}`)
-
-      // Capture Set-Cookie headers for session
-      const cookies = response.headers['set-cookie']
-      if (cookies && Array.isArray(cookies)) {
-        sessionCookie = cookies.join('; ')
-      }
 
       response.on('data', (chunk) => {
         responseData += chunk.toString()

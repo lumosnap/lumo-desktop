@@ -2,7 +2,6 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import AlbumView from '../views/AlbumView.vue'
 import ImagesView from '../views/ImagesView.vue'
 import LoginView from '../views/LoginView.vue'
-import SignupView from '../views/SignupView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import SetupView from '../views/SetupView.vue'
 import { useAuthStore } from '../stores/auth'
@@ -45,12 +44,6 @@ const router = createRouter({
       meta: { guestOnly: true, skipConfigCheck: true }
     },
     {
-      path: '/signup',
-      name: 'signup',
-      component: SignupView,
-      meta: { guestOnly: true, skipConfigCheck: true }
-    },
-    {
       path: '/billing',
       redirect: '/profile'
     }
@@ -61,9 +54,9 @@ const router = createRouter({
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
 
-  // Check session on first navigation
-  if (!authStore.user && localStorage.getItem('lumo_token')) {
-    authStore.checkSession()
+  // Check stored auth on first navigation
+  if (!authStore.user) {
+    await authStore.checkSession()
   }
 
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
