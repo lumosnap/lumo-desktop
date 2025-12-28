@@ -393,6 +393,79 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
+  ipcMain.handle('album:deleteImage', async (_event, albumId: string, imageId: number) => {
+    console.log(`[IPC] album:deleteImage called for albumId: ${albumId}, imageId: ${imageId}`)
+    try {
+      const images = getAlbumImages(albumId)
+      const image = images.find((img) => img.id === imageId)
+
+      if (!image) {
+        return { success: false, error: 'Image not found' }
+      }
+
+      // Delete from cloud if synced (has serverId)
+      if (image.serverId) {
+        console.log(`[IPC] Deleting image from cloud, serverId: ${image.serverId}`)
+        await albumsApi.deleteImages(albumId, [image.serverId])
+      }
+
+      // Delete from local database
+      console.log(`[IPC] Deleting image from local database`)
+      deleteImages([imageId])
+
+      // Update album total count
+      const album = getAlbum(albumId)
+      if (album) {
+        updateAlbum(albumId, { totalImages: Math.max(0, album.totalImages - 1) })
+      }
+
+      return { success: true }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[IPC] Failed to delete image:', message)
+      return { success: false, error: message }
+    }
+  })
+
+  ipcMain.handle('album:deleteImages', async (_event, albumId: string, imageIds: number[]) => {
+    console.log(`[IPC] album:deleteImages called for albumId: ${albumId}, count: ${imageIds.length}`)
+    try {
+      const images = getAlbumImages(albumId)
+      const imagesToDelete = images.filter((img) => imageIds.includes(img.id))
+
+      if (imagesToDelete.length === 0) {
+        return { success: false, error: 'No images found' }
+      }
+
+      // Get server IDs for cloud deletion
+      const serverIds = imagesToDelete
+        .filter((img) => img.serverId != null)
+        .map((img) => img.serverId!)
+
+      // Delete from cloud if any are synced
+      if (serverIds.length > 0) {
+        console.log(`[IPC] Deleting ${serverIds.length} images from cloud`)
+        await albumsApi.deleteImages(albumId, serverIds)
+      }
+
+      // Delete from local database
+      console.log(`[IPC] Deleting ${imageIds.length} images from local database`)
+      deleteImages(imageIds)
+
+      // Update album total count
+      const album = getAlbum(albumId)
+      if (album) {
+        updateAlbum(albumId, { totalImages: Math.max(0, album.totalImages - imageIds.length) })
+      }
+
+      return { success: true, deletedCount: imageIds.length }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[IPC] Failed to delete images:', message)
+      return { success: false, error: message }
+    }
+  })
+
   ipcMain.handle('album:scanSourceFolder', (_event, folderPath: string) => {
     try {
       const images = scanImagesInFolder(folderPath)
