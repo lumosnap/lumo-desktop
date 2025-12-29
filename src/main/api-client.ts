@@ -163,6 +163,120 @@ export interface ApiResponse<T> {
   data?: T
 }
 
+// ==================== Profile Types ====================
+
+export interface ApiProfile {
+  id: number
+  userId: string | null
+  businessName: string | null
+  phone: string | null
+  storageUsed: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ApiBillingAddress {
+  id: number
+  userId: number | null
+  street: string
+  city: string
+  state: string
+  zip: string
+  country: string
+  isDefault: boolean | null
+  createdAt: string
+}
+
+// ==================== Profile API ====================
+
+export const profileApi = {
+  /**
+   * Get user profile
+   */
+  async get(): Promise<ApiProfile> {
+    console.log('[API] Getting user profile')
+    const response = await apiFetch<ApiResponse<ApiProfile>>('/profile')
+    if (!response.data) {
+      throw new Error('No data in response')
+    }
+    return response.data
+  },
+
+  /**
+   * Update user profile
+   */
+  async update(data: { businessName?: string; phone?: string }): Promise<ApiProfile> {
+    console.log('[API] Updating user profile:', data)
+    const response = await apiFetch<ApiResponse<ApiProfile>>('/profile', {
+      method: 'PUT',
+      body: data
+    })
+    if (!response.data) {
+      throw new Error('No data in response')
+    }
+    return response.data
+  },
+
+  /**
+   * Get billing addresses
+   */
+  async getBillingAddresses(): Promise<ApiBillingAddress[]> {
+    console.log('[API] Getting billing addresses')
+    const response = await apiFetch<ApiResponse<ApiBillingAddress[]>>('/profile/billing-addresses')
+    return response.data || []
+  },
+
+  /**
+   * Create billing address
+   */
+  async createBillingAddress(data: {
+    street: string
+    city: string
+    state: string
+    zip: string
+    country: string
+    isDefault?: boolean
+  }): Promise<ApiBillingAddress> {
+    console.log('[API] Creating billing address:', data)
+    const response = await apiFetch<ApiResponse<ApiBillingAddress>>('/profile/billing-addresses', {
+      method: 'POST',
+      body: data
+    })
+    if (!response.data) {
+      throw new Error('No data in response')
+    }
+    return response.data
+  },
+
+  /**
+   * Update billing address
+   */
+  async updateBillingAddress(
+    addressId: number,
+    data: {
+      street?: string
+      city?: string
+      state?: string
+      zip?: string
+      country?: string
+      isDefault?: boolean
+    }
+  ): Promise<ApiBillingAddress> {
+    console.log(`[API] Updating billing address ${addressId}:`, data)
+    const response = await apiFetch<ApiResponse<ApiBillingAddress>>(
+      `/profile/billing-addresses/${addressId}`,
+      {
+        method: 'PUT',
+        body: data
+      }
+    )
+    if (!response.data) {
+      throw new Error('No data in response')
+    }
+    return response.data
+  }
+}
+
 // ==================== Album API ====================
 
 export const albumsApi = {

@@ -1,6 +1,72 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import AppSidebar from '../components/AppSidebar.vue'
 import FloatingNavbar from '../components/FloatingNavbar.vue'
+import { AlertTriangle, X } from 'lucide-vue-next'
+
+const props = withDefaults(defineProps<{
+  showSidebar?: boolean
+}>(), {
+  showSidebar: true
+})
+
+const BANNER_DISMISSED_KEY = 'lumosnap:lowStorageBannerDismissed'
+const BANNER_DISMISSED_SPACE_KEY = 'lumosnap:lowStorageBannerDismissedAtSpace'
+
+const showLowStorageBanner = ref(false)
+const isCheckingStorage = ref(true)
+
+async function checkStorageStatus(): Promise<void> {
+  isCheckingStorage.value = true
+  try {
+    const info = await window.api.config.getCurrentStorageInfo()
+    
+    if (info.success && info.isLowStorage) {
+      // Check if banner was previously dismissed
+      const dismissedAt = localStorage.getItem(BANNER_DISMISSED_KEY)
+      const dismissedSpace = localStorage.getItem(BANNER_DISMISSED_SPACE_KEY)
+      
+      // If storage has gotten worse (less space) since dismissal, show again
+      if (dismissedAt && dismissedSpace) {
+        const previousSpace = parseInt(dismissedSpace, 10)
+        // Show again if space decreased by more than 1GB since last dismissal
+        if (info.freeSpace >= previousSpace - 1024 * 1024 * 1024) {
+          showLowStorageBanner.value = false
+        } else {
+          // Space got significantly worse, show banner again
+          showLowStorageBanner.value = true
+        }
+      } else {
+        showLowStorageBanner.value = true
+      }
+    } else {
+      // Storage is healthy, clear any previous dismissal
+      localStorage.removeItem(BANNER_DISMISSED_KEY)
+      localStorage.removeItem(BANNER_DISMISSED_SPACE_KEY)
+      showLowStorageBanner.value = false
+    }
+  } catch {
+    // Silent fail, don't show banner on error
+    showLowStorageBanner.value = false
+  } finally {
+    isCheckingStorage.value = false
+  }
+}
+
+function dismissBanner(): void {
+  showLowStorageBanner.value = false
+  localStorage.setItem(BANNER_DISMISSED_KEY, Date.now().toString())
+  // Store current space to detect if it gets worse
+  window.api.config.getCurrentStorageInfo().then(info => {
+    if (info.success) {
+      localStorage.setItem(BANNER_DISMISSED_SPACE_KEY, info.freeSpace.toString())
+    }
+  })
+}
+
+onMounted(() => {
+  checkStorageStatus()
+})
 </script>
 
 <template>
@@ -25,15 +91,37 @@ import FloatingNavbar from '../components/FloatingNavbar.vue'
       ></div>
     </div>
 
-    <AppSidebar />
+    <AppSidebar v-if="props.showSidebar" />
     <FloatingNavbar />
 
     <!-- Main Content Area -->
-    <main class="ml-[280px] min-h-screen relative z-10 p-4 pl-0">
+    <main :class="props.showSidebar ? 'ml-[280px]' : 'ml-0'" class="min-h-screen relative z-10 p-4" :style="props.showSidebar ? 'padding-left: 0' : ''">
       <div
-        class="h-[calc(100vh-2rem)] bg-[#f5f6f7] rounded-l-[24px] shadow-[-4px_0_24px_rgba(0,0,0,0.2)] overflow-hidden relative"
+        :class="props.showSidebar ? 'rounded-l-[24px]' : 'rounded-[24px]'"
+        class="h-[calc(100vh-2rem)] bg-[#f5f6f7] shadow-[-4px_0_24px_rgba(0,0,0,0.2)] overflow-hidden relative flex flex-col"
       >
-        <div class="h-full overflow-y-auto custom-scrollbar">
+        <!-- Low Storage Banner -->
+        <Transition name="slide-down">
+          <div
+            v-if="showLowStorageBanner"
+            class="bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-3 flex items-center justify-between gap-4 shrink-0"
+          >
+            <div class="flex items-center gap-3">
+              <AlertTriangle class="w-5 h-5 text-white shrink-0" />
+              <p class="text-sm font-medium text-white">
+                You're running low on storage space. Consider freeing up space or changing your storage location in Settings.
+              </p>
+            </div>
+            <button
+              class="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 transition-colors shrink-0"
+              @click="dismissBanner"
+            >
+              <X class="w-4 h-4 text-white" />
+            </button>
+          </div>
+        </Transition>
+
+        <div class="flex-1 overflow-y-auto custom-scrollbar">
           <slot />
         </div>
       </div>
@@ -54,5 +142,17 @@ import FloatingNavbar from '../components/FloatingNavbar.vue'
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
   background-color: rgba(0, 0, 0, 0.2);
+}
+
+/* Banner slide transition */
+.slide-down-enter-active,
+.slide-down-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-down-enter-from,
+.slide-down-leave-to {
+  opacity: 0;
+  transform: translateY(-100%);
 }
 </style>

@@ -287,7 +287,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppLayout>
+  <AppLayout :show-sidebar="false">
     <div class="flex h-full flex-col overflow-hidden bg-slate-50 text-slate-900">
       <!-- Loading State (Skeleton) -->
       <div v-if="loading" class="flex-1 flex flex-col md:flex-row overflow-hidden animate-fade-in">

@@ -17,7 +17,15 @@ const api = {
       ipcRenderer.invoke('config:setStorageLocation', path),
     getFreeSpace: (path: string): Promise<{ bytes: number; formatted: string; error?: string }> =>
       ipcRenderer.invoke('config:getFreeSpace', path),
-    getConfig: (): Promise<any> => ipcRenderer.invoke('config:getConfig')
+    getConfig: (): Promise<any> => ipcRenderer.invoke('config:getConfig'),
+    getCurrentStorageInfo: (): Promise<{
+      success: boolean
+      path: string | null
+      freeSpace: number
+      freeSpaceFormatted: string
+      isLowStorage: boolean
+      error?: string
+    }> => ipcRenderer.invoke('config:getCurrentStorageInfo')
   },
   albums: {
     create: (data: {
@@ -54,6 +62,96 @@ const api = {
     generateShareLink: (albumId: string): Promise<any> =>
       ipcRenderer.invoke('api:generateShareLink', albumId),
     getFavorites: (albumId: string): Promise<any> => ipcRenderer.invoke('api:getFavorites', albumId)
+  },
+  profile: {
+    get: (): Promise<{
+      success: boolean
+      data?: {
+        id: number
+        userId: string | null
+        businessName: string | null
+        phone: string | null
+        storageUsed: number | null
+        createdAt: string
+        updatedAt: string
+      }
+      error?: string
+    }> => ipcRenderer.invoke('profile:get'),
+    update: (data: { businessName?: string; phone?: string }): Promise<{
+      success: boolean
+      data?: {
+        id: number
+        userId: string | null
+        businessName: string | null
+        phone: string | null
+        storageUsed: number | null
+        createdAt: string
+        updatedAt: string
+      }
+      error?: string
+    }> => ipcRenderer.invoke('profile:update', data),
+    getBillingAddresses: (): Promise<{
+      success: boolean
+      data?: Array<{
+        id: number
+        userId: number | null
+        street: string
+        city: string
+        state: string
+        zip: string
+        country: string
+        isDefault: boolean | null
+        createdAt: string
+      }>
+      error?: string
+    }> => ipcRenderer.invoke('profile:getBillingAddresses'),
+    createBillingAddress: (data: {
+      street: string
+      city: string
+      state: string
+      zip: string
+      country: string
+      isDefault?: boolean
+    }): Promise<{
+      success: boolean
+      data?: {
+        id: number
+        userId: number | null
+        street: string
+        city: string
+        state: string
+        zip: string
+        country: string
+        isDefault: boolean | null
+        createdAt: string
+      }
+      error?: string
+    }> => ipcRenderer.invoke('profile:createBillingAddress', data),
+    updateBillingAddress: (
+      addressId: number,
+      data: {
+        street?: string
+        city?: string
+        state?: string
+        zip?: string
+        country?: string
+        isDefault?: boolean
+      }
+    ): Promise<{
+      success: boolean
+      data?: {
+        id: number
+        userId: number | null
+        street: string
+        city: string
+        state: string
+        zip: string
+        country: string
+        isDefault: boolean | null
+        createdAt: string
+      }
+      error?: string
+    }> => ipcRenderer.invoke('profile:updateBillingAddress', addressId, data)
   },
   shell: {
     showItemInFolder: (

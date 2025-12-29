@@ -25,6 +25,14 @@ declare global {
           path: string
         ) => Promise<{ bytes: number; formatted: string; error?: string }>
         getConfig: () => Promise<any>
+        getCurrentStorageInfo: () => Promise<{
+          success: boolean
+          path: string | null
+          freeSpace: number
+          freeSpaceFormatted: string
+          isLowStorage: boolean
+          error?: string
+        }>
       }
       albums: {
         create: (data: {
@@ -53,6 +61,96 @@ declare global {
       api: {
         generateShareLink: (albumId: string) => Promise<any>
         getFavorites: (albumId: string) => Promise<any>
+      }
+      profile: {
+        get: () => Promise<{
+          success: boolean
+          data?: {
+            id: number
+            userId: string | null
+            businessName: string | null
+            phone: string | null
+            storageUsed: number | null
+            createdAt: string
+            updatedAt: string
+          }
+          error?: string
+        }>
+        update: (data: { businessName?: string; phone?: string }) => Promise<{
+          success: boolean
+          data?: {
+            id: number
+            userId: string | null
+            businessName: string | null
+            phone: string | null
+            storageUsed: number | null
+            createdAt: string
+            updatedAt: string
+          }
+          error?: string
+        }>
+        getBillingAddresses: () => Promise<{
+          success: boolean
+          data?: Array<{
+            id: number
+            userId: number | null
+            street: string
+            city: string
+            state: string
+            zip: string
+            country: string
+            isDefault: boolean | null
+            createdAt: string
+          }>
+          error?: string
+        }>
+        createBillingAddress: (data: {
+          street: string
+          city: string
+          state: string
+          zip: string
+          country: string
+          isDefault?: boolean
+        }) => Promise<{
+          success: boolean
+          data?: {
+            id: number
+            userId: number | null
+            street: string
+            city: string
+            state: string
+            zip: string
+            country: string
+            isDefault: boolean | null
+            createdAt: string
+          }
+          error?: string
+        }>
+        updateBillingAddress: (
+          addressId: number,
+          data: {
+            street?: string
+            city?: string
+            state?: string
+            zip?: string
+            country?: string
+            isDefault?: boolean
+          }
+        ) => Promise<{
+          success: boolean
+          data?: {
+            id: number
+            userId: number | null
+            street: string
+            city: string
+            state: string
+            zip: string
+            country: string
+            isDefault: boolean | null
+            createdAt: string
+          }
+          error?: string
+        }>
       }
       shell: {
         showItemInFolder: (

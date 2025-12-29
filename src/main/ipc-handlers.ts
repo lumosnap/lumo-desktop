@@ -18,7 +18,7 @@ import {
   deleteImages,
   updateAlbum
 } from './database'
-import { albumsApi } from './api-client'
+import { albumsApi, profileApi } from './api-client'
 import { uploadPipeline } from './pipeline'
 import { existsSync, rmSync, copyFileSync } from 'fs'
 import { join } from 'path'
@@ -96,6 +96,133 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('config:getConfig', () => {
     return getConfig()
   })
+
+  // 10GB threshold for low storage warning
+  const LOW_STORAGE_THRESHOLD = 10 * 1024 * 1024 * 1024
+
+  ipcMain.handle('config:getCurrentStorageInfo', async () => {
+    try {
+      const storageLocation = getStorageLocation()
+      if (!storageLocation) {
+        return {
+          success: false,
+          error: 'Storage location not configured',
+          path: null,
+          freeSpace: 0,
+          freeSpaceFormatted: '0 Bytes',
+          isLowStorage: false
+        }
+      }
+
+      const freeSpace = await getFreeSpace(storageLocation)
+      const isLowStorage = freeSpace < LOW_STORAGE_THRESHOLD
+
+      return {
+        success: true,
+        path: storageLocation,
+        freeSpace,
+        freeSpaceFormatted: formatBytes(freeSpace),
+        isLowStorage
+      }
+    } catch (error: any) {
+      console.error('Failed to get storage info:', error)
+      return {
+        success: false,
+        error: error.message,
+        path: null,
+        freeSpace: 0,
+        freeSpaceFormatted: '0 Bytes',
+        isLowStorage: false
+      }
+    }
+  })
+
+  // ==================== Profile Handlers ====================
+
+  ipcMain.handle('profile:get', async () => {
+    try {
+      const profile = await profileApi.get()
+      return { success: true, data: profile }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to get profile'
+      console.error('[IPC] Failed to get profile:', message)
+      return { success: false, error: message }
+    }
+  })
+
+  ipcMain.handle(
+    'profile:update',
+    async (_, data: { businessName?: string; phone?: string }) => {
+      try {
+        const profile = await profileApi.update(data)
+        return { success: true, data: profile }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Failed to update profile'
+        console.error('[IPC] Failed to update profile:', message)
+        return { success: false, error: message }
+      }
+    }
+  )
+
+  ipcMain.handle('profile:getBillingAddresses', async () => {
+    try {
+      const addresses = await profileApi.getBillingAddresses()
+      return { success: true, data: addresses }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to get billing addresses'
+      console.error('[IPC] Failed to get billing addresses:', message)
+      return { success: false, error: message }
+    }
+  })
+
+  ipcMain.handle(
+    'profile:createBillingAddress',
+    async (
+      _,
+      data: {
+        street: string
+        city: string
+        state: string
+        zip: string
+        country: string
+        isDefault?: boolean
+      }
+    ) => {
+      try {
+        const address = await profileApi.createBillingAddress(data)
+        return { success: true, data: address }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Failed to create billing address'
+        console.error('[IPC] Failed to create billing address:', message)
+        return { success: false, error: message }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'profile:updateBillingAddress',
+    async (
+      _,
+      addressId: number,
+      data: {
+        street?: string
+        city?: string
+        state?: string
+        zip?: string
+        country?: string
+        isDefault?: boolean
+      }
+    ) => {
+      try {
+        const address = await profileApi.updateBillingAddress(addressId, data)
+        return { success: true, data: address }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Failed to update billing address'
+        console.error('[IPC] Failed to update billing address:', message)
+        return { success: false, error: message }
+      }
+    }
+  )
 
   // ==================== Album Handlers ====================
 

@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Camera, Calendar, ChevronLeft, ChevronRight, Images } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { Camera, ChevronLeft, ChevronRight, Images, Pencil } from 'lucide-vue-next'
 
 import { useUIStore } from '../stores/ui'
 import { useAlbumStore } from '../stores/album'
+import { useAuthStore } from '../stores/auth'
+import { useProfileStore } from '../stores/profile'
 import { storeToRefs } from 'pinia'
 import { watch, onMounted } from 'vue'
 
+const router = useRouter()
 const uiStore = useUIStore()
 const albumStore = useAlbumStore()
+const authStore = useAuthStore()
+const profileStore = useProfileStore()
 const { albums } = storeToRefs(albumStore)
 const currentDate = new Date()
 const currentMonth = ref(currentDate.getMonth())
@@ -114,10 +120,23 @@ function goToAlbumDate(album: { id: string; eventDate?: string | null; createdAt
 
 onMounted(() => {
   albumStore.fetchAlbums()
+  profileStore.fetchProfile()
 })
 
+// Display name: business name or username + "Photography"
+const displayName = computed(() => {
+  // First try business name from profile store
+  if (profileStore.displayName) {
+    return profileStore.displayName
+  }
+  // Fallback to username + Photography
+  const name = authStore.user?.name || 'User'
+  return `${name} Photography`
+})
 
-
+function goToProfile(): void {
+  router.push('/profile')
+}
 </script>
 
 <template>
@@ -136,20 +155,17 @@ onMounted(() => {
             >
               <Camera class="h-6 w-6 text-white" />
             </div>
-            <div
-              class="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-turquoise)] text-[10px] font-bold text-white"
-            >
-              3
-            </div>
           </div>
-          <div class="flex-1 min-w-0">
-            <p class="font-semibold text-white truncate">Alex Photo</p>
+        <div class="flex-1 min-w-0">
+            <p class="font-semibold text-white truncate">{{ displayName }}</p>
             <p class="text-xs text-[var(--color-text-on-dark-muted)] truncate">Pro Plan</p>
           </div>
           <button
-            class="ml-auto rounded-lg p-2 text-[var(--color-text-on-dark-muted)] hover:bg-white/5"
+            class="ml-auto rounded-lg p-2 text-[var(--color-text-on-dark-muted)] hover:bg-white/5 hover:text-[var(--color-turquoise)] transition-colors"
+            title="Edit Profile"
+            @click="goToProfile"
           >
-            <Calendar class="h-5 w-5" />
+            <Pencil class="h-4 w-4" />
           </button>
         </div>
 

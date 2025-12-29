@@ -39,6 +39,22 @@ export function initConfig(): void {
   } else {
     saveConfig()
   }
+
+  // Auto-configure default storage location if not set
+  if (!config.storageLocation) {
+    const documentsPath = app.getPath('documents')
+    const defaultStoragePath = join(documentsPath, 'LumoSnap')
+    
+    // Ensure the default storage directory exists
+    if (!existsSync(defaultStoragePath)) {
+      mkdirSync(defaultStoragePath, { recursive: true })
+    }
+    
+    config.storageLocation = defaultStoragePath
+    config.isFirstLaunch = false
+    saveConfig()
+    console.log('[Config] Auto-configured default storage location:', defaultStoragePath)
+  }
 }
 
 function saveConfig(): void {

@@ -3,7 +3,6 @@ import AlbumView from '../views/AlbumView.vue'
 import ImagesView from '../views/ImagesView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProfileView from '../views/ProfileView.vue'
-import SetupView from '../views/SetupView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -12,12 +11,6 @@ const router = createRouter({
     {
       path: '/',
       redirect: '/albums'
-    },
-    {
-      path: '/setup',
-      name: 'setup',
-      component: SetupView,
-      meta: { requiresAuth: false, skipConfigCheck: true }
     },
     {
       path: '/albums',
@@ -41,7 +34,7 @@ const router = createRouter({
       path: '/login',
       name: 'login',
       component: LoginView,
-      meta: { guestOnly: true, skipConfigCheck: true }
+      meta: { guestOnly: true }
     },
     {
       path: '/billing',
@@ -61,20 +54,6 @@ router.beforeEach(async (to, _from, next) => {
 
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
   const guestOnly = to.matched.some((record) => record.meta.guestOnly)
-  const skipConfigCheck = to.matched.some((record) => record.meta.skipConfigCheck)
-
-  // Check if app is configured (unless route skips config check)
-  if (!skipConfigCheck && window.api) {
-    try {
-      const isConfigured = await window.api.config.isConfigured()
-      if (!isConfigured && to.path !== '/setup') {
-        next('/setup')
-        return
-      }
-    } catch (error) {
-      console.error('Failed to check configuration:', error)
-    }
-  }
 
   if (requiresAuth && !authStore.isAuthenticated) {
     // Redirect to login if trying to access protected route
