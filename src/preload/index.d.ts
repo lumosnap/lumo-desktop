@@ -54,6 +54,12 @@ declare global {
         generateShareLink: (albumId: string) => Promise<any>
         getFavorites: (albumId: string) => Promise<any>
       }
+      shell: {
+        showItemInFolder: (
+          albumId: string,
+          imageId: number
+        ) => Promise<{ success: boolean; error?: string }>
+      }
       onUploadProgress: (callback: (event: any, progress: any) => void) => void
       offUploadProgress: (callback: (event: any, progress: any) => void) => void
       on: (channel: string, callback: (event: any, ...args: any[]) => void) => void

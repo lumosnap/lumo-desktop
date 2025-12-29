@@ -124,7 +124,8 @@ export async function compressImage(
     }
 
     // Create processing pipeline
-    let pipeline = image.clone()
+    // Use .rotate() without arguments to auto-rotate based on EXIF orientation
+    let pipeline = image.clone().rotate()
     if (resizeOpts) {
       pipeline = pipeline.resize(resizeOpts)
     }

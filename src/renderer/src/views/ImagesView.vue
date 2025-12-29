@@ -14,7 +14,8 @@ import {
   Copy,
   Check,
   ExternalLink,
-  Link2
+  Link2,
+  FolderOpen
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -125,6 +126,17 @@ async function copyShareLink(): Promise<void> {
 
 function openShareLink(): void {
   window.open(shareLink.value, '_blank')
+}
+
+async function showOriginalInFolder(imageId: number): Promise<void> {
+  try {
+    const result = await window.api.shell.showItemInFolder(albumId, imageId)
+    if (!result.success) {
+      console.error('Failed to show in folder:', result.error)
+    }
+  } catch (err) {
+    console.error('Failed to show in folder:', err)
+  }
 }
 
 function formatFileSize(bytes: number): string {
@@ -301,8 +313,19 @@ onUnmounted(() => {
             <div
               class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 flex flex-col justify-end p-4"
             >
-              <p class="truncate text-sm font-medium text-white">{{ img.originalFilename }}</p>
-              <p class="text-xs text-white/70">{{ formatFileSize(img.fileSize) }}</p>
+              <div class="flex items-center justify-between gap-2">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium text-white">{{ img.originalFilename }}</p>
+                  <p class="text-xs text-white/70">{{ formatFileSize(img.fileSize) }}</p>
+                </div>
+                <button
+                  class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-sm transition-all hover:bg-white/40"
+                  title="Show Original in Folder"
+                  @click.stop="showOriginalInFolder(img.id)"
+                >
+                  <FolderOpen class="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <!-- Favorite star -->
@@ -351,6 +374,13 @@ onUnmounted(() => {
             <div v-if="img.isFavorite">
               <Star class="h-4 w-4 fill-yellow-400 text-yellow-400" />
             </div>
+            <button
+              class="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-on-light-muted)] transition-colors hover:bg-black/5 hover:text-[var(--color-turquoise)]"
+              title="Show Original in Folder"
+              @click="showOriginalInFolder(img.id)"
+            >
+              <FolderOpen class="h-4 w-4" />
+            </button>
             <div
               v-if="img.uploadStatus !== 'complete'"
               class="rounded-full px-2 py-1 text-[10px] font-bold uppercase"

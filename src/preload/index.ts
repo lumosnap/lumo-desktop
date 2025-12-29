@@ -55,6 +55,13 @@ const api = {
       ipcRenderer.invoke('api:generateShareLink', albumId),
     getFavorites: (albumId: string): Promise<any> => ipcRenderer.invoke('api:getFavorites', albumId)
   },
+  shell: {
+    showItemInFolder: (
+      albumId: string,
+      imageId: number
+    ): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('shell:showItemInFolder', albumId, imageId)
+  },
 
   // Progress events listener
   // Event listeners

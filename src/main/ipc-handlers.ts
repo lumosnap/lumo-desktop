@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, shell } from 'electron'
 import { isConfigured, getStorageLocation, setStorageLocation, getConfig } from './config'
 import {
   getFreeSpace,
@@ -765,9 +765,55 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     try {
       const favorites = await albumsApi.getFavorites(albumId)
       return { success: true, favorites }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
       console.error('Failed to get favorites:', error)
-      return { success: false, error: error.message, favorites: [] }
+      return { success: false, error: message, favorites: [] }
     }
   })
+
+  // ==================== Shell Handlers ====================
+
+  ipcMain.handle(
+    'shell:showItemInFolder',
+    (_event, albumId: string, imageId: number) => {
+      try {
+        console.log(
+          `[IPC] shell:showItemInFolder called for albumId: ${albumId}, imageId: ${imageId}`
+        )
+
+        // Get album to get source folder path
+        const album = getAlbum(albumId)
+        if (!album) {
+          return { success: false, error: 'Album not found' }
+        }
+
+        // Get image to get original filename
+        const images = getAlbumImages(albumId)
+        const image = images.find((img) => img.id === imageId)
+        if (!image) {
+          return { success: false, error: 'Image not found' }
+        }
+
+        // Construct original file path
+        const originalPath = join(album.sourceFolderPath, image.originalFilename)
+
+        // Check if file exists
+        if (!existsSync(originalPath)) {
+          console.error(`[IPC] Original file not found: ${originalPath}`)
+          return { success: false, error: 'Original file not found' }
+        }
+
+        // Show in folder
+        console.log(`[IPC] Showing file in folder: ${originalPath}`)
+        shell.showItemInFolder(originalPath)
+
+        return { success: true }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        console.error('[IPC] Failed to show item in folder:', message)
+        return { success: false, error: message }
+      }
+    }
+  )
 }
