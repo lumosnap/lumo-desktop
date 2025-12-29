@@ -139,6 +139,24 @@ export interface ApiFavorite {
   image?: ApiImage
 }
 
+// New favorites response format (for admin view)
+export interface ApiFavoriteImage {
+  id: number
+  originalFilename: string
+  width: number
+  height: number
+  createdAt: string
+  url: string
+  thumbnailUrl: string
+  favoriteCount: number
+  notesCount: number
+  comments: Array<{
+    clientName: string
+    notes: string | null
+    createdAt: string
+  }>
+}
+
 export interface ApiResponse<T> {
   success: boolean
   message: string
@@ -238,14 +256,14 @@ export const albumsApi = {
   },
 
   /**
-   * Get favorites for an album
+   * Get favorites for an album (new format with enriched image data)
    */
-  async getFavorites(albumId: string, clientName?: string): Promise<ApiFavorite[]> {
+  async getFavorites(albumId: string, clientName?: string): Promise<ApiFavoriteImage[]> {
     console.log(`[API] Getting favorites for album ${albumId}`)
     const endpoint = clientName
       ? `/albums/${albumId}/favorites?clientName=${encodeURIComponent(clientName)}`
       : `/albums/${albumId}/favorites`
-    const response = await apiFetch<ApiResponse<ApiFavorite[]>>(endpoint)
+    const response = await apiFetch<ApiResponse<ApiFavoriteImage[]>>(endpoint)
     console.log(`[API] Received ${response.data?.length || 0} favorites`)
     return response.data || []
   },

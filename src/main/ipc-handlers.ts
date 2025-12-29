@@ -343,40 +343,35 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         )
       })
 
-      // Get favorites from API (gracefully handle if album not yet synced to server)
-      let favorites: Array<{ imageId: number; image?: { originalFilename: string } }> = []
+      // Get favorites from API (new format with enriched data)
+      // The response now returns favorited images with comments, favoriteCount, notesCount
+      let favorites: Array<{
+        originalFilename: string
+        favoriteCount: number
+        notesCount: number
+        comments: Array<{ clientName: string; notes: string | null; createdAt: string }>
+      }> = []
+      
       console.log(`[IPC] Fetching favorites from API...`)
       try {
         favorites = await albumsApi.getFavorites(albumId)
-        console.log(`[IPC] Received ${favorites.length} favorites from API`)
+        console.log(`[IPC] Received ${favorites.length} favorited images from API`)
       } catch {
         // Album may not exist on server yet (offline-first), just return empty favorites
         console.log(`[IPC] Could not fetch favorites (album may not be synced to cloud yet)`)
         favorites = []
       }
 
-      // Debug log to understand ID mapping
-      console.log(
-        `[IPC] Local image IDs:`,
-        images.map((img) => img.id)
-      )
-      console.log(
-        `[IPC] Local image serverIDs:`,
-        images.map((img) => img.serverId)
-      )
-      console.log(
-        `[IPC] Favorite imageIds from API:`,
-        favorites.map((fav) => fav.imageId)
-      )
-
       // Combine images with favorite status
-      // Match by serverId since that's what the API uses
+      // Match by originalFilename since that's consistent between local and server
       const imagesWithFavorites = images.map((img) => {
-        const favorite = favorites.find((fav) => img.serverId && fav.imageId === img.serverId)
+        const favorite = favorites.find((fav) => fav.originalFilename === img.originalFilename)
         return {
           ...img,
           isFavorite: !!favorite,
-          favoriteData: favorite || null
+          favoriteCount: favorite?.favoriteCount || 0,
+          notesCount: favorite?.notesCount || 0,
+          comments: favorite?.comments || []
         }
       })
 
