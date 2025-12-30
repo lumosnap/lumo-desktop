@@ -65,8 +65,15 @@ const timeSlots = [
   '5 pm'
 ]
 
-// Color palette for albums
-const colors = ['yellow', 'green', 'purple', 'pink', 'blue', 'peach']
+// Pastel color palette for albums - matching reference design
+const pastelColors = [
+  { bg: '#C3F5E4', border: '#5DD4B0', text: '#0D7357', shadow: 'rgba(93, 212, 176, 0.3)' },  // Mint Green
+  { bg: '#FFE0C4', border: '#FFB876', text: '#B85C1A', shadow: 'rgba(255, 184, 118, 0.3)' }, // Coral/Orange  
+  { bg: '#FFF3C4', border: '#FFE066', text: '#9A7B1A', shadow: 'rgba(255, 224, 102, 0.3)' }, // Yellow
+  { bg: '#D4F5F5', border: '#7DD8D8', text: '#1A7A7A', shadow: 'rgba(125, 216, 216, 0.3)' }, // Cyan/Teal
+  { bg: '#FFE4F0', border: '#FFB3D9', text: '#B84D83', shadow: 'rgba(255, 179, 217, 0.3)' }, // Pink
+  { bg: '#E9D5FF', border: '#C4A3FF', text: '#6B3FA0', shadow: 'rgba(196, 163, 255, 0.3)' }  // Purple
+]
 
 // --- Calendar Logic ---
 
@@ -215,7 +222,7 @@ const calendarAlbums = computed(() => {
       date: startDate, // For month/day view
       timeSlot,
       span,
-      color: colors[index % colors.length],
+      pastelColor: pastelColors[index % pastelColors.length],
       time: timeStr
     }
   })
@@ -572,51 +579,48 @@ onUnmounted(() => {
                     (a) => isSameDay(a.date, day.date) && a.timeSlot === slotIndex
                   )"
                   :key="album.id"
-                  class="album-card group/card relative z-10 rounded-lg shadow-sm transition-all hover:shadow-md hover:z-40"
+                  class="album-card group/card relative z-10 rounded-md transition-all hover:z-40 cursor-pointer"
                   :class="[
-                    `bg-${album.color}-500/10 border border-${album.color}-500/20`,
-                    uiStore.selectedAlbumId === album.id ? 'ring-2 ring-[var(--color-turquoise)] z-50' : ''
+                    uiStore.selectedAlbumId === album.id
+                      ? 'ring-2 ring-[var(--color-turquoise)] z-50'
+                      : ''
                   ]"
                   :style="{
-                    height: album.span * 96 - 8 + 'px'
+                    height: album.span * 96 - 8 + 'px',
+                    backgroundColor: album.pastelColor.bg,
+                    boxShadow: `0 2px 8px ${album.pastelColor.shadow}`
                   }"
                   @click="openAlbum(album.id)"
                 >
-                  <!-- Image Wrapper (Clipped) -->
-                  <div class="absolute inset-0 rounded-lg overflow-hidden">
-                    <!-- Background Image -->
+                  <!-- Content -->
+                  <div class="relative z-10 flex flex-col h-full p-2.5">
+                    <!-- Time -->
                     <div
-                      v-if="album.thumbnail"
-                      class="absolute inset-0 bg-cover bg-top transition-transform duration-700 group-hover/card:scale-105"
-                      :style="{ backgroundImage: `url('file://${album.thumbnail}')` }"
-                    ></div>
-                    <!-- Dark Overlay for Image -->
-                    <div class="absolute inset-0 bg-black/10 transition-colors group-hover/card:bg-black/20"></div>
-                  </div>
-
-                  <!-- Header Overlay -->
-                  <div
-                    class="relative z-10 flex items-start justify-between border-b p-2 backdrop-blur-md rounded-t-lg"
-                    :class="`bg-${album.color}-500/10 border-${album.color}-500/10 bg-black/40`"
-                  >
-                    <div class="min-w-0 flex-1">
-                      <div class="truncate text-xs font-bold text-white drop-shadow-md">
-                        {{ album.title }}
-                      </div>
-                      <div class="text-[10px] font-medium text-white/80 drop-shadow-sm">
-                        {{ album.time }}
-                      </div>
+                      class="text-[10px] font-semibold mb-1"
+                      :style="{ color: album.pastelColor.text }"
+                    >
+                      {{ album.time }}
                     </div>
-
-                    <!-- Options Dropdown -->
-                    <div class="ml-2" @click.stop>
+                    <!-- Title -->
+                    <div
+                      class="text-xs font-bold leading-tight"
+                      :style="{ color: album.pastelColor.text }"
+                    >
+                      {{ album.title }}
+                    </div>
+                    
+                    <!-- Spacer -->
+                    <div class="flex-1"></div>
+                    
+                    <!-- Options Button -->
+                    <div class="flex justify-end" @click.stop>
                       <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
                         <template #trigger>
                           <button
-                            class="rounded-full p-1 text-white shadow-sm transition-colors"
-                            :class="`bg-${album.color}-500 hover:bg-${album.color}-600`"
+                            class="rounded-full p-1 transition-all hover:scale-110"
+                            :style="{ backgroundColor: `${album.pastelColor.border}80`, color: album.pastelColor.text }"
                           >
-                            <MoreHorizontal class="h-3 w-3" />
+                            <MoreHorizontal class="h-3.5 w-3.5" />
                           </button>
                         </template>
                         <template #content="{ close }">
@@ -655,7 +659,7 @@ onUnmounted(() => {
                   <!-- Needs Sync Badge -->
                   <div
                     v-if="album.needsSync"
-                    class="absolute right-2 top-2 z-20 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
+                    class="absolute right-2 top-10 z-20 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
                   >
                     SYNC
                   </div>
@@ -719,15 +723,21 @@ onUnmounted(() => {
               </div>
 
               <!-- Albums List -->
-              <div class="space-y-1">
+              <div class="space-y-1.5">
                 <div
                   v-for="album in calendarAlbums.filter((a) => isSameDay(a.date, day.date))"
                   :key="album.id"
-                  class="cursor-pointer truncate rounded px-1.5 py-1 text-[10px] font-medium text-white transition-opacity hover:opacity-80"
+                  class="cursor-pointer truncate rounded-md px-2 py-1.5 text-[10px] font-semibold transition-all hover:scale-[1.02]"
                   :class="[
-                    `bg-${album.color}-500`,
-                    uiStore.selectedAlbumId === album.id ? 'ring-2 ring-[var(--color-turquoise)] ring-offset-1 ring-offset-[#1e1e2d]' : ''
+                    uiStore.selectedAlbumId === album.id
+                      ? 'ring-2 ring-[var(--color-turquoise)] ring-offset-1 ring-offset-white'
+                      : ''
                   ]"
+                  :style="{
+                    backgroundColor: album.pastelColor.bg,
+                    color: album.pastelColor.text,
+                    boxShadow: `0 1px 4px ${album.pastelColor.shadow}`
+                  }"
                   :title="album.title"
                   @click="openAlbum(album.id)"
                 >
@@ -783,55 +793,57 @@ onUnmounted(() => {
                     (a) => isSameDay(a.date, currentDay.date) && a.timeSlot === slotIndex
                   )"
                   :key="album.id"
-                  class="album-card group/card relative z-10 rounded-lg shadow-sm transition-all hover:shadow-md hover:z-40"
+                  class="album-card group/card relative z-10 rounded-md transition-all hover:z-40 cursor-pointer"
                   :class="[
-                    `bg-${album.color}-500/10 border border-${album.color}-500/20`,
-                    uiStore.selectedAlbumId === album.id ? 'ring-2 ring-[var(--color-turquoise)] z-50' : ''
+                    uiStore.selectedAlbumId === album.id
+                      ? 'ring-2 ring-[var(--color-turquoise)] z-50'
+                      : ''
                   ]"
                   :style="{
-                    height: album.span * 128 - 16 + 'px'
+                    height: album.span * 128 - 16 + 'px',
+                    backgroundColor: album.pastelColor.bg,
+                    boxShadow: `0 2px 8px ${album.pastelColor.shadow}`
                   }"
                   @click="openAlbum(album.id)"
                 >
-                  <!-- Image Wrapper (Clipped) -->
-                  <div class="absolute inset-0 rounded-lg overflow-hidden">
-                    <!-- Background Image -->
+                  <!-- Content -->
+                  <div class="relative z-10 flex flex-col h-full p-3">
+                    <!-- Time -->
                     <div
-                      v-if="album.thumbnail"
-                      class="absolute inset-0 bg-cover bg-top transition-transform duration-700 group-hover/card:scale-105"
-                      :style="{ backgroundImage: `url('file://${album.thumbnail}')` }"
-                    ></div>
-                    <!-- Dark Overlay for Image -->
-                    <div class="absolute inset-0 bg-black/10 transition-colors group-hover/card:bg-black/20"></div>
-                  </div>
-
-                  <!-- Header Overlay -->
-                  <div
-                    class="relative z-10 flex items-start justify-between border-b p-3 backdrop-blur-md rounded-t-lg"
-                    :class="`bg-${album.color}-500/10 border-${album.color}-500/10 bg-black/40`"
-                  >
-                    <div class="min-w-0 flex-1">
-                      <div class="truncate text-sm font-bold text-white drop-shadow-md">
-                        {{ album.title }}
-                      </div>
-                      <div class="text-xs font-medium text-white/80 drop-shadow-sm">
-                        {{ album.time }}
-                      </div>
-                      <div
-                        v-if="album.totalImages"
-                        class="mt-1 text-[10px] text-white/70 drop-shadow-sm"
-                      >
-                        {{ album.totalImages }} photos
-                      </div>
+                      class="text-xs font-semibold mb-1"
+                      :style="{ color: album.pastelColor.text }"
+                    >
+                      {{ album.time }}
+                    </div>
+                    <!-- Title -->
+                    <div
+                      class="text-sm font-bold leading-tight"
+                      :style="{ color: album.pastelColor.text }"
+                    >
+                      {{ album.title }}
+                    </div>
+                    <!-- Photo count -->
+                    <div
+                      v-if="album.totalImages"
+                      class="mt-1 text-[11px] opacity-70"
+                      :style="{ color: album.pastelColor.text }"
+                    >
+                      {{ album.totalImages }} photos
                     </div>
 
-                    <!-- Options Dropdown -->
-                    <div class="ml-2" @click.stop>
+                    <!-- Spacer -->
+                    <div class="flex-1"></div>
+
+                    <!-- Options Button -->
+                    <div class="flex justify-end" @click.stop>
                       <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
                         <template #trigger>
                           <button
-                            class="rounded-full p-1.5 text-white shadow-sm transition-colors"
-                            :class="`bg-${album.color}-500 hover:bg-${album.color}-600`"
+                            class="rounded-full p-1.5 transition-all hover:scale-110"
+                            :style="{
+                              backgroundColor: `${album.pastelColor.border}80`,
+                              color: album.pastelColor.text
+                            }"
                           >
                             <MoreHorizontal class="h-4 w-4" />
                           </button>
@@ -872,7 +884,7 @@ onUnmounted(() => {
                   <!-- Needs Sync Badge -->
                   <div
                     v-if="album.needsSync"
-                    class="absolute right-2 top-2 z-20 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
+                    class="absolute right-2 top-14 z-20 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
                   >
                     SYNC
                   </div>
@@ -880,7 +892,7 @@ onUnmounted(() => {
                   <!-- Loading Overlay -->
                   <div
                     v-if="currentUploadingAlbumId === album.id"
-                    class="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-[1px]"
+                    class="absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-black/30 backdrop-blur-[1px]"
                   >
                     <Loader2 class="h-8 w-8 animate-spin text-[var(--color-turquoise)]" />
                   </div>

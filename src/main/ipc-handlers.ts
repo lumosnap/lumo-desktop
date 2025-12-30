@@ -489,10 +489,18 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         favorites = []
       }
 
+      // Helper to get base filename without extension
+      const getBaseName = (filename: string): string => {
+        const lastDot = filename.lastIndexOf('.')
+        return lastDot > 0 ? filename.substring(0, lastDot) : filename
+      }
+
       // Combine images with favorite status
-      // Match by originalFilename since that's consistent between local and server
+      // Match by base filename (without extension) since local files have original extensions
+      // (.jpg, .png, etc.) but API returns .webp filenames after compression
       const imagesWithFavorites = images.map((img) => {
-        const favorite = favorites.find((fav) => fav.originalFilename === img.originalFilename)
+        const imgBaseName = getBaseName(img.originalFilename)
+        const favorite = favorites.find((fav) => getBaseName(fav.originalFilename) === imgBaseName)
         return {
           ...img,
           isFavorite: !!favorite,
