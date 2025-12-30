@@ -20,7 +20,13 @@ const props = defineProps<{
 
 const progressPercentage = computed(() => {
   if (!props.progress || !props.progress.total) return 0
-  return (props.progress.complete / props.progress.total) * 100
+  // Weight progress: compressing = 25%, uploading = 75%, complete = 100%
+  // This gives a smoother progress indication instead of jumping from 0% to 100%
+  const weightedProgress = 
+    props.progress.complete + 
+    (props.progress.uploading * 0.75) + 
+    (props.progress.compressing * 0.25)
+  return (weightedProgress / props.progress.total) * 100
 })
 
 const statusText = computed(() => {

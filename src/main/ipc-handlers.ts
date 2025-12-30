@@ -358,6 +358,12 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
               updateAlbum(album.id, { needsSync: 1 })
             } else {
               console.log(`[IPC] Album ${album.id} is in sync`)
+              // Reset needsSync in database if it was previously set
+              if (album.needsSync === 1) {
+                console.log(`[IPC] Resetting needsSync to 0 for album ${album.id}`)
+                updateAlbum(album.id, { needsSync: 0 })
+              }
+              needsSync = 0
             }
           } catch (error) {
             console.warn(`[IPC] Failed to check sync for album ${album.id}:`, error)
@@ -408,6 +414,12 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
             updateAlbum(albumId, { needsSync: 1 })
           } else {
             console.log(`[IPC] Album ${albumId} is in sync (count match)`)
+            // Reset needsSync in database if it was previously set
+            if (album.needsSync === 1) {
+              console.log(`[IPC] Resetting needsSync to 0 for album ${albumId}`)
+              updateAlbum(albumId, { needsSync: 0 })
+            }
+            needsSync = 0
           }
         } catch (error) {
           console.warn(`[IPC] Failed to check sync for album ${albumId}:`, error)

@@ -168,7 +168,8 @@ const api = {
       'upload:progress',
       'upload:batch-start',
       'upload:complete',
-      'upload:error'
+      'upload:error',
+      'album:status-changed'
     ]
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, callback)
@@ -179,7 +180,8 @@ const api = {
       'upload:progress',
       'upload:batch-start',
       'upload:complete',
-      'upload:error'
+      'upload:error',
+      'album:status-changed'
     ]
     if (validChannels.includes(channel)) {
       ipcRenderer.removeListener(channel, callback)
