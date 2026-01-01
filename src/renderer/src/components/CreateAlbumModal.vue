@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import Modal from './ui/Modal.vue'
-import Button from './ui/Button.vue'
-import { Folder, AlertCircle } from 'lucide-vue-next'
+import { AlertCircle, Plus, Loader2 } from 'lucide-vue-next'
 
 const props = defineProps<{
   show: boolean
-  initialDate?: Date
 }>()
 
 const emit = defineEmits<{
@@ -14,53 +12,13 @@ const emit = defineEmits<{
   created: [albumId: string]
 }>()
 
-const sourceFolderPath = ref<string>('')
 const title = ref<string>('')
-const startTime = ref<string>('')
-const endTime = ref<string>('')
-const imageCount = ref<number>(0)
-const isScanning = ref(false)
 const isCreating = ref(false)
 const error = ref<string | null>(null)
 
-// Helper to format date for datetime-local input
-function formatDateTime(date: Date): string {
-  const d = new Date(date)
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 16)
-}
-
-async function selectFolder(): Promise<void> {
-  try {
-    const path = await window.api.dialog.openDirectory()
-    if (path) {
-      sourceFolderPath.value = path
-      isScanning.value = true
-      error.value = null
-
-      // Scan folder for images
-      const result = await window.api.albums.scanSourceFolder(path)
-      if (result.success) {
-        imageCount.value = result.count
-      } else {
-        error.value = result.error || 'Failed to scan folder'
-      }
-    }
-  } catch (err: any) {
-    error.value = err.message || 'Failed to select folder'
-  } finally {
-    isScanning.value = false
-  }
-}
-
 async function createAlbum(): Promise<void> {
-  if (!sourceFolderPath.value || !title.value) {
-    error.value = 'Please fill in all required fields'
-    return
-  }
-
-  if (imageCount.value === 0) {
-    error.value = 'No images found in the selected folder'
+  if (!title.value.trim()) {
+    error.value = 'Please enter an album title'
     return
   }
 
@@ -68,13 +26,10 @@ async function createAlbum(): Promise<void> {
   error.value = null
 
   try {
-    // Use startTime as the main eventDate if available
-    const eventDate = startTime.value || null
-
     const result = await window.api.albums.create({
-      title: title.value,
-      eventDate: eventDate,
-      sourceFolderPath: sourceFolderPath.value
+      title: title.value.trim(),
+      eventDate: null,
+      sourceFolderPath: '' // Will be set by master folder + title in backend
     })
 
     if (result.success) {
@@ -83,33 +38,16 @@ async function createAlbum(): Promise<void> {
     } else {
       error.value = result.error || 'Failed to create album'
     }
-  } catch (err: any) {
-    error.value = err.message || 'Failed to create album'
+  } catch (err: unknown) {
+    error.value = err instanceof Error ? err.message : 'Failed to create album'
   } finally {
     isCreating.value = false
   }
 }
 
 function resetForm(): void {
-  sourceFolderPath.value = ''
   title.value = ''
-  if (props.initialDate) {
-    setInitialDates(props.initialDate)
-  } else {
-    startTime.value = ''
-    endTime.value = ''
-  }
-  imageCount.value = 0
   error.value = null
-}
-
-function setInitialDates(date: Date): void {
-  startTime.value = formatDateTime(date)
-
-  // Default end time to 1 hour later
-  const endDate = new Date(date)
-  endDate.setHours(endDate.getHours() + 1)
-  endTime.value = formatDateTime(endDate)
 }
 
 function handleClose(): void {
@@ -123,12 +61,7 @@ function handleClose(): void {
 watch(
   () => props.show,
   (newValue) => {
-    if (newValue) {
-      // When opening, set initial date if provided
-      if (props.initialDate) {
-        setInitialDates(props.initialDate)
-      }
-    } else {
+    if (!newValue) {
       resetForm()
     }
   }
@@ -137,47 +70,11 @@ watch(
 
 <template>
   <Modal :show="show" title="Create New Album" @close="handleClose">
-    <div class="space-y-6">
-      <!-- Source folder selection -->
-      <div>
-        <label class="block text-sm font-medium text-gray-300 mb-2">
-          Source Folder <span class="text-red-400">*</span>
-        </label>
-        <button
-          :disabled="isScanning || isCreating"
-          class="w-full bg-[#252525] hover:bg-[#2a2a2a] border border-[#333] rounded-xl p-4 text-left transition-all hover:border-[var(--color-turquoise)] group disabled:opacity-50 disabled:cursor-not-allowed"
-          @click="selectFolder"
-        >
-          <div class="flex items-start gap-3">
-            <div
-              class="w-10 h-10 rounded-lg bg-[var(--color-turquoise)]/10 flex items-center justify-center group-hover:bg-[var(--color-turquoise)]/20 transition-colors"
-            >
-              <Folder class="w-5 h-5 text-[var(--color-turquoise)]" />
-            </div>
-
-            <div class="flex-1 min-w-0">
-              <div
-                class="text-sm font-medium truncate"
-                :class="sourceFolderPath ? 'text-white' : 'text-gray-500'"
-              >
-                {{ sourceFolderPath || 'Click to select folder with images...' }}
-              </div>
-              <div v-if="sourceFolderPath" class="text-xs text-gray-400 mt-1">
-                <span v-if="isScanning">Scanning for images...</span>
-                <span v-else-if="imageCount > 0" class="text-green-400">
-                  {{ imageCount }} {{ imageCount === 1 ? 'image' : 'images' }} found
-                </span>
-                <span v-else class="text-yellow-400">No images found</span>
-              </div>
-            </div>
-          </div>
-        </button>
-      </div>
-
+    <div class="space-y-5">
       <!-- Album title -->
       <div>
-        <label for="album-title" class="block text-sm font-medium text-gray-300 mb-2">
-          Album Title <span class="text-red-400">*</span>
+        <label for="album-title" class="block text-sm font-medium text-slate-700 mb-2">
+          Album Name <span class="text-red-500">*</span>
         </label>
         <input
           id="album-title"
@@ -185,78 +82,49 @@ watch(
           type="text"
           placeholder="e.g., Smith Wedding, Product Shoot"
           :disabled="isCreating"
-          class="w-full bg-[#252525] border border-[#333] rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-[var(--color-turquoise)] transition-colors disabled:opacity-50"
+          class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all disabled:opacity-50"
+          @keyup.enter="createAlbum"
         />
-      </div>
-
-      <!-- Event Time Range -->
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label for="start-time" class="block text-sm font-medium text-gray-300 mb-2">
-            Start Time
-          </label>
-          <input
-            id="start-time"
-            v-model="startTime"
-            type="datetime-local"
-            :disabled="isCreating"
-            class="w-full bg-[#252525] border border-[#333] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[var(--color-turquoise)] transition-colors disabled:opacity-50 [color-scheme:dark]"
-          />
-        </div>
-        <div>
-          <label for="end-time" class="block text-sm font-medium text-gray-300 mb-2">
-            End Time
-          </label>
-          <input
-            id="end-time"
-            v-model="endTime"
-            type="datetime-local"
-            :disabled="isCreating"
-            class="w-full bg-[#252525] border border-[#333] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[var(--color-turquoise)] transition-colors disabled:opacity-50 [color-scheme:dark]"
-          />
-        </div>
+        <p class="mt-2 text-xs text-slate-500">
+          A folder with this name will be created in your master folder
+        </p>
       </div>
 
       <!-- Error message -->
       <div
         v-if="error"
-        class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-start gap-3"
+        class="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3"
       >
-        <AlertCircle class="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-        <p class="text-sm text-red-400">{{ error }}</p>
+        <AlertCircle class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+        <p class="text-sm text-red-600">{{ error }}</p>
       </div>
 
       <!-- Info note -->
-      <div
-        class="bg-[var(--color-turquoise)]/5 border border-[var(--color-turquoise)]/20 rounded-xl p-4"
-      >
-        <p class="text-sm text-gray-400">
-          <strong class="text-[var(--color-turquoise)]">Note:</strong> The images will be compressed
-          and uploaded automatically. The original files will not be modified.
+      <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+        <p class="text-sm text-slate-600">
+          <strong class="text-indigo-600">Tip:</strong> After creating the album,
+          add photos to the folder. The app will automatically detect and process them.
         </p>
       </div>
 
       <!-- Action buttons -->
       <div class="flex gap-3 pt-2">
-        <Button
-          variant="secondary"
-          size="md"
+        <button
           :disabled="isCreating"
-          class="flex-1"
+          class="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors disabled:opacity-50"
           @click="handleClose"
         >
           Cancel
-        </Button>
-        <Button
-          variant="primary"
-          size="md"
-          :disabled="!sourceFolderPath || !title || imageCount === 0 || isScanning || isCreating"
-          class="flex-1"
+        </button>
+        <button
+          :disabled="!title.trim() || isCreating"
+          class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-semibold shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           @click="createAlbum"
         >
-          <span v-if="isCreating">Creating...</span>
-          <span v-else>Create Album</span>
-        </Button>
+          <Loader2 v-if="isCreating" class="w-4 h-4 animate-spin" />
+          <Plus v-else class="w-4 h-4" />
+          <span>{{ isCreating ? 'Creating...' : 'Create Album' }}</span>
+        </button>
       </div>
     </div>
   </Modal>

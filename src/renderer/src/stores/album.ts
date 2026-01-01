@@ -30,6 +30,7 @@ export interface Album {
   createdAt: string
   updatedAt: string
   needsSync?: number // 0 or 1 (SQLite boolean) - indicates if album needs sync with source folder
+  isOrphaned?: number // 0 or 1 (SQLite boolean) - indicates if source folder was deleted
   // For backward compatibility with frontend
   photoCount?: number
   coverPhoto?: string

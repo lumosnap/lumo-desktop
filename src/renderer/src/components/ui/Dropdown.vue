@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 
 defineProps<{
   align?: 'left' | 'right'
+  disabled?: boolean
 }>()
 
 const isOpen = ref(false)
@@ -33,7 +34,7 @@ onUnmounted(() => {
 
 <template>
   <div ref="dropdownRef" class="relative inline-block text-left">
-    <div @click="toggle">
+    <div @click="!disabled && toggle()">
       <slot name="trigger"></slot>
     </div>
 
@@ -46,8 +47,8 @@ onUnmounted(() => {
       leave-to-class="transform opacity-0 scale-95"
     >
       <div
-        v-if="isOpen"
-        class="absolute z-50 mt-2 w-auto min-w-48 overflow-hidden rounded-xl bg-[#1e1e2d] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none border border-white/10"
+        v-if="isOpen && !disabled"
+        class="absolute z-[100] mt-2 w-auto min-w-48 overflow-hidden rounded-xl bg-white shadow-xl shadow-slate-200/50 ring-1 ring-slate-200 focus:outline-none"
         :class="[align === 'right' ? 'right-0' : 'left-0']"
       >
         <div class="py-1" role="menu" aria-orientation="vertical" aria-labelledby="options-menu">

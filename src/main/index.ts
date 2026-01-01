@@ -2,11 +2,12 @@ import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { initDatabase, closeDatabase } from './database'
-import { initConfig } from './config'
+import { initDatabase, closeDatabase, getAllAlbums, getImagesByStatus } from './database'
+import { initConfig, getMasterFolder } from './config'
 import { registerIpcHandlers } from './ipc-handlers'
 import { protocol } from 'electron'
 import { watcherService } from './watcher'
+import { uploadPipeline } from './pipeline'
 
 // Register file protocol as privileged
 protocol.registerSchemesAsPrivileged([
@@ -125,8 +126,46 @@ app.whenReady().then(() => {
     try {
       watcherService.initialize(mainWindow)
       console.log('[Main] ✓ Watcher service initialized')
+      
+      // Start master folder watcher if configured
+      const masterFolder = getMasterFolder()
+      if (masterFolder) {
+        watcherService.watchMasterFolder(masterFolder)
+        watcherService.scanMasterFolderOnStartup(masterFolder)
+        console.log('[Main] ✓ Master folder watcher started')
+      }
     } catch (error) {
       console.error('[Main] ✗ Failed to initialize watcher service:', error)
+    }
+
+    // Auto-retry failed uploads on startup
+    try {
+      const albums = getAllAlbums()
+      let totalFailed = 0
+      const albumsWithFailed: string[] = []
+
+      for (const album of albums) {
+        const failedImages = getImagesByStatus(album.id, 'failed')
+        if (failedImages.length > 0) {
+          totalFailed += failedImages.length
+          albumsWithFailed.push(album.id)
+        }
+      }
+
+      if (albumsWithFailed.length > 0) {
+        console.log(`[Main] Found ${totalFailed} failed images in ${albumsWithFailed.length} albums, auto-retrying...`)
+        // Queue all albums with failed images - the pipeline queue system will handle them sequentially
+        for (const albumId of albumsWithFailed) {
+          uploadPipeline.startPipeline(albumId, mainWindow).catch((error) => {
+            console.error(`[Main] Auto-retry failed for album ${albumId}:`, error)
+          })
+        }
+        console.log('[Main] ✓ Auto-retry queued for failed uploads')
+      } else {
+        console.log('[Main] No failed uploads to retry')
+      }
+    } catch (error) {
+      console.error('[Main] ✗ Failed to check for failed uploads:', error)
     }
   } else {
     console.error('[Main] ✗ Cannot register IPC handlers: mainWindow is null')

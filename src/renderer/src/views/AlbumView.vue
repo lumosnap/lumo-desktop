@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import CreateAlbumModal from '../components/CreateAlbumModal.vue'
 import SyncModal from '../components/SyncModal.vue'
 import Dropdown from '../components/ui/Dropdown.vue'
 import ProgressPopover from '../components/ui/ProgressPopover.vue'
-import { ChevronLeft, ChevronRight, RefreshCw, Plus, Trash2, MoreHorizontal, Loader2 } from 'lucide-vue-next'
+import {
+  RefreshCw,
+  Plus,
+  Trash2,
+  MoreHorizontal,
+  Loader2,
+  FolderOpen,
+  Image as ImageIcon,
+  AlertCircle
+} from 'lucide-vue-next'
 import type { Album } from '../stores/album'
 import { useUIStore } from '../stores/ui'
 
@@ -15,12 +24,7 @@ const router = useRouter()
 const showCreateModal = ref(false)
 const albums = ref<Album[]>([])
 const loading = ref(true)
-const currentDate = computed({
-  get: () => uiStore.selectedDate,
-  set: (val) => uiStore.setSelectedDate(val)
-})
-const selectedView = ref<'month' | 'week' | 'day'>('week')
-const createAlbumDate = ref<Date | undefined>(undefined)
+const masterFolder = ref<string | null>(null)
 
 // Progress State
 const isProcessing = ref(false)
@@ -49,254 +53,44 @@ const syncAlbum = ref<Album | null>(null)
 const syncChanges = ref<any>(null)
 const isSyncLoading = ref(false)
 
-// Time slots for the calendar
-const timeSlots = [
-  '6 am',
-  '7 am',
-  '8 am',
-  '9 am',
-  '10 am',
-  '11 am',
-  '12 pm',
-  '1 pm',
-  '2 pm',
-  '3 pm',
-  '4 pm',
-  '5 pm'
-]
-
-// Pastel color palette for albums - matching reference design
+// Pastel color palette for albums
 const pastelColors = [
-  { bg: '#C3F5E4', border: '#5DD4B0', text: '#0D7357', shadow: 'rgba(93, 212, 176, 0.3)' },  // Mint Green
-  { bg: '#FFE0C4', border: '#FFB876', text: '#B85C1A', shadow: 'rgba(255, 184, 118, 0.3)' }, // Coral/Orange  
-  { bg: '#FFF3C4', border: '#FFE066', text: '#9A7B1A', shadow: 'rgba(255, 224, 102, 0.3)' }, // Yellow
-  { bg: '#D4F5F5', border: '#7DD8D8', text: '#1A7A7A', shadow: 'rgba(125, 216, 216, 0.3)' }, // Cyan/Teal
-  { bg: '#FFE4F0', border: '#FFB3D9', text: '#B84D83', shadow: 'rgba(255, 179, 217, 0.3)' }, // Pink
-  { bg: '#E9D5FF', border: '#C4A3FF', text: '#6B3FA0', shadow: 'rgba(196, 163, 255, 0.3)' }  // Purple
+  { bg: '#C3F5E4', border: '#5DD4B0', text: '#0D7357', shadow: 'rgba(93, 212, 176, 0.3)' },
+  { bg: '#FFE0C4', border: '#FFB876', text: '#B85C1A', shadow: 'rgba(255, 184, 118, 0.3)' },
+  { bg: '#FFF3C4', border: '#FFE066', text: '#9A7B1A', shadow: 'rgba(255, 224, 102, 0.3)' },
+  { bg: '#D4F5F5', border: '#7DD8D8', text: '#1A7A7A', shadow: 'rgba(125, 216, 216, 0.3)' },
+  { bg: '#FFE4F0', border: '#FFB3D9', text: '#B84D83', shadow: 'rgba(255, 179, 217, 0.3)' },
+  { bg: '#E9D5FF', border: '#C4A3FF', text: '#6B3FA0', shadow: 'rgba(196, 163, 255, 0.3)' }
 ]
 
-// --- Calendar Logic ---
-
-// Week View Days
-const weekDays = computed(() => {
-  const days: { date: Date; dayName: string; dayNumber: number; isToday: boolean }[] = []
-  const startOfWeek = new Date(currentDate.value)
-  startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay()) // Sunday
-
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(startOfWeek)
-    date.setDate(startOfWeek.getDate() + i)
-    days.push({
-      date,
-      dayName: date.toLocaleDateString('en-US', { weekday: 'short' }),
-      dayNumber: date.getDate(),
-      isToday: isToday(date)
-    })
-  }
-  return days
-})
-
-// Month View Days
-const monthDays = computed(() => {
-  const days: { date: Date; dayNumber: number; isCurrentMonth: boolean; isToday: boolean }[] = []
-  const year = currentDate.value.getFullYear()
-  const month = currentDate.value.getMonth()
-
-  const firstDayOfMonth = new Date(year, month, 1)
-  const lastDayOfMonth = new Date(year, month + 1, 0)
-
-  // Start from the Sunday before the first day of the month
-  const startDate = new Date(firstDayOfMonth)
-  startDate.setDate(startDate.getDate() - startDate.getDay())
-
-  // End on the Saturday after the last day of the month
-  const endDate = new Date(lastDayOfMonth)
-  endDate.setDate(endDate.getDate() + (6 - endDate.getDay()))
-
-  const iterDate = new Date(startDate)
-  while (iterDate <= endDate) {
-    days.push({
-      date: new Date(iterDate),
-      dayNumber: iterDate.getDate(),
-      isCurrentMonth: iterDate.getMonth() === month,
-      isToday: isToday(iterDate)
-    })
-    iterDate.setDate(iterDate.getDate() + 1)
-  }
-
-  return days
-})
-
-// Day View
-const currentDay = computed(() => {
-  const date = new Date(currentDate.value)
-  return {
-    date,
-    dayName: date.toLocaleDateString('en-US', { weekday: 'long' }),
-    dayNumber: date.getDate(),
-    isToday: isToday(date)
-  }
-})
-
-// Month and year display
-const monthYear = computed(() => {
-  return currentDate.value.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-})
-
-// Map albums to calendar grid
-const calendarAlbums = computed(() => {
-  // Filter albums based on view
-  let filteredAlbums = albums.value
-
-  if (selectedView.value === 'week') {
-    if (!weekDays.value.length) return []
-    const start = new Date(weekDays.value[0].date)
-    start.setHours(0, 0, 0, 0)
-    const end = new Date(weekDays.value[6].date)
-    end.setHours(23, 59, 59, 999)
-
-    filteredAlbums = albums.value.filter((a) => {
-      const d = new Date(a.startTime || a.eventDate || a.createdAt)
-      return d >= start && d <= end
-    })
-  } else if (selectedView.value === 'month') {
-    if (!monthDays.value.length) return []
-    const start = new Date(monthDays.value[0].date)
-    start.setHours(0, 0, 0, 0)
-    const end = new Date(monthDays.value[monthDays.value.length - 1].date)
-    end.setHours(23, 59, 59, 999)
-
-    filteredAlbums = albums.value.filter((a) => {
-      const d = new Date(a.startTime || a.eventDate || a.createdAt)
-      return d >= start && d <= end
-    })
-  } else if (selectedView.value === 'day') {
-    const start = new Date(currentDate.value)
-    start.setHours(0, 0, 0, 0)
-    const end = new Date(currentDate.value)
-    end.setHours(23, 59, 59, 999)
-
-    filteredAlbums = albums.value.filter((a) => {
-      const d = new Date(a.startTime || a.eventDate || a.createdAt)
-      return d >= start && d <= end
-    })
-  }
-
-  return filteredAlbums.map((album, index) => {
-    // Determine start time
-    const startDate = album.startTime
-      ? new Date(album.startTime)
-      : album.eventDate
-        ? new Date(album.eventDate)
-        : new Date(album.createdAt)
-
-    const dayIndex = startDate.getDay() // 0-6 (Sun-Sat)
-
-    // Calculate time slot
-    const startHour = startDate.getHours()
-    let timeSlot = startHour - 6 // Calendar starts at 6am
-    if (timeSlot < 0) timeSlot = 0
-    if (timeSlot >= timeSlots.length) timeSlot = timeSlots.length - 1
-
-    // Calculate span
-    let span = 2 // Default span
-    if (album.endTime && album.startTime) {
-      const end = new Date(album.endTime)
-      const start = new Date(album.startTime)
-      const durationHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60)
-      span = Math.max(1, Math.ceil(durationHours))
-    }
-
-    // Cap span to remaining slots
-    span = Math.min(span, timeSlots.length - timeSlot)
-
-    // Format time string
-    const timeStr =
-      album.startTime && album.endTime
-        ? `${new Date(album.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${new Date(album.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-        : `${timeSlots[timeSlot]} - ${timeSlots[Math.min(timeSlot + span, timeSlots.length - 1)] || 'End'}`
-
-    return {
-      ...album,
-      dayIndex, // For week view
-      date: startDate, // For month/day view
-      timeSlot,
-      span,
-      pastelColor: pastelColors[index % pastelColors.length],
-      time: timeStr
-    }
-  })
-})
-
-function isToday(date: Date): boolean {
-  const today = new Date()
-  return (
-    date.getDate() === today.getDate() &&
-    date.getMonth() === today.getMonth() &&
-    date.getFullYear() === today.getFullYear()
-  )
+// Get color for album based on index
+function getAlbumColor(index: number) {
+  return pastelColors[index % pastelColors.length]
 }
 
-function isSameDay(d1: Date, d2: Date): boolean {
-  return (
-    d1.getDate() === d2.getDate() &&
-    d1.getMonth() === d2.getMonth() &&
-    d1.getFullYear() === d2.getFullYear()
-  )
-}
-
-function prev(): void {
-  const newDate = new Date(currentDate.value)
-  if (selectedView.value === 'month') {
-    newDate.setMonth(newDate.getMonth() - 1)
-  } else if (selectedView.value === 'week') {
-    newDate.setDate(newDate.getDate() - 7)
+function openAlbum(album: Album): void {
+  if (album.totalImages === 0 && album.sourceFolderPath) {
+    // Open in file manager if empty
+    window.api.shell.openFolder(album.sourceFolderPath)
   } else {
-    newDate.setDate(newDate.getDate() - 1)
+    router.push(`/albums/${album.id}`)
   }
-  currentDate.value = newDate
 }
 
-function next(): void {
-  const newDate = new Date(currentDate.value)
-  if (selectedView.value === 'month') {
-    newDate.setMonth(newDate.getMonth() + 1)
-  } else if (selectedView.value === 'week') {
-    newDate.setDate(newDate.getDate() + 7)
-  } else {
-    newDate.setDate(newDate.getDate() + 1)
-  }
-  currentDate.value = newDate
-}
-
-function goToToday(): void {
-  currentDate.value = new Date()
-}
-
-function goToDate(date: Date): void {
-  currentDate.value = date
-  selectedView.value = 'day' // Switch to day view when clicking a date header
-}
-
-function openAlbum(albumId: string): void {
-  router.push(`/albums/${albumId}`)
-}
-
-function openCreateModal(date?: Date, timeSlotIndex?: number): void {
-  if (date) {
-    const d = new Date(date)
-    if (timeSlotIndex !== undefined) {
-      // timeSlots start at 6am
-      d.setHours(6 + timeSlotIndex, 0, 0, 0)
-    } else {
-      // Default to 9am if no time slot
-      d.setHours(9, 0, 0, 0)
-    }
-    createAlbumDate.value = d
-  } else {
-    createAlbumDate.value = undefined
-  }
+function openCreateModal(): void {
   showCreateModal.value = true
+}
+
+function openFolderInExplorer(album: Album): void {
+  if (album.sourceFolderPath) {
+    window.api.shell.openFolder(album.sourceFolderPath)
+  }
+}
+
+async function openWatchFolder(): Promise<void> {
+  if (masterFolder.value) {
+    await window.api.shell.openFolder(masterFolder.value)
+  }
 }
 
 async function loadAlbums(): Promise<void> {
@@ -310,6 +104,14 @@ async function loadAlbums(): Promise<void> {
     console.error('Failed to load albums:', error)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMasterFolder(): Promise<void> {
+  try {
+    masterFolder.value = await window.api.config.getMasterFolder()
+  } catch (error) {
+    console.error('Failed to load master folder:', error)
   }
 }
 
@@ -401,7 +203,6 @@ const onComplete = (): void => {
 
 const onError = (): void => {
   isProcessing.value = false
-  // Optional: show toast
 }
 
 const onAlbumStatusChanged = (_e: any, data: { albumId: string; needsSync: number }): void => {
@@ -412,8 +213,14 @@ const onAlbumStatusChanged = (_e: any, data: { albumId: string; needsSync: numbe
   }
 }
 
+const onAlbumsRefresh = (): void => {
+  console.log('Albums refresh requested')
+  loadAlbums()
+}
+
 onMounted(() => {
   loadAlbums()
+  loadMasterFolder()
 
   // Register listeners
   if (window.api && window.api.on) {
@@ -422,6 +229,7 @@ onMounted(() => {
     window.api.on('upload:complete', onComplete)
     window.api.on('upload:error', onError)
     window.api.on('album:status-changed', onAlbumStatusChanged)
+    window.api.on('albums:refresh', onAlbumsRefresh)
   }
 })
 
@@ -432,68 +240,38 @@ onUnmounted(() => {
     window.api.off('upload:complete', onComplete)
     window.api.off('upload:error', onError)
     window.api.off('album:status-changed', onAlbumStatusChanged)
+    window.api.off('albums:refresh', onAlbumsRefresh)
   }
 })
 </script>
 
 <template>
   <AppLayout>
-    <div class="flex h-full flex-col">
+    <div class="flex h-full flex-col bg-slate-50">
       <!-- Header -->
-      <div class="flex items-center justify-between px-8 py-6">
-        <h1 class="text-3xl font-bold text-[var(--color-text-on-light)]">{{ monthYear }}</h1>
-
-        <div class="flex items-center gap-4">
-          <!-- View Toggle -->
-          <div class="view-toggle">
-            <button
-              class="view-toggle-btn"
-              :class="{ active: selectedView === 'month' }"
-              @click="selectedView = 'month'"
-            >
-              Month
-            </button>
-            <button
-              class="view-toggle-btn"
-              :class="{ active: selectedView === 'week' }"
-              @click="selectedView = 'week'"
-            >
-              Week
-            </button>
-            <button
-              class="view-toggle-btn"
-              :class="{ active: selectedView === 'day' }"
-              @click="selectedView = 'day'"
-            >
-              Day
-            </button>
+      <div class="flex items-center justify-between px-8 py-6 border-b border-slate-200 bg-white">
+        <div>
+          <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1">
+            Library
           </div>
+          <h1 class="text-3xl font-bold text-slate-900">Albums</h1>
+        </div>
 
-          <!-- Navigation -->
-          <div class="flex items-center gap-2">
-            <button
-              class="rounded-lg p-2 text-[var(--color-text-on-light-muted)] hover:bg-black/5"
-              @click="prev"
-            >
-              <ChevronLeft class="h-5 w-5" />
-            </button>
-            <button
-              class="rounded-lg px-4 py-2 text-sm font-medium text-[var(--color-text-on-light)] hover:bg-black/5"
-              @click="goToToday"
-            >
-              Today
-            </button>
-            <button
-              class="rounded-lg p-2 text-[var(--color-text-on-light-muted)] hover:bg-black/5"
-              @click="next"
-            >
-              <ChevronRight class="h-5 w-5" />
-            </button>
-          </div>
+        <div class="flex items-center gap-3">
+          <!-- Open Watch Folder Button -->
+          <button
+            v-if="masterFolder"
+            class="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 transition-colors"
+            title="Open Watch Folder"
+            @click="openWatchFolder"
+          >
+            <FolderOpen class="h-4 w-4" />
+            Open Watch Folder
+          </button>
 
           <!-- Refresh Button -->
           <button
-            class="rounded-lg p-2 text-[var(--color-text-on-light-muted)] hover:bg-black/5 transition-colors"
+            class="rounded-xl p-2.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
             title="Refresh Albums"
             :disabled="loading"
             @click="loadAlbums"
@@ -503,7 +281,7 @@ onUnmounted(() => {
 
           <!-- Create Album Button -->
           <button
-            class="flex items-center gap-2 rounded-lg bg-[var(--color-turquoise)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-turquoise-dark)]"
+            class="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5"
             @click="openCreateModal()"
           >
             <Plus class="h-4 w-4" />
@@ -515,399 +293,184 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- WEEK VIEW -->
-      <template v-if="selectedView === 'week'">
-        <!-- Week Day Headers -->
-        <div class="grid grid-cols-[80px_repeat(7,1fr)] border-b border-black/5 px-4">
-          <div></div>
-          <div
-            v-for="day in weekDays"
-            :key="day.date.getTime()"
-            class="cursor-pointer py-4 text-center transition-all hover:bg-black/5"
-            :class="{ 'rounded-2xl bg-[#1e1e2d] hover:bg-[#252535]': day.isToday }"
-            @click="goToDate(day.date)"
-          >
-            <div
-              class="text-xs font-medium"
-              :class="day.isToday ? 'text-white/70' : 'text-[var(--color-text-on-light-muted)]'"
-            >
-              {{ day.dayName }}
-            </div>
-            <div
-              class="text-2xl font-bold"
-              :class="day.isToday ? 'text-white' : 'text-[var(--color-text-on-light)]'"
-            >
-              {{ day.dayNumber }}
-            </div>
-          </div>
+      <!-- Content -->
+      <div class="flex-1 overflow-y-auto p-8">
+        <!-- Loading State -->
+        <div v-if="loading" class="flex items-center justify-center py-20">
+          <Loader2 class="w-10 h-10 text-indigo-500 animate-spin" />
         </div>
 
-        <!-- Week Calendar Grid -->
-        <div class="content-scrollable flex-1 overflow-y-auto">
-          <div class="grid grid-cols-[80px_repeat(7,1fr)]">
-            <!-- Time Slots -->
-            <template v-for="(slot, slotIndex) in timeSlots" :key="slotIndex">
-              <!-- Time Label -->
-              <div class="flex h-24 items-start justify-end pr-4 pt-2">
-                <span class="text-xs font-medium text-[var(--color-text-on-light-muted)]">
-                  {{ slot }}
-                </span>
-              </div>
+        <!-- Empty State -->
+        <div
+          v-else-if="albums.length === 0"
+          class="flex flex-col items-center justify-center py-20 text-center"
+        >
+          <div
+            class="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center mb-6"
+          >
+            <ImageIcon class="w-10 h-10 text-indigo-500" />
+          </div>
+          <h3 class="text-xl font-bold text-slate-900 mb-2">No albums yet</h3>
+          <p class="text-slate-500 mb-6 max-w-sm">
+            Create your first album to start organizing and sharing your photos with clients.
+          </p>
+          <button
+            class="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl"
+            @click="openCreateModal()"
+          >
+            <Plus class="h-4 w-4" />
+            Create Your First Album
+          </button>
+        </div>
 
-              <!-- Day Cells -->
+        <!-- Albums Grid -->
+        <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div
+            v-for="(album, index) in albums"
+            :key="album.id"
+            class="group relative bg-white rounded-2xl border border-slate-200 transition-all duration-300 hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1 cursor-pointer"
+            :class="[
+              uiStore.selectedAlbumId === album.id ? 'ring-2 ring-indigo-500' : ''
+            ]"
+            @click="openAlbum(album)"
+          >
+            <!-- Thumbnail / Color Block -->
+            <div
+              class="h-40 relative overflow-hidden rounded-t-2xl"
+              :style="{ backgroundColor: getAlbumColor(index).bg }"
+            >
+              <!-- Thumbnail Image -->
+              <img
+                v-if="album.thumbnail"
+                :src="`file://${album.thumbnail}`"
+                :alt="album.title"
+                class="w-full h-full object-cover"
+              />
+              
+              <!-- Empty State Icon -->
               <div
-                v-for="(day, dayIndex) in weekDays"
-                :key="`${slotIndex}-${dayIndex}`"
-                class="group relative h-24 border-b border-l border-black/5 p-1"
+                v-else
+                class="absolute inset-0 flex items-center justify-center"
               >
-                <!-- Add Button on Hover -->
-                <div
-                  class="pointer-events-none absolute inset-0 z-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
-                >
-                  <button
-                    class="pointer-events-auto transform rounded-full bg-[var(--color-turquoise)] p-2 text-white shadow-lg transition-transform hover:scale-100 hover:scale-110"
-                    title="Create Album Here"
-                    @click="openCreateModal(day.date, slotIndex)"
-                  >
-                    <Plus class="h-4 w-4" />
-                  </button>
-                </div>
-
-                <!-- Album Cards -->
-                <div
-                  v-for="album in calendarAlbums.filter(
-                    (a) => isSameDay(a.date, day.date) && a.timeSlot === slotIndex
-                  )"
-                  :key="album.id"
-                  class="album-card group/card relative z-10 rounded-md transition-all hover:z-40 cursor-pointer"
-                  :class="[
-                    uiStore.selectedAlbumId === album.id
-                      ? 'ring-2 ring-[var(--color-turquoise)] z-50'
-                      : ''
-                  ]"
-                  :style="{
-                    height: album.span * 96 - 8 + 'px',
-                    backgroundColor: album.pastelColor.bg,
-                    boxShadow: `0 2px 8px ${album.pastelColor.shadow}`
-                  }"
-                  @click="openAlbum(album.id)"
-                >
-                  <!-- Content -->
-                  <div class="relative z-10 flex flex-col h-full p-2.5">
-                    <!-- Time -->
-                    <div
-                      class="text-[10px] font-semibold mb-1"
-                      :style="{ color: album.pastelColor.text }"
-                    >
-                      {{ album.time }}
-                    </div>
-                    <!-- Title -->
-                    <div
-                      class="text-xs font-bold leading-tight"
-                      :style="{ color: album.pastelColor.text }"
-                    >
-                      {{ album.title }}
-                    </div>
-                    
-                    <!-- Spacer -->
-                    <div class="flex-1"></div>
-                    
-                    <!-- Options Button -->
-                    <div class="flex justify-end" @click.stop>
-                      <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
-                        <template #trigger>
-                          <button
-                            class="rounded-full p-1 transition-all hover:scale-110"
-                            :style="{ backgroundColor: `${album.pastelColor.border}80`, color: album.pastelColor.text }"
-                          >
-                            <MoreHorizontal class="h-3.5 w-3.5" />
-                          </button>
-                        </template>
-                        <template #content="{ close }">
-                          <div class="py-1">
-                            <button
-                              v-if="album.needsSync"
-                              class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[var(--color-turquoise)] hover:bg-[var(--color-turquoise)]/10"
-                              @click="
-                                () => {
-                                  close()
-                                  openSyncModal(album)
-                                }
-                              "
-                            >
-                              <RefreshCw class="h-4 w-4" />
-                              Sync Album
-                            </button>
-                            <button
-                              class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                              @click="
-                                () => {
-                                  close()
-                                  openDeleteModal(album)
-                                }
-                              "
-                            >
-                              <Trash2 class="h-4 w-4" />
-                              Delete Album
-                            </button>
-                          </div>
-                        </template>
-                      </Dropdown>
-                    </div>
-                  </div>
-
-                  <!-- Needs Sync Badge -->
-                  <div
-                    v-if="album.needsSync"
-                    class="absolute right-2 top-10 z-20 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
-                  >
-                    SYNC
-                  </div>
-
-                  <!-- Loading Overlay -->
-                  <div
-                    v-if="currentUploadingAlbumId === album.id"
-                    class="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-[1px]"
-                  >
-                    <Loader2 class="h-6 w-6 animate-spin text-[var(--color-turquoise)]" />
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-        </div>
-      </template>
-
-      <!-- MONTH VIEW -->
-      <template v-else-if="selectedView === 'month'">
-        <!-- Month Day Headers -->
-        <div class="grid grid-cols-7 border-b border-black/5 px-4">
-          <div
-            v-for="day in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']"
-            :key="day"
-            class="py-4 text-center text-xs font-medium text-[var(--color-text-on-light-muted)]"
-          >
-            {{ day }}
-          </div>
-        </div>
-
-        <!-- Month Grid -->
-        <div class="content-scrollable flex-1 overflow-y-auto p-4">
-          <div class="grid h-full auto-rows-fr grid-cols-7 gap-1">
-            <div
-              v-for="day in monthDays"
-              :key="day.date.getTime()"
-              class="group relative min-h-[120px] rounded-lg border border-black/5 p-2 transition-colors hover:bg-white"
-              :class="{ 'bg-white/50': !day.isCurrentMonth, 'bg-[#1e1e2d]/5': day.isToday }"
-            >
-              <div class="mb-2 flex items-start justify-between">
-                <span
-                  class="flex h-7 w-7 items-center justify-center rounded-full text-sm font-medium"
-                  :class="
-                    day.isToday
-                      ? 'bg-[#1e1e2d] text-white'
-                      : 'text-[var(--color-text-on-light-muted)]'
-                  "
-                >
-                  {{ day.dayNumber }}
-                </span>
-
-                <!-- Add Button on Hover -->
-                <button
-                  class="transform rounded-full bg-[var(--color-turquoise)] p-1 text-white opacity-0 shadow-sm transition-opacity hover:scale-100 group-hover:opacity-100"
-                  title="Create Album"
-                  @click="openCreateModal(day.date)"
-                >
-                  <Plus class="h-3 w-3" />
-                </button>
+                <FolderOpen
+                  class="w-12 h-12 opacity-40"
+                  :style="{ color: getAlbumColor(index).text }"
+                />
               </div>
 
-              <!-- Albums List -->
-              <div class="space-y-1.5">
-                <div
-                  v-for="album in calendarAlbums.filter((a) => isSameDay(a.date, day.date))"
-                  :key="album.id"
-                  class="cursor-pointer truncate rounded-md px-2 py-1.5 text-[10px] font-semibold transition-all hover:scale-[1.02]"
-                  :class="[
-                    uiStore.selectedAlbumId === album.id
-                      ? 'ring-2 ring-[var(--color-turquoise)] ring-offset-1 ring-offset-white'
-                      : ''
-                  ]"
-                  :style="{
-                    backgroundColor: album.pastelColor.bg,
-                    color: album.pastelColor.text,
-                    boxShadow: `0 1px 4px ${album.pastelColor.shadow}`
-                  }"
-                  :title="album.title"
-                  @click="openAlbum(album.id)"
-                >
-                  {{ album.title }}
+              <!-- Sync Badge -->
+              <div
+                v-if="album.needsSync && !album.isOrphaned"
+                class="absolute top-3 right-3 rounded-full bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white shadow-lg"
+              >
+                SYNC
+              </div>
+
+              <!-- Orphaned Badge -->
+              <div
+                v-if="album.isOrphaned"
+                class="absolute top-3 right-3 rounded-full bg-red-500 px-2.5 py-1 text-[10px] font-bold text-white shadow-lg"
+                title="Source folder was deleted"
+              >
+                ORPHANED
+              </div>
+
+              <!-- Loading Overlay -->
+              <div
+                v-if="currentUploadingAlbumId === album.id"
+                class="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+              >
+                <Loader2 class="h-8 w-8 animate-spin text-white" />
+              </div>
+            </div>
+
+            <!-- Info -->
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex-1 min-w-0">
+                  <h3 class="font-semibold text-slate-900 truncate">{{ album.title }}</h3>
+                  <p class="text-sm text-slate-500 mt-0.5">
+                    {{ album.totalImages }} {{ album.totalImages === 1 ? 'photo' : 'photos' }}
+                  </p>
                 </div>
+
+                <!-- Actions Dropdown -->
+                <div @click.stop>
+                  <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
+                    <template #trigger>
+                      <button
+                        class="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <MoreHorizontal class="h-4 w-4" />
+                      </button>
+                    </template>
+                    <template #content="{ close }">
+                      <div class="py-1">
+                        <!-- Open Folder -->
+                        <button
+                          class="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                          @click="
+                            () => {
+                              close()
+                              openFolderInExplorer(album)
+                            }
+                          "
+                        >
+                          <FolderOpen class="h-4 w-4" />
+                          Open Folder
+                        </button>
+
+                        <!-- Sync Option -->
+                        <button
+                          v-if="album.needsSync"
+                          class="flex w-full items-center gap-2 px-4 py-2 text-sm text-indigo-600 hover:bg-indigo-50"
+                          @click="
+                            () => {
+                              close()
+                              openSyncModal(album)
+                            }
+                          "
+                        >
+                          <RefreshCw class="h-4 w-4" />
+                          Sync Album
+                        </button>
+
+                        <!-- Delete Option -->
+                        <button
+                          class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-red-50"
+                          @click="
+                            () => {
+                              close()
+                              openDeleteModal(album)
+                            }
+                          "
+                        >
+                          <Trash2 class="h-4 w-4" />
+                          Delete Album
+                        </button>
+                      </div>
+                    </template>
+                  </Dropdown>
+                </div>
+              </div>
+
+              <!-- Empty Album Hint -->
+              <div
+                v-if="album.totalImages === 0"
+                class="mt-3 flex items-center gap-2 text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2"
+              >
+                <AlertCircle class="h-3.5 w-3.5 flex-shrink-0" />
+                <span>Click to open folder and add photos</span>
               </div>
             </div>
           </div>
         </div>
-      </template>
-
-      <!-- DAY VIEW -->
-      <template v-else-if="selectedView === 'day'">
-        <!-- Day Header -->
-        <div class="border-b border-black/5 px-8 py-4 text-center">
-          <div class="text-sm font-medium text-[var(--color-text-on-light-muted)]">
-            {{ currentDay.dayName }}
-          </div>
-          <div class="text-3xl font-bold text-[var(--color-text-on-light)]">
-            {{ currentDay.dayNumber }}
-          </div>
-        </div>
-
-        <!-- Day Grid -->
-        <div class="content-scrollable flex-1 overflow-y-auto">
-          <div class="grid grid-cols-[80px_1fr]">
-            <template v-for="(slot, slotIndex) in timeSlots" :key="slotIndex">
-              <!-- Time Label -->
-              <div class="flex h-32 items-start justify-end pr-4 pt-2">
-                <span class="text-xs font-medium text-[var(--color-text-on-light-muted)]">
-                  {{ slot }}
-                </span>
-              </div>
-
-              <!-- Day Cell -->
-              <div class="group relative h-32 border-b border-l border-black/5 p-2">
-                <!-- Add Button on Hover -->
-                <div
-                  class="pointer-events-none absolute inset-0 z-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
-                >
-                  <button
-                    class="pointer-events-auto transform rounded-full bg-[var(--color-turquoise)] p-2 text-white shadow-lg transition-transform hover:scale-100 hover:scale-110"
-                    title="Create Album Here"
-                    @click="openCreateModal(currentDay.date, slotIndex)"
-                  >
-                    <Plus class="h-4 w-4" />
-                  </button>
-                </div>
-
-                <!-- Album Cards -->
-                <div
-                  v-for="album in calendarAlbums.filter(
-                    (a) => isSameDay(a.date, currentDay.date) && a.timeSlot === slotIndex
-                  )"
-                  :key="album.id"
-                  class="album-card group/card relative z-10 rounded-md transition-all hover:z-40 cursor-pointer"
-                  :class="[
-                    uiStore.selectedAlbumId === album.id
-                      ? 'ring-2 ring-[var(--color-turquoise)] z-50'
-                      : ''
-                  ]"
-                  :style="{
-                    height: album.span * 128 - 16 + 'px',
-                    backgroundColor: album.pastelColor.bg,
-                    boxShadow: `0 2px 8px ${album.pastelColor.shadow}`
-                  }"
-                  @click="openAlbum(album.id)"
-                >
-                  <!-- Content -->
-                  <div class="relative z-10 flex flex-col h-full p-3">
-                    <!-- Time -->
-                    <div
-                      class="text-xs font-semibold mb-1"
-                      :style="{ color: album.pastelColor.text }"
-                    >
-                      {{ album.time }}
-                    </div>
-                    <!-- Title -->
-                    <div
-                      class="text-sm font-bold leading-tight"
-                      :style="{ color: album.pastelColor.text }"
-                    >
-                      {{ album.title }}
-                    </div>
-                    <!-- Photo count -->
-                    <div
-                      v-if="album.totalImages"
-                      class="mt-1 text-[11px] opacity-70"
-                      :style="{ color: album.pastelColor.text }"
-                    >
-                      {{ album.totalImages }} photos
-                    </div>
-
-                    <!-- Spacer -->
-                    <div class="flex-1"></div>
-
-                    <!-- Options Button -->
-                    <div class="flex justify-end" @click.stop>
-                      <Dropdown align="right" :disabled="currentUploadingAlbumId === album.id">
-                        <template #trigger>
-                          <button
-                            class="rounded-full p-1.5 transition-all hover:scale-110"
-                            :style="{
-                              backgroundColor: `${album.pastelColor.border}80`,
-                              color: album.pastelColor.text
-                            }"
-                          >
-                            <MoreHorizontal class="h-4 w-4" />
-                          </button>
-                        </template>
-                        <template #content="{ close }">
-                          <div class="py-1">
-                            <button
-                              v-if="album.needsSync"
-                              class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[var(--color-turquoise)] hover:bg-[var(--color-turquoise)]/10"
-                              @click="
-                                () => {
-                                  close()
-                                  openSyncModal(album)
-                                }
-                              "
-                            >
-                              <RefreshCw class="h-4 w-4" />
-                              Sync Album
-                            </button>
-                            <button
-                              class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                              @click="
-                                () => {
-                                  close()
-                                  openDeleteModal(album)
-                                }
-                              "
-                            >
-                              <Trash2 class="h-4 w-4" />
-                              Delete Album
-                            </button>
-                          </div>
-                        </template>
-                      </Dropdown>
-                    </div>
-                  </div>
-
-                  <!-- Needs Sync Badge -->
-                  <div
-                    v-if="album.needsSync"
-                    class="absolute right-2 top-14 z-20 rounded-full bg-yellow-500 px-2 py-0.5 text-[9px] font-bold text-yellow-950 shadow-lg"
-                  >
-                    SYNC
-                  </div>
-
-                  <!-- Loading Overlay -->
-                  <div
-                    v-if="currentUploadingAlbumId === album.id"
-                    class="absolute inset-0 z-30 flex items-center justify-center rounded-xl bg-black/30 backdrop-blur-[1px]"
-                  >
-                    <Loader2 class="h-8 w-8 animate-spin text-[var(--color-turquoise)]" />
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-        </div>
-      </template>
+      </div>
     </div>
 
     <!-- Create Album Modal -->
     <CreateAlbumModal
       :show="showCreateModal"
-      :initial-date="createAlbumDate"
       @close="showCreateModal = false"
       @created="handleAlbumCreated"
     />
@@ -926,23 +489,23 @@ onUnmounted(() => {
     <!-- Delete Confirmation Modal -->
     <div
       v-if="showDeleteModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
     >
-      <div class="w-full max-w-md rounded-2xl bg-[#1e1e2d] border border-red-500/20 p-6 shadow-2xl">
-        <h3 class="mb-2 text-xl font-bold text-white">Delete Album</h3>
-        <p class="mb-4 text-sm text-gray-400">
-          This will permanently delete <strong>{{ albumToDelete?.title }}</strong> from the cloud
+      <div class="w-full max-w-md rounded-2xl bg-white border border-slate-200 p-6 shadow-2xl">
+        <h3 class="mb-2 text-xl font-bold text-slate-900">Delete Album</h3>
+        <p class="mb-4 text-sm text-slate-500">
+          This will permanently delete <strong class="text-slate-900">{{ albumToDelete?.title }}</strong> from the cloud
           and your local device. This action cannot be undone.
         </p>
 
         <div class="mb-4">
-          <label class="mb-1.5 block text-xs font-medium text-gray-400">
-            Type <span class="text-white font-bold">{{ albumToDelete?.title }}</span> to confirm
+          <label class="mb-1.5 block text-xs font-medium text-slate-500">
+            Type <span class="text-slate-900 font-bold">{{ albumToDelete?.title }}</span> to confirm
           </label>
           <input
             v-model="deleteConfirmation"
             type="text"
-            class="w-full rounded-lg bg-black/20 border border-white/10 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-red-500/50 focus:outline-none"
+            class="w-full rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20"
             placeholder="Type album name"
           />
           <p v-if="deleteError" class="mt-1 text-xs text-red-500">{{ deleteError }}</p>
@@ -950,14 +513,14 @@ onUnmounted(() => {
 
         <div class="flex justify-end gap-3">
           <button
-            class="rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:text-white"
+            class="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
             :disabled="isDeleting"
             @click="showDeleteModal = false"
           >
             Cancel
           </button>
           <button
-            class="rounded-lg bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-500 hover:bg-red-500/20 disabled:opacity-50"
+            class="rounded-xl bg-red-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
             :disabled="isDeleting || deleteConfirmation !== albumToDelete?.title"
             @click="handleDeleteAlbum"
           >
@@ -966,7 +529,5 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-
-    <!-- Progress Overlay Removed -->
   </AppLayout>
 </template>

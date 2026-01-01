@@ -25,7 +25,16 @@ const api = {
       freeSpaceFormatted: string
       isLowStorage: boolean
       error?: string
-    }> => ipcRenderer.invoke('config:getCurrentStorageInfo')
+    }> => ipcRenderer.invoke('config:getCurrentStorageInfo'),
+    getMasterFolder: (): Promise<string | null> =>
+      ipcRenderer.invoke('config:getMasterFolder'),
+    setMasterFolder: (path: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('config:setMasterFolder', path),
+    scanMasterFolder: (): Promise<{
+      success: boolean
+      folders: Array<{ name: string; path: string; imageCount: number }>
+      error?: string
+    }> => ipcRenderer.invoke('config:scanMasterFolder')
   },
   albums: {
     create: (data: {
@@ -158,7 +167,9 @@ const api = {
       albumId: string,
       imageId: number
     ): Promise<{ success: boolean; error?: string }> =>
-      ipcRenderer.invoke('shell:showItemInFolder', albumId, imageId)
+      ipcRenderer.invoke('shell:showItemInFolder', albumId, imageId),
+    openFolder: (folderPath: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('shell:openFolder', folderPath)
   },
 
   // Progress events listener
@@ -169,7 +180,9 @@ const api = {
       'upload:batch-start',
       'upload:complete',
       'upload:error',
-      'album:status-changed'
+      'album:status-changed',
+      'albums:refresh',
+      'master-folder:change'
     ]
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, callback)
@@ -181,7 +194,9 @@ const api = {
       'upload:batch-start',
       'upload:complete',
       'upload:error',
-      'album:status-changed'
+      'album:status-changed',
+      'albums:refresh',
+      'master-folder:change'
     ]
     if (validChannels.includes(channel)) {
       ipcRenderer.removeListener(channel, callback)

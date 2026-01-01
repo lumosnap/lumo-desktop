@@ -5,6 +5,7 @@ import sharp from 'sharp'
 export interface CompressionResult {
   success: boolean
   compressedPath: string
+  thumbnailPath: string
   width: number
   height: number
   fileSize: number
@@ -58,6 +59,7 @@ export async function compressImage(
       return {
         success: false,
         compressedPath: '',
+        thumbnailPath: '',
         width: 0,
         height: 0,
         fileSize: 0,
@@ -96,6 +98,7 @@ export async function compressImage(
       return {
         success: false,
         compressedPath: '',
+        thumbnailPath: '',
         width: 0,
         height: 0,
         fileSize: 0,
@@ -134,6 +137,7 @@ export async function compressImage(
     const webpBaseOpts = {
       effort: opts.effort,
       smartSubsample: opts.smartSubsample,
+      progressive: true, // Enable progressive/incremental loading
       ...(opts.preset && { preset: opts.preset })
     }
 
@@ -176,6 +180,24 @@ export async function compressImage(
     console.log(`[Compress] Writing compressed file to: ${outputPath}`)
     await fs.writeFile(outputPath, finalBuffer)
 
+    // Thumbnail generation disabled for now
+    // TODO: Re-enable when ready
+    /*
+    const thumbnailDir = path.join(outputDir, '.thumbnails')
+    await fs.mkdir(thumbnailDir, { recursive: true })
+    const thumbnailPath = path.join(thumbnailDir, outputFileName)
+    
+    console.log(`[Compress] Generating thumbnail: ${thumbnailPath}`)
+    await image
+      .clone()
+      .rotate() // Auto-rotate based on EXIF orientation
+      .resize(300, 300, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 70 })
+      .toFile(thumbnailPath)
+    console.log(`[Compress] Thumbnail generated successfully`)
+    */
+    const thumbnailPath = '' // Empty path since thumbnails are disabled
+
     // Get final dimensions
     const outputMetadata = await sharp(finalBuffer).metadata()
     console.log(`[Compress] Compression complete!`)
@@ -186,6 +208,7 @@ export async function compressImage(
     return {
       success: true,
       compressedPath: outputPath,
+      thumbnailPath,
       width: outputMetadata.width || 0,
       height: outputMetadata.height || 0,
       fileSize: finalBuffer.length
@@ -195,6 +218,7 @@ export async function compressImage(
     return {
       success: false,
       compressedPath: '',
+      thumbnailPath: '',
       width: 0,
       height: 0,
       fileSize: 0,

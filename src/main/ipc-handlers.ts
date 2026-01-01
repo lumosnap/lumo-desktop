@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow, shell } from 'electron'
-import { isConfigured, getStorageLocation, setStorageLocation, getConfig } from './config'
+import { isConfigured, getStorageLocation, setStorageLocation, getConfig, getMasterFolder, setMasterFolder } from './config'
 import {
   getFreeSpace,
   createAlbumFolder,
@@ -20,7 +20,7 @@ import {
 } from './database'
 import { albumsApi, profileApi } from './api-client'
 import { uploadPipeline } from './pipeline'
-import { existsSync, rmSync, copyFileSync } from 'fs'
+import { existsSync, rmSync, copyFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { watcherService } from './watcher'
 import { startAuth } from './oauth-handler'
@@ -224,6 +224,73 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   )
 
+  // ==================== Master Folder Handlers ====================
+
+  ipcMain.handle('config:getMasterFolder', () => {
+    return getMasterFolder()
+  })
+
+  ipcMain.handle('config:setMasterFolder', async (_event, path: string) => {
+    try {
+      if (!existsSync(path)) {
+        throw new Error('Selected path does not exist')
+      }
+
+      setMasterFolder(path)
+      watcherService.watchMasterFolder(path)
+
+      return { success: true }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to set master folder'
+      console.error('[IPC] Failed to set master folder:', message)
+      return { success: false, error: message }
+    }
+  })
+
+  ipcMain.handle('config:scanMasterFolder', () => {
+    try {
+      const masterFolder = getMasterFolder()
+      if (!masterFolder || !existsSync(masterFolder)) {
+        return { success: false, error: 'Master folder not configured', folders: [] }
+      }
+
+      // Read all directories in master folder
+      const entries = readdirSync(masterFolder, { withFileTypes: true })
+      const folders = entries
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+        .map((entry) => {
+          const folderPath = join(masterFolder, entry.name)
+          const images = scanImagesInFolder(folderPath)
+          return {
+            name: entry.name,
+            path: folderPath,
+            imageCount: images.length
+          }
+        })
+
+      return { success: true, folders }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to scan master folder'
+      console.error('[IPC] Failed to scan master folder:', message)
+      return { success: false, error: message, folders: [] }
+    }
+  })
+
+  // Open folder in system file manager
+  ipcMain.handle('shell:openFolder', async (_event, folderPath: string) => {
+    try {
+      if (!existsSync(folderPath)) {
+        return { success: false, error: 'Folder does not exist' }
+      }
+      await shell.openPath(folderPath)
+      return { success: true }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to open folder'
+      console.error('[IPC] Failed to open folder:', message)
+      return { success: false, error: message }
+    }
+  })
+
   // ==================== Album Handlers ====================
 
   ipcMain.handle(
@@ -266,7 +333,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           sourceFolderPath: data.sourceFolderPath,
           totalImages: 0,
           lastSyncedAt: null,
-          needsSync: 0
+          needsSync: 0,
+          isOrphaned: 0
         })
 
         // Scan source folder for images

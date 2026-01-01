@@ -15,6 +15,7 @@ export interface Album {
   totalImages: number
   lastSyncedAt: string | null
   needsSync: number // 0 or 1 (SQLite boolean)
+  isOrphaned: number // 0 or 1 - true if source folder was deleted
   createdAt: string
 }
 
@@ -72,6 +73,18 @@ export function initDatabase(): void {
     }
   } catch (error) {
     console.error('[Database] Album migration failed:', error)
+  }
+
+  // Migration: Add isOrphaned column if it doesn't exist
+  try {
+    const albumInfo = db.pragma('table_info(albums)') as Array<{ name: string }>
+    const hasIsOrphaned = albumInfo.some((col) => col.name === 'isOrphaned')
+    if (!hasIsOrphaned) {
+      console.log('[Database] Adding isOrphaned column to albums table')
+      db.exec('ALTER TABLE albums ADD COLUMN isOrphaned INTEGER DEFAULT 0')
+    }
+  } catch (error) {
+    console.error('[Database] isOrphaned migration failed:', error)
   }
 
   // Create indexes
@@ -171,6 +184,13 @@ export function getAllAlbums(): Album[] {
 
   const stmt = db.prepare('SELECT * FROM albums ORDER BY createdAt DESC')
   return stmt.all() as Album[]
+}
+
+export function getAlbumBySourcePath(sourceFolderPath: string): Album | null {
+  if (!db) throw new Error('Database not initialized')
+
+  const stmt = db.prepare('SELECT * FROM albums WHERE sourceFolderPath = ?')
+  return stmt.get(sourceFolderPath) as Album | null
 }
 
 export function updateAlbum(id: string, updates: Partial<Album>): void {

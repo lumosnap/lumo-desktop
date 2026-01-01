@@ -92,6 +92,19 @@ const formattedEventDate = computed(() => {
   })
 })
 
+// Get thumbnail path for an image (stored in .thumbnails subfolder)
+// Falls back to original if thumbnail doesn't exist
+function getThumbnailPath(localFilePath: string): string {
+  // localFilePath: /path/to/album/image.webp
+  // thumbnail:     /path/to/album/.thumbnails/image.webp
+  const lastSlash = localFilePath.lastIndexOf('/')
+  if (lastSlash === -1) return localFilePath
+  
+  const dir = localFilePath.substring(0, lastSlash)
+  const filename = localFilePath.substring(lastSlash + 1)
+  return `${dir}/.thumbnails/${filename}`
+}
+
 async function loadAlbumImages(): Promise<void> {
   loading.value = true
   error.value = null
@@ -469,11 +482,12 @@ onUnmounted(() => {
               class="group relative aspect-[4/5] rounded-xl overflow-hidden bg-slate-200 cursor-pointer shadow-sm hover:shadow-md transition-all duration-300 block"
             >
               <img
-                :src="`file://${image.localFilePath}?t=${Date.now()}`"
-                :alt="image.originalFilename"
-                loading="lazy"
-                class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-              />
+              :src="`file://${getThumbnailPath(image.localFilePath)}?t=${Date.now()}`"
+              :alt="image.originalFilename"
+              loading="lazy"
+              class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+              @error="(e) => (e.target as HTMLImageElement).src = `file://${image.localFilePath}`"
+            />
 
               <!-- Gradient Overlay -->
               <div

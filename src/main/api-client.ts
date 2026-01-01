@@ -109,6 +109,8 @@ export interface ApiUploadUrl {
   filename: string
   uploadUrl: string
   key: string
+  thumbnailUploadUrl: string
+  thumbnailKey: string
 }
 
 export interface ApiImage {
@@ -171,6 +173,8 @@ export interface ApiProfile {
   businessName: string | null
   phone: string | null
   storageUsed: number | null
+  totalImages: number
+  globalMaxImages: number
   createdAt: string
   updatedAt: string
 }
@@ -284,10 +288,16 @@ export const albumsApi = {
    * Create a new album on the server
    */
   async create(data: { title: string; eventDate?: string | null }): Promise<ApiAlbum> {
-    console.log('[API] Creating album:', data)
+    // Only send title (required) and optionally eventDate if it has a value
+    const body: { title: string; eventDate?: string } = { title: data.title }
+    if (data.eventDate) {
+      body.eventDate = data.eventDate
+    }
+    
+    console.log('[API] Creating album:', body)
     const response = await apiFetch<ApiResponse<ApiAlbum>>('/albums', {
       method: 'POST',
-      body: data
+      body
     })
     if (!response.data) {
       throw new Error('No data in response')
@@ -331,12 +341,13 @@ export const albumsApi = {
     images: Array<{
       filename: string
       b2FileId: string
+      key: string
       fileSize: number
       width: number
       height: number
       uploadOrder: number
       thumbnailB2FileId?: string
-      thumbnailB2FileName?: string
+      thumbnailKey?: string
     }>
   ): Promise<Array<{ id: number; originalFilename: string; b2FileName: string }>> {
     console.log(`[API] Confirming upload of ${images.length} images in album ${albumId}`)

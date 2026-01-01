@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import Button from '../components/ui/Button.vue'
 import { useAuthStore } from '../stores/auth'
+import { useProfileStore } from '../stores/profile'
 import {
   User,
   CreditCard,
@@ -16,11 +17,14 @@ import {
   AlertTriangle,
   X,
   Phone,
-  Loader2
+  Loader2,
+  ImageIcon,
+  ArrowLeft
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const profileStore = useProfileStore()
 
 const activeTab = ref('profile')
 
@@ -30,7 +34,7 @@ const tabs = [
   { id: 'billing', label: 'Billing & Plan', icon: CreditCard }
 ]
 
-// Profile data from API
+// Profile data from API (local editable fields only)
 const profileData = ref<{
   businessName: string
   phone: string
@@ -64,14 +68,15 @@ async function loadProfileData(): Promise<void> {
   isLoadingProfile.value = true
   profileError.value = null
   try {
-    const result = await window.api.profile.get()
-    if (result.success && result.data) {
+    // Use the profile store to fetch data (syncs with other components)
+    await profileStore.fetchProfile(true) // force refresh
+    if (profileStore.profile) {
       profileData.value = {
-        businessName: result.data.businessName || '',
-        phone: result.data.phone || ''
+        businessName: profileStore.profile.businessName || '',
+        phone: profileStore.profile.phone || ''
       }
-    } else {
-      profileError.value = result.error || 'Failed to load profile'
+    } else if (profileStore.error) {
+      profileError.value = profileStore.error
     }
   } catch (err: unknown) {
     profileError.value = err instanceof Error ? err.message : 'Failed to load profile'
@@ -91,6 +96,8 @@ async function saveProfile(): Promise<void> {
     })
     if (result.success) {
       profileSaveSuccess.value = true
+      // Refresh the store to sync changes across components
+      await profileStore.fetchProfile(true)
       setTimeout(() => {
         profileSaveSuccess.value = false
       }, 3000)
@@ -215,6 +222,15 @@ onMounted(() => {
 
         <!-- Spacer -->
         <div class="flex-1"></div>
+
+        <!-- Back to Albums -->
+        <button
+          class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent hover:border-slate-200"
+          @click="router.push('/')"
+        >
+          <ArrowLeft class="h-4 w-4" />
+          <span>Back to Albums</span>
+        </button>
 
         <!-- Logout Button -->
         <button
@@ -553,23 +569,30 @@ onMounted(() => {
             <div class="bg-white rounded-2xl border border-slate-200 p-6">
               <h3 class="font-semibold text-slate-900 mb-4">Current Usage</h3>
               <div class="space-y-4">
+                <!-- Images Usage -->
                 <div>
-                  <div class="flex justify-between text-sm mb-2">
-                    <span class="text-slate-600">Storage</span>
-                    <span class="font-medium text-slate-900">4.2 GB / 50 GB</span>
+                  <div class="flex items-center gap-3 mb-3">
+                    <div class="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
+                      <ImageIcon class="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <div class="flex-1">
+                      <div class="flex justify-between text-sm mb-1">
+                        <span class="text-slate-600 font-medium">Images</span>
+                        <span class="font-semibold text-slate-900">
+                          {{ (profileStore.profile?.totalImages || 0).toLocaleString() }} / {{ (profileStore.profile?.globalMaxImages || 50000).toLocaleString() }}
+                        </span>
+                      </div>
+                      <div class="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          class="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
+                          :style="{ width: `${Math.min(((profileStore.profile?.totalImages || 0) / (profileStore.profile?.globalMaxImages || 50000)) * 100, 100)}%` }"
+                        ></div>
+                      </div>
+                    </div>
                   </div>
-                  <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div class="h-full w-[8%] bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full"></div>
-                  </div>
-                </div>
-                <div>
-                  <div class="flex justify-between text-sm mb-2">
-                    <span class="text-slate-600">Albums</span>
-                    <span class="font-medium text-slate-900">12 / Unlimited</span>
-                  </div>
-                  <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div class="h-full w-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full"></div>
-                  </div>
+                  <p class="text-xs text-slate-400 ml-[52px]">
+                    {{ Math.round(((profileStore.profile?.totalImages || 0) / (profileStore.profile?.globalMaxImages || 50000)) * 100) }}% of your image quota used
+                  </p>
                 </div>
               </div>
             </div>

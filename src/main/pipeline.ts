@@ -18,10 +18,18 @@ class UploadPipeline {
   private compressionConcurrency = 4
   private uploadBatchSize = 100
   private isRunning = false
+  private queuedAlbums: Set<string> = new Set()
+  private mainWindowRef: BrowserWindow | null = null
 
   async startPipeline(albumId: string, mainWindow: BrowserWindow | null): Promise<void> {
+    // Store mainWindow reference for queue processing
+    if (mainWindow) {
+      this.mainWindowRef = mainWindow
+    }
+
     if (this.isRunning) {
-      console.log(`[Pipeline] Pipeline already running for album ${albumId}`)
+      console.log(`[Pipeline] Pipeline already running, queuing album ${albumId}`)
+      this.queuedAlbums.add(albumId)
       return
     }
 
@@ -89,6 +97,21 @@ class UploadPipeline {
     } finally {
       this.isRunning = false
       console.log(`[Pipeline] Pipeline isRunning flag reset`)
+
+      // Process next queued album
+      if (this.queuedAlbums.size > 0) {
+        const nextAlbumId = this.queuedAlbums.values().next().value
+        if (nextAlbumId) {
+          this.queuedAlbums.delete(nextAlbumId)
+          console.log(`[Pipeline] Processing next queued album: ${nextAlbumId}`)
+          // Use setImmediate to avoid stack overflow with many queued albums
+          setImmediate(() => {
+            this.startPipeline(nextAlbumId, this.mainWindowRef).catch((error) => {
+              console.error(`[Pipeline] Queued pipeline failed for ${nextAlbumId}:`, error)
+            })
+          })
+        }
+      }
     }
   }
 
@@ -149,6 +172,9 @@ class UploadPipeline {
         localId: number
         filename: string
         b2FileId: string
+        key: string
+        thumbnailB2FileId: string
+        thumbnailKey: string
         fileSize: number
         width: number
         height: number
@@ -172,13 +198,33 @@ class UploadPipeline {
                 mainWindow.webContents.send('upload:progress', this.getProgress(albumId))
               }
 
+              // Upload main image
               const result = await uploadToPresignedUrl(signedUrl.uploadUrl, img.localFilePath)
 
               if (result.success && result.b2FileId) {
+                // Upload thumbnail
+                let thumbnailB2FileId = ''
+                if (img.thumbnailPath && signedUrl.thumbnailUploadUrl) {
+                  console.log(`[Pipeline] Uploading thumbnail for ${img.originalFilename}`)
+                  const thumbResult = await uploadToPresignedUrl(
+                    signedUrl.thumbnailUploadUrl,
+                    img.thumbnailPath
+                  )
+                  if (thumbResult.success && thumbResult.b2FileId) {
+                    thumbnailB2FileId = thumbResult.b2FileId
+                    console.log(`[Pipeline] Thumbnail uploaded successfully: ${thumbnailB2FileId}`)
+                  } else {
+                    console.warn(`[Pipeline] Thumbnail upload failed for ${img.originalFilename}`)
+                  }
+                }
+
                 uploadedImages.push({
-                  localId: img.id, // Track local ID for matching after confirm
+                  localId: img.id,
                   filename: signedUrl.filename,
                   b2FileId: result.b2FileId,
+                  key: signedUrl.key,
+                  thumbnailB2FileId,
+                  thumbnailKey: signedUrl.thumbnailKey || '',
                   fileSize: img.fileSize,
                   width: img.width,
                   height: img.height,
@@ -208,14 +254,17 @@ class UploadPipeline {
       if (uploadedImages.length > 0) {
         console.log(`[Pipeline] Batch: Confirming ${uploadedImages.length} uploads...`)
 
-        // Send only the fields the API expects
+        // Send only the fields the API expects (including thumbnail fields)
         const confirmPayload = uploadedImages.map((u) => ({
           filename: u.filename,
           b2FileId: u.b2FileId,
+          key: u.key,
           fileSize: u.fileSize,
           width: u.width,
           height: u.height,
-          uploadOrder: u.uploadOrder
+          uploadOrder: u.uploadOrder,
+          thumbnailB2FileId: u.thumbnailB2FileId || undefined,
+          thumbnailKey: u.thumbnailKey || undefined
         }))
 
         const confirmed = await albumsApi.confirmUpload(albumId, confirmPayload)
@@ -275,6 +324,7 @@ class UploadPipeline {
 
         // Update in-memory object for next steps
         image.localFilePath = result.compressedPath
+        image.thumbnailPath = result.thumbnailPath
         image.fileSize = result.fileSize
         image.width = result.width
         image.height = result.height

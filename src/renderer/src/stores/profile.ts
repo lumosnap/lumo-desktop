@@ -7,6 +7,8 @@ interface ProfileData {
   businessName: string | null
   phone: string | null
   storageUsed: number | null
+  totalImages?: number
+  globalMaxImages?: number
   createdAt: string
   updatedAt: string
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import { LayoutGrid, Camera } from 'lucide-vue-next'
+import { LayoutGrid, User } from 'lucide-vue-next'
 
 const route = useRoute()
 
@@ -10,31 +10,34 @@ const isActive = (path: string) => route.path.startsWith(path)
 <template>
   <div class="fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
     <div
-      class="flex items-center gap-2 rounded-full bg-gradient-to-r from-[#1a1a1f]/90 to-[#1f1f24]/90 px-4 py-3 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl"
+      class="flex items-center gap-1.5 rounded-2xl bg-white/95 px-2 py-2 shadow-xl shadow-slate-900/10 ring-1 ring-slate-200/50 backdrop-blur-xl"
     >
       <!-- Albums Button -->
       <router-link
         to="/albums"
-        class="group relative flex h-11 w-11 items-center justify-center rounded-full transition-all duration-200"
-        :class="isActive('/albums') ? 'bg-white/10' : 'hover:bg-white/5'"
+        class="group relative flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200"
+        :class="isActive('/albums') 
+          ? 'bg-gradient-to-r from-indigo-500 to-purple-500 shadow-lg shadow-indigo-500/25' 
+          : 'hover:bg-slate-100'"
       >
         <LayoutGrid
           class="h-5 w-5 transition-colors"
-          :class="isActive('/albums') ? 'text-white' : 'text-white/60 group-hover:text-white'"
+          :class="isActive('/albums') ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'"
         />
       </router-link>
 
       <!-- Profile Button -->
       <router-link
         to="/profile"
-        class="group relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-full ring-2 transition-all duration-200"
-        :class="isActive('/profile') ? 'ring-white' : 'ring-transparent hover:ring-white/30'"
+        class="group relative flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200"
+        :class="isActive('/profile') 
+          ? 'bg-gradient-to-r from-indigo-500 to-purple-500 shadow-lg shadow-indigo-500/25' 
+          : 'hover:bg-slate-100'"
       >
-        <div
-          class="flex h-full w-full items-center justify-center bg-gradient-to-br from-[var(--color-turquoise)] to-[var(--color-deep-teal)]"
-        >
-          <Camera class="h-5 w-5 text-white" />
-        </div>
+        <User
+          class="h-5 w-5 transition-colors"
+          :class="isActive('/profile') ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'"
+        />
       </router-link>
     </div>
   </div>
