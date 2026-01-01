@@ -16,7 +16,8 @@ import {
   createImage,
   getAlbumImages,
   deleteImages,
-  updateAlbum
+  updateAlbum,
+  updateImage
 } from './database'
 import { albumsApi, profileApi } from './api-client'
 import { uploadPipeline } from './pipeline'
@@ -561,7 +562,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       
       console.log(`[IPC] Fetching favorites from API...`)
       try {
-        favorites = await albumsApi.getFavorites(albumId)
+        const favoritesResult = await albumsApi.getFavorites(albumId)
+        favorites = favoritesResult.data
         console.log(`[IPC] Received ${favorites.length} favorited images from API`)
       } catch {
         // Album may not exist on server yet (offline-first), just return empty favorites
@@ -914,9 +916,36 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           `[Main] Sync: Modified files:`,
           changes.modified.map((f: any) => f.filename)
         )
-        console.log(
-          `[Main] Sync: Note: Modified file handling not yet implemented - skipping for now`
-        )
+
+        // For each modified file:
+        // 1. Update the local mtime/fileSize in database
+        // 2. Reset uploadStatus to 'pending' so pipeline will re-process
+        // The pipeline will handle compression, upload, and calling PATCH endpoint
+        for (const file of changes.modified) {
+          const localFilePath = join(album.localFolderPath, file.filename)
+          const sourceFilePath = join(album.sourceFolderPath, file.filename)
+
+          console.log(`[Main] Sync: Updating modified file ${file.filename} (id: ${file.existingId})`)
+
+          // Copy updated source file to local storage (overwrite existing)
+          try {
+            copyFileSync(sourceFilePath, localFilePath)
+            console.log(`[Main] Sync: Copied updated file to ${localFilePath}`)
+          } catch (err) {
+            console.error(`[Main] Sync: Failed to copy updated file ${file.filename}:`, err)
+            continue
+          }
+
+          // Update database record: reset status to pending, update mtime/size
+          updateImage(file.existingId, {
+            uploadStatus: 'pending',
+            mtime: file.mtime,
+            fileSize: file.size,
+            width: file.width || 0,
+            height: file.height || 0
+          })
+          console.log(`[Main] Sync: Reset image ${file.existingId} to pending for re-upload`)
+        }
       }
 
       // Update album metadata
@@ -933,9 +962,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       // Clear scan cache for this folder to ensure fresh data
       clearScanCache(album.sourceFolderPath)
 
-      // Start upload for new images
-      if (changes.new && changes.new.length > 0) {
-        console.log('[Main] Sync: Triggering upload pipeline for new images...')
+      // Start upload for new and modified images (both are now marked as 'pending')
+      const hasPendingImages = (changes.new && changes.new.length > 0) || (changes.modified && changes.modified.length > 0)
+      if (hasPendingImages) {
+        console.log('[Main] Sync: Triggering upload pipeline for new/modified images...')
         uploadPipeline.startPipeline(albumId, mainWindow).catch((error) => {
           console.error('[Main] Sync: Pipeline trigger failed:', error)
         })
@@ -971,14 +1001,14 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
-  ipcMain.handle('api:getFavorites', async (_event, albumId: string) => {
+  ipcMain.handle('api:getFavorites', async (_event, albumId: string, clientName?: string) => {
     try {
-      const favorites = await albumsApi.getFavorites(albumId)
-      return { success: true, favorites }
+      const result = await albumsApi.getFavorites(albumId, clientName)
+      return { success: true, favorites: result.data, clientNames: result.clientNames }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       console.error('Failed to get favorites:', error)
-      return { success: false, error: message, favorites: [] }
+      return { success: false, error: message, favorites: [], clientNames: [] }
     }
   })
 

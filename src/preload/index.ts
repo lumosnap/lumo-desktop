@@ -70,7 +70,7 @@ const api = {
   api: {
     generateShareLink: (albumId: string): Promise<any> =>
       ipcRenderer.invoke('api:generateShareLink', albumId),
-    getFavorites: (albumId: string): Promise<any> => ipcRenderer.invoke('api:getFavorites', albumId)
+    getFavorites: (albumId: string, clientName?: string): Promise<any> => ipcRenderer.invoke('api:getFavorites', albumId, clientName)
   },
   profile: {
     get: (): Promise<{

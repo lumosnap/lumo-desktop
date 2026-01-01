@@ -20,7 +20,7 @@ console.log('[API] App domain:', APP_DOMAIN)
 async function apiFetch<T>(
   endpoint: string,
   options: {
-    method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
+    method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
     body?: object
     headers?: Record<string, string>
   } = {}
@@ -159,10 +159,17 @@ export interface ApiFavoriteImage {
   }>
 }
 
+// Favorites response with client names for filtering
+export interface ApiFavoritesResponse {
+  data: ApiFavoriteImage[]
+  clientNames: string[]
+}
+
 export interface ApiResponse<T> {
   success: boolean
   message: string
   data?: T
+  clientNames?: string[]
 }
 
 // ==================== Profile Types ====================
@@ -382,15 +389,19 @@ export const albumsApi = {
 
   /**
    * Get favorites for an album (new format with enriched image data)
+   * Returns both favorites data and list of unique client names for filtering
    */
-  async getFavorites(albumId: string, clientName?: string): Promise<ApiFavoriteImage[]> {
-    console.log(`[API] Getting favorites for album ${albumId}`)
+  async getFavorites(albumId: string, clientName?: string): Promise<ApiFavoritesResponse> {
+    console.log(`[API] Getting favorites for album ${albumId}${clientName ? ` (filter: ${clientName})` : ''}`)
     const endpoint = clientName
       ? `/albums/${albumId}/favorites?clientName=${encodeURIComponent(clientName)}`
       : `/albums/${albumId}/favorites`
     const response = await apiFetch<ApiResponse<ApiFavoriteImage[]>>(endpoint)
-    console.log(`[API] Received ${response.data?.length || 0} favorites`)
-    return response.data || []
+    console.log(`[API] Received ${response.data?.length || 0} favorites, ${response.clientNames?.length || 0} unique clients`)
+    return {
+      data: response.data || [],
+      clientNames: response.clientNames || []
+    }
   },
 
   /**
@@ -409,6 +420,29 @@ export const albumsApi = {
       throw new Error('No data in response')
     }
     return response.data
+  },
+
+  /**
+   * Update existing images with new file references (for modified files)
+   * Called after re-uploading modified files to update their B2 file IDs
+   */
+  async updateImages(
+    albumId: string,
+    images: Array<{
+      imageId: number
+      b2FileId: string
+      b2FileName: string
+      fileSize: number
+      width: number
+      height: number
+    }>
+  ): Promise<void> {
+    console.log(`[API] Updating ${images.length} images in album ${albumId}`)
+    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/images`, {
+      method: 'PATCH',
+      body: { images }
+    })
+    console.log('[API] Images updated successfully')
   }
 }
 

@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: lumo-desk
+appId: com.lumosnap.desktop
+productName: Lumosnap
 directories:
   buildResources: build
 files:
@@ -14,7 +14,7 @@ asarUnpack:
   - '**/node_modules/sharp/**/*'
   - '**/node_modules/@img/**/*'
 win:
-  executableName: lumo-desk
+  executableName: Lumosnap
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -41,5 +41,5 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: true
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: Lumosnap
+  url: https://lumosnap.com/auto-updates

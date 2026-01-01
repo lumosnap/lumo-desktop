@@ -293,6 +293,13 @@ export function getImagesByStatus(albumId: string, status: Image['uploadStatus']
   return stmt.all(albumId, status) as Image[]
 }
 
+export function getImageByFilename(albumId: string, filename: string): Image | null {
+  if (!db) throw new Error('Database not initialized')
+
+  const stmt = db.prepare('SELECT * FROM images WHERE albumId = ? AND originalFilename = ?')
+  return stmt.get(albumId, filename) as Image | null
+}
+
 export function getImageStats(albumId: string): {
   total: number
   pending: number

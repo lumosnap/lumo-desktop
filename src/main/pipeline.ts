@@ -170,6 +170,7 @@ class UploadPipeline {
       // Track uploaded images with their local IDs for reliable matching
       const uploadedImages: Array<{
         localId: number
+        serverId: number | null  // If set, this is a modified file that needs PATCH
         filename: string
         b2FileId: string
         key: string
@@ -220,6 +221,7 @@ class UploadPipeline {
 
                 uploadedImages.push({
                   localId: img.id,
+                  serverId: img.serverId,  // Track if this was a modified file
                   filename: signedUrl.filename,
                   b2FileId: result.b2FileId,
                   key: signedUrl.key,
@@ -250,44 +252,76 @@ class UploadPipeline {
         }
       }
 
-      // 3. Confirm Step
+      // 3. Confirm Step - handle new and modified images differently
       if (uploadedImages.length > 0) {
-        console.log(`[Pipeline] Batch: Confirming ${uploadedImages.length} uploads...`)
+        // Split into new images (no serverId) and modified images (has serverId)
+        const newImages = uploadedImages.filter((u) => u.serverId === null)
+        const modifiedImages = uploadedImages.filter((u) => u.serverId !== null)
 
-        // Send only the fields the API expects (including thumbnail fields)
-        const confirmPayload = uploadedImages.map((u) => ({
-          filename: u.filename,
-          b2FileId: u.b2FileId,
-          key: u.key,
-          fileSize: u.fileSize,
-          width: u.width,
-          height: u.height,
-          uploadOrder: u.uploadOrder,
-          thumbnailB2FileId: u.thumbnailB2FileId || undefined,
-          thumbnailKey: u.thumbnailKey || undefined
-        }))
+        // Confirm new uploads
+        if (newImages.length > 0) {
+          console.log(`[Pipeline] Batch: Confirming ${newImages.length} new uploads...`)
 
-        const confirmed = await albumsApi.confirmUpload(albumId, confirmPayload)
+          const confirmPayload = newImages.map((u) => ({
+            filename: u.filename,
+            b2FileId: u.b2FileId,
+            key: u.key,
+            fileSize: u.fileSize,
+            width: u.width,
+            height: u.height,
+            uploadOrder: u.uploadOrder,
+            thumbnailB2FileId: u.thumbnailB2FileId || undefined,
+            thumbnailKey: u.thumbnailKey || undefined
+          }))
 
-        // Match confirmed results back to local images by filename
-        for (const conf of confirmed) {
-          const uploaded = uploadedImages.find((u) => u.filename === conf.originalFilename)
-          if (uploaded) {
-            updateImage(uploaded.localId, {
-              uploadStatus: 'complete',
-              serverId: conf.id
-            })
+          const confirmed = await albumsApi.confirmUpload(albumId, confirmPayload)
+
+          // Match confirmed results back to local images by filename
+          for (const conf of confirmed) {
+            const uploaded = newImages.find((u) => u.filename === conf.originalFilename)
+            if (uploaded) {
+              updateImage(uploaded.localId, {
+                uploadStatus: 'complete',
+                serverId: conf.id
+              })
+              console.log(
+                `[Pipeline] Image ${uploaded.localId} marked complete with serverId ${conf.id}`
+              )
+              if (mainWindow) {
+                mainWindow.webContents.send('upload:progress', this.getProgress(albumId))
+              }
+            } else {
+              console.warn(
+                `[Pipeline] Could not find local image for confirmed file: ${conf.originalFilename}`
+              )
+            }
+          }
+        }
+
+        // Update modified images via PATCH
+        if (modifiedImages.length > 0) {
+          console.log(`[Pipeline] Batch: Updating ${modifiedImages.length} modified images via PATCH...`)
+
+          const updatePayload = modifiedImages.map((u) => ({
+            imageId: u.serverId!,
+            b2FileId: u.b2FileId,
+            b2FileName: u.key,
+            fileSize: u.fileSize,
+            width: u.width,
+            height: u.height
+          }))
+
+          await albumsApi.updateImages(albumId, updatePayload)
+
+          // Mark modified images as complete
+          for (const uploaded of modifiedImages) {
+            updateImage(uploaded.localId, { uploadStatus: 'complete' })
             console.log(
-              `[Pipeline] Image ${uploaded.localId} marked complete with serverId ${conf.id}`
+              `[Pipeline] Modified image ${uploaded.localId} (serverId ${uploaded.serverId}) updated successfully`
             )
-            // Send progress update after each image is marked complete
             if (mainWindow) {
               mainWindow.webContents.send('upload:progress', this.getProgress(albumId))
             }
-          } else {
-            console.warn(
-              `[Pipeline] Could not find local image for confirmed file: ${conf.originalFilename}`
-            )
           }
         }
       }

@@ -67,7 +67,7 @@ declare global {
       }
       api: {
         generateShareLink: (albumId: string) => Promise<any>
-        getFavorites: (albumId: string) => Promise<any>
+        getFavorites: (albumId: string, clientName?: string) => Promise<any>
       }
       profile: {
         get: () => Promise<{

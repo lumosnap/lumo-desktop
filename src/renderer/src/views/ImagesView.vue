@@ -16,7 +16,8 @@ import {
   Link2,
   FolderOpen,
   MessageSquare,
-  CheckCircle2
+  CheckCircle2,
+  ChevronDown
 } from 'lucide-vue-next'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import 'photoswipe/style.css'
@@ -43,6 +44,7 @@ interface Image {
   favoriteCount?: number
   notesCount?: number
   comments?: Comment[]
+  favoritedBy?: string[] // List of client names who favorited this image
 }
 
 interface Album {
@@ -58,6 +60,10 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const showFavoritesOnly = ref(false)
 const gridLoading = ref(false)
+
+// Client Name Filter State
+const clientNames = ref<string[]>([])
+const selectedClientName = ref<string>('')
 
 // Share Link State
 const showShareModal = ref(false)
@@ -123,6 +129,9 @@ async function loadAlbumImages(): Promise<void> {
     } else {
       error.value = imagesResult.error || 'Failed to load images'
     }
+
+    // Load client names for filter dropdown (fetch without filter first)
+    await loadFavorites()
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to load album'
     error.value = message
@@ -132,6 +141,66 @@ async function loadAlbumImages(): Promise<void> {
     await nextTick()
     initLightbox()
   }
+}
+
+// Load favorites from API and update images with favoritedBy info
+async function loadFavorites(clientNameFilter?: string): Promise<void> {
+  try {
+    const result = await window.api.api.getFavorites(albumId, clientNameFilter)
+    if (result.success) {
+      // Update clientNames if not filtering (to get all clients)
+      if (!clientNameFilter && result.clientNames) {
+        clientNames.value = result.clientNames
+      }
+
+      // Build a map of filename -> client names who favorited
+      const favoritedByMap = new Map<string, string[]>()
+      if (result.favorites) {
+        for (const fav of result.favorites) {
+          const baseName = getBaseName(fav.originalFilename)
+          // Extract unique client names from comments
+          const clients = fav.comments
+            ?.map((c: Comment) => c.clientName)
+            .filter((name: string, idx: number, arr: string[]) => arr.indexOf(name) === idx) || []
+          favoritedByMap.set(baseName, clients)
+        }
+      }
+
+      // Update images with favoritedBy info
+      images.value = images.value.map((img) => {
+        const imgBaseName = getBaseName(img.originalFilename)
+        const favoritedBy = favoritedByMap.get(imgBaseName)
+        return {
+          ...img,
+          favoritedBy: favoritedBy || img.favoritedBy
+        }
+      })
+    }
+  } catch (err) {
+    console.error('Failed to load favorites:', err)
+  }
+}
+
+// Helper to get base filename without extension
+function getBaseName(filename: string): string {
+  const lastDot = filename.lastIndexOf('.')
+  return lastDot > 0 ? filename.substring(0, lastDot) : filename
+}
+
+// Handle client filter change
+async function onClientFilterChange(): Promise<void> {
+  gridLoading.value = true
+  await loadFavorites(selectedClientName.value || undefined)
+
+  // Destroy and reinitialize lightbox
+  if (lightbox) {
+    lightbox.destroy()
+    lightbox = null
+  }
+
+  await nextTick()
+  initLightbox()
+  gridLoading.value = false
 }
 
 async function toggleShowFavorites(): Promise<void> {
@@ -400,6 +469,24 @@ onUnmounted(() => {
               }}</span>
             </button>
 
+            <!-- Client Filter Dropdown -->
+            <div v-if="clientNames.length > 0" class="relative">
+              <label class="text-xs font-medium text-slate-500 mb-1.5 block">Filter by Client</label>
+              <div class="relative">
+                <select
+                  v-model="selectedClientName"
+                  @change="onClientFilterChange"
+                  class="w-full appearance-none bg-white border border-slate-200 rounded-xl px-4 py-2.5 pr-10 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 cursor-pointer transition-all"
+                >
+                  <option value="">All Clients ({{ clientNames.length }})</option>
+                  <option v-for="name in clientNames" :key="name" :value="name">
+                    {{ name }}
+                  </option>
+                </select>
+                <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
             <!-- Share Button -->
             <button
               class="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5"
@@ -497,12 +584,24 @@ onUnmounted(() => {
               <!-- Favorite Badge (Top Right) -->
               <div
                 v-if="image.isFavorite"
-                class="absolute top-3 right-3 h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-rose-500 text-white shadow-lg z-10"
+                class="absolute top-3 right-3 group/fav z-10"
               >
-                <Heart class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
-                <span v-if="(image.favoriteCount || 0) > 0" class="text-xs font-bold">{{
-                  image.favoriteCount
-                }}</span>
+                <div class="h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-rose-500 text-white shadow-lg">
+                  <Heart class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
+                  <span v-if="(image.favoriteCount || 0) > 0" class="text-xs font-bold">{{
+                    image.favoriteCount
+                  }}</span>
+                </div>
+                <!-- Who favorited tooltip -->
+                <div
+                  v-if="image.favoritedBy && image.favoritedBy.length > 0"
+                  class="absolute top-full right-0 mt-1.5 opacity-0 group-hover/fav:opacity-100 transition-opacity pointer-events-none"
+                >
+                  <div class="bg-slate-800/95 backdrop-blur-sm text-white text-xs rounded-lg px-3 py-2 shadow-xl whitespace-nowrap">
+                    <div class="font-medium text-slate-300 mb-1">Favorited by:</div>
+                    <div v-for="name in image.favoritedBy" :key="name" class="text-white">{{ name }}</div>
+                  </div>
+                </div>
               </div>
 
               <!-- Notes Badge (Top Left) -->
