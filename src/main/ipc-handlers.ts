@@ -16,7 +16,9 @@ import {
   createImage,
   getAlbumImages,
   deleteImages,
-  updateAlbum
+  updateAlbum,
+  updateImage,
+  getWorkflowImages
 } from './database'
 import { albumsApi, profileApi } from './api-client'
 import { uploadPipeline } from './pipeline'
@@ -355,7 +357,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
             mtime: file.mtime,
             sourceFileHash: null,
             uploadStatus: 'pending',
-            uploadOrder: index
+            uploadOrder: index,
+            localNotes: null,
+            localTodoStatus: null
           })
         })
 
@@ -602,6 +606,44 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       return { success: false, error: message, images: [] }
     }
   })
+
+  ipcMain.handle('album:getWorkflowImages', async () => {
+    console.log('[IPC] album:getWorkflowImages called')
+    try {
+      const images = getWorkflowImages()
+      return { success: true, images }
+    } catch (error: any) {
+      console.error('[IPC] Failed to get workflow images:', error)
+      return { success: false, error: error.message, images: [] }
+    }
+  })
+
+  ipcMain.handle(
+    'album:updateImageLocalData',
+    async (
+      _event,
+      data: {
+        imageId: number
+        localNotes?: string | null
+        localTodoStatus?: 'normal' | 'needs-work' | 'working' | 'done' | null
+      }
+    ) => {
+      try {
+        const { imageId, localNotes, localTodoStatus } = data
+        const updates: any = {}
+        if (localNotes !== undefined) updates.localNotes = localNotes
+        if (localTodoStatus !== undefined) updates.localTodoStatus = localTodoStatus
+
+        if (Object.keys(updates).length > 0) {
+          updateImage(imageId, updates)
+        }
+        return { success: true }
+      } catch (error: any) {
+        console.error('Failed to update image local data:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  )
 
   ipcMain.handle('album:deleteImage', async (_event, albumId: string, imageId: number) => {
     console.log(`[IPC] album:deleteImage called for albumId: ${albumId}, imageId: ${imageId}`)
@@ -901,7 +943,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
             mtime: file.mtime,
             sourceFileHash: null,
             uploadStatus: 'pending',
-            uploadOrder: maxOrder + index + 1
+            uploadOrder: maxOrder + index + 1,
+            localNotes: null,
+            localTodoStatus: null
           })
           console.log(`[Main] Sync: DB record created with ID: ${newImage.id}`)
         })

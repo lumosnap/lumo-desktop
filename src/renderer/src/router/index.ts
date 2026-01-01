@@ -32,6 +32,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresSetup: true }
     },
     {
+      path: '/workflow',
+      name: 'workflow',
+      component: () => import('../views/WorkflowView.vue'),
+      meta: { requiresAuth: true, requiresSetup: true }
+    },
+    {
       path: '/login',
       name: 'login',
       component: LoginView,

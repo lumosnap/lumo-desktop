@@ -33,6 +33,8 @@ export interface Image {
   uploadStatus: 'pending' | 'compressing' | 'uploading' | 'complete' | 'failed'
   uploadOrder: number
   createdAt: string
+  localNotes: string | null
+  localTodoStatus: 'normal' | 'needs-work' | 'working' | 'done' | null
 }
 
 export function initDatabase(): void {
@@ -87,6 +89,24 @@ export function initDatabase(): void {
     console.error('[Database] isOrphaned migration failed:', error)
   }
 
+  // Migration: Add localNotes and localTodoStatus columns if they don't exist
+  try {
+    const tableInfo = db.pragma('table_info(images)') as Array<{ name: string }>
+    const hasLocalNotes = tableInfo.some((col) => col.name === 'localNotes')
+    const hasLocalTodoStatus = tableInfo.some((col) => col.name === 'localTodoStatus')
+
+    if (!hasLocalNotes) {
+      console.log('[Database] Adding localNotes column to images table')
+      db.exec('ALTER TABLE images ADD COLUMN localNotes TEXT')
+    }
+    if (!hasLocalTodoStatus) {
+      console.log('[Database] Adding localTodoStatus column to images table')
+      db.exec('ALTER TABLE images ADD COLUMN localTodoStatus TEXT')
+    }
+  } catch (error) {
+    console.error('[Database] Local notes/status migration failed:', error)
+  }
+
   // Create indexes
   createIndexes()
 }
@@ -127,6 +147,8 @@ function createTables(): void {
       uploadStatus TEXT NOT NULL,
       uploadOrder INTEGER NOT NULL,
       createdAt TEXT NOT NULL,
+      localNotes TEXT,
+      localTodoStatus TEXT,
       FOREIGN KEY (albumId) REFERENCES albums(id) ON DELETE CASCADE
     )
   `)
@@ -219,8 +241,8 @@ export function createImage(image: Omit<Image, 'id' | 'createdAt'>): Image {
   const createdAt = new Date().toISOString()
 
   const stmt = db.prepare(`
-    INSERT INTO images (albumId, serverId, originalFilename, localFilePath, fileSize, width, height, mtime, sourceFileHash, uploadStatus, uploadOrder, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO images (albumId, serverId, originalFilename, localFilePath, fileSize, width, height, mtime, sourceFileHash, uploadStatus, uploadOrder, createdAt, localNotes, localTodoStatus)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const result = stmt.run(
@@ -235,7 +257,10 @@ export function createImage(image: Omit<Image, 'id' | 'createdAt'>): Image {
     image.sourceFileHash,
     image.uploadStatus,
     image.uploadOrder,
-    createdAt
+    image.uploadOrder,
+    createdAt,
+    image.localNotes || null,
+    image.localTodoStatus || null
   )
 
   return {
@@ -291,6 +316,19 @@ export function getImagesByStatus(albumId: string, status: Image['uploadStatus']
 
   const stmt = db.prepare('SELECT * FROM images WHERE albumId = ? AND uploadStatus = ?')
   return stmt.all(albumId, status) as Image[]
+}
+
+export function getWorkflowImages(): (Image & { albumTitle: string })[] {
+  if (!db) throw new Error('Database not initialized')
+
+  const stmt = db.prepare(`
+    SELECT i.*, a.title as albumTitle
+    FROM images i
+    JOIN albums a ON i.albumId = a.id
+    WHERE i.localTodoStatus IS NOT NULL OR i.localNotes IS NOT NULL
+    ORDER BY i.createdAt DESC
+  `)
+  return stmt.all() as (Image & { albumTitle: string })[]
 }
 
 export function getImageStats(albumId: string): {

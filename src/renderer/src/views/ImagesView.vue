@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import Modal from '../components/ui/Modal.vue'
 import Button from '../components/ui/Button.vue'
-import NotesSidebar from '../components/NotesSidebar.vue'
+
 import {
   ArrowLeft,
   Heart,
@@ -16,7 +16,11 @@ import {
   Link2,
   FolderOpen,
   MessageSquare,
-  CheckCircle2
+  CheckCircle2,
+  Circle,
+  Clock,
+  AlertCircle,
+  Notebook
 } from 'lucide-vue-next'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import 'photoswipe/style.css'
@@ -43,6 +47,8 @@ interface Image {
   favoriteCount?: number
   notesCount?: number
   comments?: Comment[]
+  localNotes?: string | null
+  localTodoStatus?: 'normal' | 'needs-work' | 'working' | 'done' | null
 }
 
 interface Album {
@@ -69,6 +75,39 @@ const copied = ref(false)
 // Notes Sidebar State
 const showNotesSidebar = ref(false)
 const currentNotesImage = ref<Image | null>(null)
+
+// Local Data Edit State
+const showLocalEditModal = ref(false)
+const editingImage = ref<Image | null>(null)
+const editNotes = ref('')
+const editStatus = ref<'normal' | 'needs-work' | 'working' | 'done'>('normal')
+
+function openLocalEdit(image: Image) {
+  editingImage.value = image
+  editNotes.value = image.localNotes || ''
+  editStatus.value = image.localTodoStatus || 'normal'
+  showLocalEditModal.value = true
+}
+
+async function saveLocalData() {
+  if (!editingImage.value) return
+
+  try {
+    const result = await window.api.albums.updateImageLocalData({
+      imageId: editingImage.value.id,
+      localNotes: editNotes.value,
+      localTodoStatus: editStatus.value
+    })
+
+    if (result.success) {
+      editingImage.value.localNotes = editNotes.value
+      editingImage.value.localTodoStatus = editStatus.value
+      showLocalEditModal.value = false
+    }
+  } catch (err) {
+    console.error('Failed to save local data:', err)
+  }
+}
 
 // Lightbox
 let lightbox: PhotoSwipeLightbox | null = null
@@ -494,26 +533,70 @@ onUnmounted(() => {
                 class="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
               ></div>
 
-              <!-- Favorite Badge (Top Right) -->
-              <div
-                v-if="image.isFavorite"
-                class="absolute top-3 right-3 h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-rose-500 text-white shadow-lg z-10"
-              >
-                <Heart class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
-                <span v-if="(image.favoriteCount || 0) > 0" class="text-xs font-bold">{{
-                  image.favoriteCount
-                }}</span>
+              <!-- Top Right Actions (Favorites & Notes) -->
+              <div class="absolute top-3 right-3 flex flex-col gap-2 z-10">
+                <!-- Favorite Badge -->
+                <div
+                  v-if="image.isFavorite"
+                  class="h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-rose-500 text-white shadow-lg"
+                >
+                  <Heart class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
+                  <span v-if="(image.favoriteCount || 0) > 0" class="text-xs font-bold">{{
+                    image.favoriteCount
+                  }}</span>
+                </div>
+
+                <!-- Notes Button (Subtle) -->
+                <button
+                  v-if="(image.notesCount || 0) > 0"
+                  @click.stop.prevent="openNotesSidebar(image)"
+                  class="h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-white/90 text-slate-700 shadow-sm backdrop-blur-md hover:bg-white transition-all"
+                  title="View Notes"
+                >
+                  <MessageSquare class="h-3.5 w-3.5 shrink-0" />
+                  <span class="text-xs font-bold">{{ image.notesCount }}</span>
+                </button>
+                <!-- Show empty notes button on hover if no notes -->
+                <button
+                  v-else
+                  @click.stop.prevent="openNotesSidebar(image)"
+                  class="h-8 w-8 rounded-full flex items-center justify-center bg-white/90 text-slate-700 shadow-sm backdrop-blur-md opacity-0 group-hover:opacity-100 hover:bg-white transition-all"
+                  title="Add Note"
+                >
+                  <MessageSquare class="h-3.5 w-3.5 shrink-0" />
+                </button>
               </div>
 
-              <!-- Notes Badge (Top Left) -->
-              <button
-                v-if="(image.notesCount || 0) > 0"
-                @click.stop.prevent="openNotesSidebar(image)"
-                class="absolute top-3 left-3 h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-indigo-500 text-white shadow-md z-10 hover:bg-indigo-600 transition-colors"
-              >
-                <MessageSquare class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
-                <span class="text-xs font-bold">{{ image.notesCount }}</span>
-              </button>
+              <!-- Top Left: Status Badge / Edit Button -->
+              <div class="absolute top-3 left-3 z-10">
+                <!-- Status Badge (Always visible if set) -->
+                <button
+                  v-if="image.localTodoStatus && image.localTodoStatus !== 'normal'"
+                  @click.stop.prevent="openLocalEdit(image)"
+                  class="h-8 rounded-full flex text-xs items-center justify-center px-2 gap-1.5 min-w-8 shadow-md transition-colors hover:scale-105"
+                  :class="{
+                    'bg-amber-500 text-white': image.localTodoStatus === 'needs-work',
+                    'bg-blue-500 text-white': image.localTodoStatus === 'working',
+                    'bg-emerald-500 text-white': image.localTodoStatus === 'done'
+                  }"
+                  title="Edit Status"
+                >
+                  <AlertCircle v-if="image.localTodoStatus === 'needs-work'" class="h-3.5 w-3.5 shrink-0" />
+                  <Clock v-else-if="image.localTodoStatus === 'working'" class="h-3.5 w-3.5 shrink-0" />
+                  <CheckCircle2 v-else-if="image.localTodoStatus === 'done'" class="h-3.5 w-3.5 shrink-0" />
+                  <span class="text-[10px] font-bold uppercase tracking-wider">{{ image.localTodoStatus.replace('-', ' ') }}</span>
+                </button>
+
+                <!-- Edit Button (Visible on hover if no status) -->
+                <button
+                  v-else
+                  @click.stop.prevent="openLocalEdit(image)"
+                  class="h-8 w-8 rounded-full flex items-center justify-center bg-white/90 text-slate-700 shadow-sm backdrop-blur-md opacity-0 group-hover:opacity-100 hover:bg-white transition-all"
+                  title="Edit Status & Notes"
+                >
+                  <Notebook class="h-3.5 w-3.5" />
+                </button>
+              </div>
 
               <!-- Image Info (Bottom) - Show on hover -->
               <div
@@ -621,6 +704,48 @@ onUnmounted(() => {
             class="rounded-xl border border-red-200 bg-red-50 p-4 text-center text-sm text-red-600"
           >
             {{ shareError }}
+          </div>
+        </div>
+      </Modal>
+
+      <!-- Local Edit Modal -->
+      <Modal :show="showLocalEditModal" title="Edit Image Workflow" @close="showLocalEditModal = false">
+        <div class="space-y-6">
+          <!-- Status Selection -->
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-2">Status</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                v-for="status in ['normal', 'needs-work', 'working', 'done']"
+                :key="status"
+                @click="editStatus = status as any"
+                class="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all"
+                :class="editStatus === status ? 'bg-indigo-50 border-indigo-200 ring-1 ring-indigo-200' : 'bg-white border-slate-200 hover:bg-slate-50'"
+              >
+                <Circle v-if="status === 'normal'" class="h-4 w-4 text-slate-400" />
+                <AlertCircle v-else-if="status === 'needs-work'" class="h-4 w-4 text-amber-500" />
+                <Clock v-else-if="status === 'working'" class="h-4 w-4 text-blue-500" />
+                <CheckCircle2 v-else-if="status === 'done'" class="h-4 w-4 text-emerald-500" />
+                <span class="text-sm font-medium capitalize">{{ status.replace('-', ' ') }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Notes Input -->
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-2">Notes</label>
+            <textarea
+              v-model="editNotes"
+              rows="4"
+              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              placeholder="Add private notes for this image..."
+            ></textarea>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex justify-end gap-3">
+            <Button variant="secondary" @click="showLocalEditModal = false">Cancel</Button>
+            <Button variant="primary" @click="saveLocalData">Save Changes</Button>
           </div>
         </div>
       </Modal>

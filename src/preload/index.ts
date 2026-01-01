@@ -46,10 +46,16 @@ const api = {
     get: (albumId: string): Promise<any> => ipcRenderer.invoke('album:get', albumId),
     delete: (albumId: string): Promise<any> => ipcRenderer.invoke('album:delete', albumId),
     getImages: (albumId: string): Promise<any> => ipcRenderer.invoke('album:getImages', albumId),
+    getWorkflowImages: (): Promise<any> => ipcRenderer.invoke('album:getWorkflowImages'),
     deleteImage: (albumId: string, imageId: number): Promise<any> =>
       ipcRenderer.invoke('album:deleteImage', albumId, imageId),
     deleteImages: (albumId: string, imageIds: number[]): Promise<any> =>
       ipcRenderer.invoke('album:deleteImages', albumId, imageIds),
+    updateImageLocalData: (data: {
+      imageId: number
+      localNotes?: string | null
+      localTodoStatus?: 'normal' | 'needs-work' | 'working' | 'done' | null
+    }): Promise<any> => ipcRenderer.invoke('album:updateImageLocalData', data),
     scanSourceFolder: (path: string): Promise<any> =>
       ipcRenderer.invoke('album:scanSourceFolder', path),
     startUpload: (albumId: string): Promise<any> =>

@@ -245,6 +245,19 @@ function goToProfile(): void {
           </div>
         </div>
       </div>
+      
+      <!-- CARD 1.5: Workflow / Notes -->
+      <div class="sidebar-card cursor-pointer hover:bg-white/[0.04] transition-all duration-200" @click="router.push('/workflow')">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg shadow-amber-500/25">
+            <Pencil class="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <p class="font-semibold text-white/90 text-sm">Workflow</p>
+            <p class="text-xs text-white/40">Manage notes & status</p>
+          </div>
+        </div>
+      </div>
 
       <!-- CARD 2: Recent Albums -->
       <div class="sidebar-card">

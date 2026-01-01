@@ -160,7 +160,9 @@ class WatcherService {
         mtime: file.mtime,
         sourceFileHash: null,
         uploadStatus: 'pending',
-        uploadOrder: index
+        uploadOrder: index,
+        localNotes: null,
+        localTodoStatus: null
       })
     })
 

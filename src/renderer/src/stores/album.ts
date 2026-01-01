@@ -13,6 +13,8 @@ interface AlbumImage {
   serverId?: number
   isFavorite?: boolean
   favoriteData?: unknown
+  localNotes?: string | null
+  localTodoStatus?: 'normal' | 'needs-work' | 'working' | 'done' | null
 }
 
 export interface Album {
@@ -220,6 +222,49 @@ export const useAlbumStore = defineStore('album', () => {
     }
   }
 
+  /**
+   * Update local notes and todo status for an image
+   */
+  async function updateImageLocalData(
+    imageId: number,
+    data: {
+      localNotes?: string | null
+      localTodoStatus?: 'normal' | 'needs-work' | 'working' | 'done' | null
+    }
+  ) {
+    try {
+      const result = await window.api.albums.updateImageLocalData({
+        imageId,
+        ...data
+      })
+
+      if (result.success) {
+        // Update in currentImages
+        const image = currentImages.value.find((img) => img.id === imageId)
+        if (image) {
+          if (data.localNotes !== undefined) image.localNotes = data.localNotes
+          if (data.localTodoStatus !== undefined) image.localTodoStatus = data.localTodoStatus
+        }
+        
+        // Update in currentAlbum photos if exists
+        if (currentAlbum.value && currentAlbum.value.photos) {
+          const albumImage = currentAlbum.value.photos.find((img) => img.id === imageId)
+          if (albumImage) {
+            if (data.localNotes !== undefined) albumImage.localNotes = data.localNotes
+            if (data.localTodoStatus !== undefined) albumImage.localTodoStatus = data.localTodoStatus
+          }
+        }
+        return { success: true }
+      } else {
+        return { success: false, error: result.error }
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Failed to update image local data'
+      console.error('[AlbumStore] updateImageLocalData error:', message)
+      return { success: false, error: message }
+    }
+  }
+
   return {
     albums,
     currentAlbum,
@@ -232,6 +277,7 @@ export const useAlbumStore = defineStore('album', () => {
     fetchAlbumImages,
     createAlbum,
     deleteImage,
-    deleteImages
+    deleteImages,
+    updateImageLocalData
   }
 })
