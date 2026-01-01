@@ -1,10 +1,10 @@
 {
-  "name": "lumo-desk",
-  "version": "1.0.0",
+  "name": "Lumosnap",
+  "version": "0.1.0-alpha",
   "description": "An Electron application with Vue and TypeScript",
   "main": "./out/main/index.js",
-  "author": "example.com",
-  "homepage": "https://electron-vite.org",
+  "author": "hello@jithinsha.in, darkwebplayer101@gmail.com",
+  "homepage": "https://lumosnap.com",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
