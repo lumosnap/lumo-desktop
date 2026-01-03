@@ -41,5 +41,5 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: true
 publish:
-  provider: Lumosnap
+  provider: generic
   url: https://lumosnap.com/auto-updates
