@@ -93,18 +93,25 @@ async function openWatchFolder(): Promise<void> {
   }
 }
 
+let loadDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
 async function loadAlbums(): Promise<void> {
-  loading.value = true
-  try {
-    const result = await window.api.albums.list()
-    if (result.success) {
-      albums.value = result.albums || []
+  // Simple debounce
+  if (loadDebounceTimer) clearTimeout(loadDebounceTimer)
+  
+  loadDebounceTimer = setTimeout(async () => {
+    loading.value = true
+    try {
+      const result = await window.api.albums.list()
+      if (result.success) {
+        albums.value = result.albums || []
+      }
+    } catch (error) {
+      console.error('Failed to load albums:', error)
+    } finally {
+      loading.value = false
     }
-  } catch (error) {
-    console.error('Failed to load albums:', error)
-  } finally {
-    loading.value = false
-  }
+  }, 100)
 }
 
 async function loadMasterFolder(): Promise<void> {
@@ -328,7 +335,7 @@ onUnmounted(() => {
           <div
             v-for="(album, index) in albums"
             :key="album.id"
-            class="group relative bg-white rounded-2xl border border-slate-200 transition-all duration-300 hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1 cursor-pointer"
+            class="group relative bg-white rounded-2xl border border-slate-200 transition-all duration-300 hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1 cursor-pointer hover:z-30 focus-within:z-30"
             :class="[
               uiStore.selectedAlbumId === album.id ? 'ring-2 ring-indigo-500' : ''
             ]"

@@ -5,7 +5,9 @@ import {
   getAllAlbums,
   createAlbum,
   createImage,
-  getAlbumBySourcePath
+  getAlbumBySourcePath,
+  getAlbum,
+  getAlbumImages
 } from './database'
 import { BrowserWindow } from 'electron'
 import { basename, join } from 'path'
@@ -14,16 +16,38 @@ import { albumsApi } from './api-client'
 import { scanImagesInFolder, createAlbumFolder } from './storage'
 import { getStorageLocation } from './config'
 import { uploadPipeline } from './pipeline'
+import { debounceByKey } from './utils'
+import { createLogger } from './logger'
+import {
+  createAlbumMetadata,
+  writeAlbumMetadata,
+  getFolderStats,
+  getAlbumIdFromMetadata,
+  hasAlbumMetadata
+} from './album-metadata'
+
+const logger = createLogger('Watcher')
+
+// Debounce delay for file change events (100ms)
+const FILE_CHANGE_DEBOUNCE_MS = 100
 
 class WatcherService {
   private watchers: Map<string, FSWatcher> = new Map()
   private masterFolderWatcher: FSWatcher | null = null
   private mainWindow: BrowserWindow | null = null
 
+  // Debounced file change handler - batches rapid events
+  private debouncedHandleFileChange = debounceByKey(
+    (albumId: string) => {
+      this.processFileChange(albumId)
+    },
+    FILE_CHANGE_DEBOUNCE_MS
+  )
+
   initialize(mainWindow: BrowserWindow): void {
     this.mainWindow = mainWindow
     const albums = getAllAlbums()
-    console.log(`[Watcher] Initializing watchers for ${albums.length} albums`)
+    logger.info(`Initializing watchers for ${albums.length} albums`)
 
     albums.forEach((album) => {
       if (album.sourceFolderPath) {
@@ -167,6 +191,15 @@ class WatcherService {
     // Update album total images count
     updateAlbum(album.id, { totalImages: imageFiles.length })
 
+    // Create .lumosnap metadata file in source folder
+    const folderStats = getFolderStats(sourceFolderPath)
+    const metadata = createAlbumMetadata(
+      album.id,
+      imageFiles.length,
+      folderStats.totalSize
+    )
+    writeAlbumMetadata(sourceFolderPath, metadata)
+
     console.log(`[Watcher] Album created: ${album.id} with ${imageFiles.length} images`)
 
     // Start compression and upload pipeline
@@ -204,20 +237,41 @@ class WatcherService {
       // Get existing albums to compare
       const albums = getAllAlbums()
       const existingPaths = new Set(albums.map((a) => a.sourceFolderPath))
+      const existingAlbumIds = new Set(albums.map((a) => a.id))
 
       // Find new folders not in database
       const newFolders = subfolders.filter((f) => !existingPaths.has(f.path))
 
       if (newFolders.length > 0) {
-        console.log(`[Watcher] Found ${newFolders.length} new folders - auto-creating albums`)
+        console.log(`[Watcher] Found ${newFolders.length} new folders - checking for existing albums`)
 
-        // Auto-create albums for new folders
         for (const folder of newFolders) {
           try {
+            // Check if folder has .lumosnap metadata (moved/renamed album)
+            if (hasAlbumMetadata(folder.path)) {
+              const existingAlbumId = getAlbumIdFromMetadata(folder.path)
+              
+              if (existingAlbumId && existingAlbumIds.has(existingAlbumId)) {
+                // Album exists but with different path - update the path
+                console.log(`[Watcher] Detected moved album ${existingAlbumId} at ${folder.path}`)
+                updateAlbum(existingAlbumId, { 
+                  sourceFolderPath: folder.path,
+                  isOrphaned: 0 
+                })
+                this.watch(existingAlbumId, folder.path)
+                continue
+              } else if (existingAlbumId) {
+                // Metadata points to album not in DB - could be from another installation
+                // or copied folder. Skip and let user handle manually.
+                console.log(`[Watcher] Found metadata for unknown album ${existingAlbumId} in ${folder.path}`)
+              }
+            }
+            
+            // No existing metadata or album not found - create new album
             await this.autoCreateAlbum(folder.name, folder.path)
             console.log(`[Watcher] Auto-created album for: ${folder.name}`)
           } catch (error) {
-            console.error(`[Watcher] Failed to auto-create album for ${folder.name}:`, error)
+            console.error(`[Watcher] Failed to process folder ${folder.name}:`, error)
           }
         }
 
@@ -267,12 +321,18 @@ class WatcherService {
   }
 
   private handleFileChange(albumId: string, event: string, path: string): void {
-    console.log(`[Watcher] Detected ${event} on ${path} for album ${albumId}`)
+    logger.debug(`Detected ${event} on ${path} for album ${albumId}`)
+    // Use debounced handler to batch rapid events
+    this.debouncedHandleFileChange(albumId)
+  }
+
+  private processFileChange(albumId: string): void {
+    logger.info(`Processing file changes for album ${albumId}`)
 
     // Update database to mark album as needing sync
     try {
       updateAlbum(albumId, { needsSync: 1 })
-      console.log(`[Watcher] Marked album ${albumId} as needing sync`)
+      logger.debug(`Marked album ${albumId} as needing sync`)
 
       // Notify renderer to update UI
       if (this.mainWindow) {
@@ -282,8 +342,64 @@ class WatcherService {
         })
       }
     } catch (error) {
-      console.error(`[Watcher] Failed to update album status:`, error)
+      logger.error(`Failed to update album status:`, error)
     }
+  }
+
+  /**
+   * Check sync status for a specific album
+   * Compares local file count with database count without full processing
+   */
+  async checkSyncStatus(albumId: string): Promise<void> {
+    try {
+      const album = getAlbum(albumId)
+      if (!album || !album.sourceFolderPath) return
+
+      // Fast scan - skip dimensions, just get file stats
+      const sourceImages = scanImagesInFolder(album.sourceFolderPath, { 
+        useCache: true, 
+        skipDimensions: true 
+      })
+      
+      const dbImages = getAlbumImages(albumId)
+      
+      // Determine if sync is needed based on count
+      // For more accuracy, we could compare mtimes, but count is the fastest first pass
+      const needsSync = sourceImages.length !== dbImages.length ? 1 : 0
+      
+      // Update DB if changed
+      if (album.needsSync !== needsSync) {
+        updateAlbum(albumId, { needsSync })
+        
+        // Notify renderer
+        if (this.mainWindow) {
+          this.mainWindow.webContents.send('album:status-changed', {
+            albumId,
+            needsSync
+          })
+        }
+      }
+    } catch (error) {
+      console.error(`[Watcher] Failed to check sync status for ${albumId}:`, error)
+    }
+  }
+
+  /**
+   * Refresh sync status for all albums (background task)
+   */
+  async refreshSyncStatus(): Promise<void> {
+    const albums = getAllAlbums()
+    
+    logger.info(`Starting background sync check for ${albums.length} albums...`)
+    
+    // Process sequentially to avoid IO spikes
+    for (const album of albums) {
+      await this.checkSyncStatus(album.id)
+      // Small delay to yield to other tasks
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    
+    logger.info('Background sync check completed')
   }
 
   closeAll(): void {

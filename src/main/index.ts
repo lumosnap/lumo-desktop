@@ -4,10 +4,30 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { initDatabase, closeDatabase, getAllAlbums, getImagesByStatus } from './database'
 import { initConfig, getMasterFolder } from './config'
-import { registerIpcHandlers } from './ipc-handlers'
+import { registerIpcHandlers } from './ipc'
 import { protocol } from 'electron'
 import { watcherService } from './watcher'
 import { uploadPipeline } from './pipeline'
+import log, { createLogger, getErrorMessage } from './logger'
+
+// Scoped logger for main process
+const logger = createLogger('Main')
+
+// ==================== Global Error Handlers ====================
+// Catch unhandled exceptions to prevent silent crashes
+process.on('uncaughtException', (error: Error) => {
+  log.error('Uncaught Exception:', error)
+  // Log stack trace for debugging
+  if (error.stack) {
+    log.error('Stack trace:', error.stack)
+  }
+  // Don't exit - try to keep app running if possible
+})
+
+// Catch unhandled promise rejections
+process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
+  log.error('Unhandled Rejection at:', promise, 'reason:', reason)
+})
 
 // Register file protocol as privileged
 protocol.registerSchemesAsPrivileged([
@@ -26,7 +46,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
-  console.log('[Main] Creating browser window...')
+  logger.info('Creating browser window...')
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -40,14 +60,14 @@ function createWindow(): void {
       webSecurity: false
     }
   })
-  console.log('[Main] Browser window created')
+  logger.info('Browser window created')
 
   mainWindow.on('ready-to-show', () => {
-    console.log('[Main] Browser window ready to show')
+    logger.info('Browser window ready to show')
     if (mainWindow) {
       mainWindow.show()
       if (is.dev) {
-        console.log('[Main] Opening DevTools in dev mode')
+        logger.debug('Opening DevTools in dev mode')
         mainWindow.webContents.openDevTools()
       }
     }
@@ -71,26 +91,26 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
-  console.log('[Main] Electron app ready, initializing...')
+  logger.info('Electron app ready, initializing...')
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.lumosnap')
 
   // Initialize database
-  console.log('[Main] Initializing database...')
+  logger.info('Initializing database...')
   try {
     initDatabase()
-    console.log('[Main] ✓ Database initialized successfully')
+    logger.info('✓ Database initialized successfully')
   } catch (error) {
-    console.error('[Main] ✗ Failed to initialize database:', error)
+    logger.error('✗ Failed to initialize database:', getErrorMessage(error))
   }
 
   // Initialize config
-  console.log('[Main] Initializing config...')
+  logger.info('Initializing config...')
   try {
     initConfig()
-    console.log('[Main] ✓ Config initialized successfully')
+    logger.info('✓ Config initialized successfully')
   } catch (error) {
-    console.error('[Main] ✗ Failed to initialize config:', error)
+    logger.error('✗ Failed to initialize config:', getErrorMessage(error))
   }
 
   // Default open or close DevTools by F12 in development
@@ -101,7 +121,7 @@ app.whenReady().then(() => {
   })
 
   // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  ipcMain.on('ping', () => logger.debug('pong'))
 
   ipcMain.handle('dialog:openDirectory', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -116,26 +136,56 @@ app.whenReady().then(() => {
 
   createWindow()
 
+  // ==================== Renderer Crash Recovery ====================
+  // Handle renderer process crashes - attempt to recreate window
+  app.on('render-process-gone', (_event, _webContents, details) => {
+    logger.error('Renderer process gone:', details.reason, 'exitCode:', details.exitCode)
+
+    if (details.reason === 'crashed' || details.reason === 'killed') {
+      logger.warn('Attempting to recover by recreating window...')
+      // Close existing window if not already destroyed
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.close()
+      }
+      mainWindow = null
+
+      // Recreate window after short delay
+      setTimeout(() => {
+        createWindow()
+        if (mainWindow) {
+          registerIpcHandlers(mainWindow)
+          watcherService.initialize(mainWindow)
+          logger.info('✓ Window recreated after crash recovery')
+        }
+      }, 1000)
+    }
+  })
+
+  // Handle child process crashes
+  app.on('child-process-gone', (_event, details) => {
+    logger.error('Child process gone:', details.type, 'reason:', details.reason)
+  })
+
   // Register IPC handlers after window is created
-  console.log('[Main] Registering IPC handlers...')
+  logger.info('Registering IPC handlers...')
   if (mainWindow) {
     registerIpcHandlers(mainWindow)
-    console.log('[Main] ✓ IPC handlers registered successfully')
-    
+    logger.info('✓ IPC handlers registered successfully')
+
     // Initialize Watcher Service
     try {
       watcherService.initialize(mainWindow)
-      console.log('[Main] ✓ Watcher service initialized')
-      
+      logger.info('✓ Watcher service initialized')
+
       // Start master folder watcher if configured
       const masterFolder = getMasterFolder()
       if (masterFolder) {
         watcherService.watchMasterFolder(masterFolder)
         watcherService.scanMasterFolderOnStartup(masterFolder)
-        console.log('[Main] ✓ Master folder watcher started')
+        logger.info('✓ Master folder watcher started')
       }
     } catch (error) {
-      console.error('[Main] ✗ Failed to initialize watcher service:', error)
+      logger.error('✗ Failed to initialize watcher service:', getErrorMessage(error))
     }
 
     // Auto-retry failed uploads on startup
@@ -153,22 +203,24 @@ app.whenReady().then(() => {
       }
 
       if (albumsWithFailed.length > 0) {
-        console.log(`[Main] Found ${totalFailed} failed images in ${albumsWithFailed.length} albums, auto-retrying...`)
+        logger.info(
+          `Found ${totalFailed} failed images in ${albumsWithFailed.length} albums, auto-retrying...`
+        )
         // Queue all albums with failed images - the pipeline queue system will handle them sequentially
         for (const albumId of albumsWithFailed) {
           uploadPipeline.startPipeline(albumId, mainWindow).catch((error) => {
-            console.error(`[Main] Auto-retry failed for album ${albumId}:`, error)
+            logger.error(`Auto-retry failed for album ${albumId}:`, getErrorMessage(error))
           })
         }
-        console.log('[Main] ✓ Auto-retry queued for failed uploads')
+        logger.info('✓ Auto-retry queued for failed uploads')
       } else {
-        console.log('[Main] No failed uploads to retry')
+        logger.debug('No failed uploads to retry')
       }
     } catch (error) {
-      console.error('[Main] ✗ Failed to check for failed uploads:', error)
+      logger.error('✗ Failed to check for failed uploads:', getErrorMessage(error))
     }
   } else {
-    console.error('[Main] ✗ Cannot register IPC handlers: mainWindow is null')
+    logger.error('✗ Cannot register IPC handlers: mainWindow is null')
   }
 
   app.on('activate', function () {
@@ -189,6 +241,7 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+  logger.info('All windows closed, cleaning up...')
   closeDatabase()
   try {
     watcherService.closeAll()
@@ -201,8 +254,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  logger.info('App quitting, closing database...')
   closeDatabase()
 })
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.

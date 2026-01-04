@@ -19,7 +19,9 @@ import {
   Phone,
   Loader2,
   ImageIcon,
-  ArrowLeft
+  ArrowLeft,
+  Settings2,
+  Eye
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -30,8 +32,9 @@ const activeTab = ref('profile')
 
 const tabs = [
   { id: 'profile', label: 'My Profile', icon: User },
-  { id: 'storage', label: 'Storage', icon: HardDrive },
-  { id: 'billing', label: 'Billing & Plan', icon: CreditCard }
+  { id: 'storage', label: 'Watch Folder', icon: Eye },
+  { id: 'billing', label: 'Billing & Plan', icon: CreditCard },
+  { id: 'advanced', label: 'Advanced', icon: Settings2 }
 ]
 
 // Profile data from API (local editable fields only)
@@ -63,6 +66,12 @@ const storageError = ref<string | null>(null)
 const showChangeConfirmation = ref(false)
 const pendingNewPath = ref<string | null>(null)
 const isChangingStorage = ref(false)
+
+// Master folder state
+const masterFolder = ref<string | null>(null)
+const isLoadingMasterFolder = ref(false)
+const isSettingMasterFolder = ref(false)
+const masterFolderError = ref<string | null>(null)
 
 async function loadProfileData(): Promise<void> {
   isLoadingProfile.value = true
@@ -172,6 +181,45 @@ function cancelChangeStorage(): void {
   pendingNewPath.value = null
 }
 
+async function loadMasterFolder(): Promise<void> {
+  isLoadingMasterFolder.value = true
+  masterFolderError.value = null
+  try {
+    const folder = await window.api.config.getMasterFolder()
+    masterFolder.value = folder
+  } catch (err: unknown) {
+    masterFolderError.value = err instanceof Error ? err.message : 'Failed to load master folder'
+  } finally {
+    isLoadingMasterFolder.value = false
+  }
+}
+
+async function selectMasterFolder(): Promise<void> {
+  try {
+    const path = await window.api.dialog.openDirectory()
+    if (path) {
+      isSettingMasterFolder.value = true
+      masterFolderError.value = null
+      const result = await window.api.config.setMasterFolder(path)
+      if (result.success) {
+        masterFolder.value = path
+      } else {
+        masterFolderError.value = result.error || 'Failed to set master folder'
+      }
+      isSettingMasterFolder.value = false
+    }
+  } catch (err: unknown) {
+    masterFolderError.value = err instanceof Error ? err.message : 'Failed to select folder'
+    isSettingMasterFolder.value = false
+  }
+}
+
+async function openMasterFolder(): Promise<void> {
+  if (masterFolder.value) {
+    await window.api.shell.openFolder(masterFolder.value)
+  }
+}
+
 async function handleLogout(): Promise<void> {
   await authStore.logout()
   router.push('/login')
@@ -180,6 +228,7 @@ async function handleLogout(): Promise<void> {
 onMounted(() => {
   loadStorageInfo()
   loadProfileData()
+  loadMasterFolder()
 })
 </script>
 
@@ -351,101 +400,107 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- Storage Section -->
+          <!-- Watch Folder Section (renamed from Storage) -->
           <div v-if="activeTab === 'storage'" class="space-y-8 animate-fade-in">
             <!-- Section Header -->
             <div>
-              <h2 class="text-2xl font-bold text-slate-900 mb-1">Storage Settings</h2>
+              <h2 class="text-2xl font-bold text-slate-900 mb-1">Watch Folder</h2>
               <p class="text-slate-500 text-sm">
-                Manage where LumoSnap stores your compressed images.
+                Set up a master folder to automatically detect and create albums from subfolders.
               </p>
             </div>
 
-            <!-- Current Storage Location -->
+            <!-- Master Folder Card -->
             <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-6">
               <div>
-                <h3 class="font-semibold text-slate-900 mb-4">Storage Location</h3>
-                
+                <h3 class="font-semibold text-slate-900 mb-4">Master Watch Folder</h3>
+
                 <!-- Loading State -->
-                <div v-if="isLoadingStorage" class="flex items-center gap-3 text-slate-500">
+                <div v-if="isLoadingMasterFolder" class="flex items-center gap-3 text-slate-500">
                   <div class="w-5 h-5 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin"></div>
-                  <span>Loading storage info...</span>
+                  <span>Loading folder info...</span>
                 </div>
 
-                <!-- Storage Location Display -->
                 <div v-else>
+                  <!-- Folder Display -->
                   <button
                     class="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl p-5 text-left transition-all hover:border-indigo-300 group"
-                    @click="selectNewFolder"
+                    :disabled="isSettingMasterFolder"
+                    @click="selectMasterFolder"
                   >
                     <div class="flex items-start gap-4">
                       <div
-                        class="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center group-hover:bg-indigo-200 transition-colors"
+                        class="w-12 h-12 rounded-xl bg-violet-100 flex items-center justify-center group-hover:bg-violet-200 transition-colors"
                       >
-                        <Folder class="w-6 h-6 text-indigo-600" />
+                        <Eye class="w-6 h-6 text-violet-600" />
                       </div>
 
                       <div class="flex-1 min-w-0">
-                        <div class="text-sm text-slate-400 mb-1">Current Location</div>
+                        <div class="text-sm text-slate-400 mb-1">Watch Folder</div>
                         <div class="text-slate-900 font-medium truncate">
-                          {{ storageLocation || 'Not configured' }}
+                          {{ masterFolder || 'Not configured' }}
                         </div>
                       </div>
+
+                      <Loader2
+                        v-if="isSettingMasterFolder"
+                        class="w-5 h-5 text-indigo-500 animate-spin"
+                      />
                     </div>
                   </button>
 
                   <p class="mt-3 text-xs text-slate-400">
-                    Click to change the storage location. 
+                    Click to select a folder. Subfolders will automatically become albums.
                   </p>
+
+                  <!-- Warning when changing existing folder -->
+                  <div
+                    v-if="masterFolder"
+                    class="mt-4 flex items-start gap-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3"
+                  >
+                    <AlertTriangle class="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>Changing the watch folder will stop tracking changes for albums in the current folder.</span>
+                  </div>
                 </div>
               </div>
 
-              <!-- Free Space Indicator -->
-              <div v-if="storageLocation && !isLoadingStorage" class="pt-4 border-t border-slate-100">
-                <div class="flex items-center gap-4">
-                  <div
-                    class="w-12 h-12 rounded-xl flex items-center justify-center"
-                    :class="isLowStorage ? 'bg-amber-100' : 'bg-emerald-100'"
-                  >
-                    <HardDrive
-                      class="w-6 h-6"
-                      :class="isLowStorage ? 'text-amber-600' : 'text-emerald-600'"
-                    />
-                  </div>
-
-                  <div class="flex-1">
-                    <div class="text-sm text-slate-400">Available Space</div>
-                    <div
-                      class="text-lg font-bold"
-                      :class="isLowStorage ? 'text-amber-600' : 'text-slate-900'"
-                    >
-                      {{ freeSpace || 'Unknown' }}
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Low Storage Warning -->
-                <div
-                  v-if="isLowStorage"
-                  class="mt-4 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4"
+              <!-- Open Folder Button -->
+              <div v-if="masterFolder" class="pt-4 border-t border-slate-100">
+                <button
+                  class="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                  @click="openMasterFolder"
                 >
-                  <AlertTriangle class="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                  <div>
-                    <p class="text-sm font-medium text-amber-800">You're running out of space</p>
-                    <p class="text-xs text-amber-600 mt-1">
-                      Consider freeing up space or changing to a different storage location.
-                    </p>
-                  </div>
-                </div>
+                  <Folder class="w-4 h-4" />
+                  Open Watch Folder
+                </button>
+              </div>
+
+              <!-- How it works -->
+              <div class="pt-4 border-t border-slate-100">
+                <h4 class="text-sm font-medium text-slate-700 mb-3">How it works</h4>
+                <ul class="space-y-2 text-xs text-slate-500">
+                  <li class="flex items-start gap-2">
+                    <CheckCircle2 class="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>Create folders inside your watch folder for each event</span>
+                  </li>
+                  <li class="flex items-start gap-2">
+                    <CheckCircle2 class="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>LumoSnap automatically creates albums from each subfolder</span>
+                  </li>
+                  <li class="flex items-start gap-2">
+                    <CheckCircle2 class="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>Add photos to the folder and they'll sync automatically</span>
+                  </li>
+                </ul>
               </div>
             </div>
 
-            <!-- Storage Error -->
+            <!-- Master Folder Error -->
             <div
-              v-if="storageError"
+              v-if="masterFolderError"
               class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm"
             >
-              {{ storageError }}
+              {{ masterFolderError }}
             </div>
           </div>
 
@@ -595,6 +650,107 @@ onMounted(() => {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Advanced Section -->
+          <div v-if="activeTab === 'advanced'" class="space-y-8 animate-fade-in">
+            <!-- Section Header -->
+            <div>
+              <h2 class="text-2xl font-bold text-slate-900 mb-1">Advanced Settings</h2>
+              <p class="text-slate-500 text-sm">
+                Configure internal storage and other advanced options.
+              </p>
+            </div>
+
+            <!-- Storage Location Card -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-6">
+              <div>
+                <h3 class="font-semibold text-slate-900 mb-2">Internal Storage Location</h3>
+                <p class="text-xs text-slate-400 mb-4">
+                  Where LumoSnap stores compressed images before uploading.
+                </p>
+
+                <!-- Loading State -->
+                <div v-if="isLoadingStorage" class="flex items-center gap-3 text-slate-500">
+                  <div class="w-5 h-5 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin"></div>
+                  <span>Loading storage info...</span>
+                </div>
+
+                <!-- Storage Location Display -->
+                <div v-else>
+                  <button
+                    class="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl p-5 text-left transition-all hover:border-indigo-300 group"
+                    @click="selectNewFolder"
+                  >
+                    <div class="flex items-start gap-4">
+                      <div
+                        class="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center group-hover:bg-indigo-200 transition-colors"
+                      >
+                        <HardDrive class="w-6 h-6 text-indigo-600" />
+                      </div>
+
+                      <div class="flex-1 min-w-0">
+                        <div class="text-sm text-slate-400 mb-1">Current Location</div>
+                        <div class="text-slate-900 font-medium truncate">
+                          {{ storageLocation || 'Not configured' }}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+
+                  <p class="mt-3 text-xs text-slate-400">
+                    Click to change the storage location.
+                  </p>
+                </div>
+              </div>
+
+              <!-- Free Space Indicator -->
+              <div v-if="storageLocation && !isLoadingStorage" class="pt-4 border-t border-slate-100">
+                <div class="flex items-center gap-4">
+                  <div
+                    class="w-12 h-12 rounded-xl flex items-center justify-center"
+                    :class="isLowStorage ? 'bg-amber-100' : 'bg-emerald-100'"
+                  >
+                    <HardDrive
+                      class="w-6 h-6"
+                      :class="isLowStorage ? 'text-amber-600' : 'text-emerald-600'"
+                    />
+                  </div>
+
+                  <div class="flex-1">
+                    <div class="text-sm text-slate-400">Available Space</div>
+                    <div
+                      class="text-lg font-bold"
+                      :class="isLowStorage ? 'text-amber-600' : 'text-slate-900'"
+                    >
+                      {{ freeSpace || 'Unknown' }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Low Storage Warning -->
+                <div
+                  v-if="isLowStorage"
+                  class="mt-4 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4"
+                >
+                  <AlertTriangle class="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p class="text-sm font-medium text-amber-800">You're running out of space</p>
+                    <p class="text-xs text-amber-600 mt-1">
+                      Consider freeing up space or changing to a different storage location.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Storage Error -->
+            <div
+              v-if="storageError"
+              class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm"
+            >
+              {{ storageError }}
             </div>
           </div>
         </div>

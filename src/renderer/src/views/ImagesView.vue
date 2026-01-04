@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import Modal from '../components/ui/Modal.vue'
@@ -17,7 +17,8 @@ import {
   FolderOpen,
   MessageSquare,
   CheckCircle2,
-  ChevronDown
+  ChevronDown,
+  Loader2
 } from 'lucide-vue-next'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import 'photoswipe/style.css'
@@ -79,10 +80,20 @@ const currentNotesImage = ref<Image | null>(null)
 // Lightbox
 let lightbox: PhotoSwipeLightbox | null = null
 
+// Pagination State
+const page = ref(1)
+const PAGE_SIZE = 50
+const loadMoreTrigger = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | null = null
+
 // Computed
 const filteredImages = computed(() => {
   if (!showFavoritesOnly.value) return images.value
   return images.value.filter((img) => img.isFavorite)
+})
+
+const displayedImages = computed(() => {
+  return filteredImages.value.slice(0, page.value * PAGE_SIZE)
 })
 
 const favoritedPhotosCount = computed(() => {
@@ -95,6 +106,42 @@ const formattedEventDate = computed(() => {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
+  })
+})
+
+// Setup Intersection Observer for Infinite Scroll
+function setupObserver() {
+  if (observer) observer.disconnect()
+  
+  observer = new IntersectionObserver((entries) => {
+    const target = entries[0]
+    if (target.isIntersecting) {
+      if (displayedImages.value.length < filteredImages.value.length) {
+        page.value++
+      }
+    }
+  }, {
+    root: null,
+    rootMargin: '200px', // Load before reaching bottom
+    threshold: 0.1
+  })
+  
+  if (loadMoreTrigger.value) {
+    observer.observe(loadMoreTrigger.value)
+  }
+}
+
+// Watch for loading trigger visibility
+watch(() => [loadMoreTrigger.value, filteredImages.value.length], () => {
+    if(loadMoreTrigger.value) setupObserver()
+}, { flush: 'post' })
+
+// Reset page when filter changes
+watch(() => [showFavoritesOnly.value, selectedClientName.value], () => {
+  page.value = 1
+  // Wait for DOM update then re-init lightbox
+  nextTick(() => {
+    initLightbox()
   })
 })
 
@@ -114,6 +161,7 @@ function getThumbnailPath(localFilePath: string): string {
 async function loadAlbumImages(): Promise<void> {
   loading.value = true
   error.value = null
+  page.value = 1
 
   try {
     // Load album details
@@ -140,6 +188,7 @@ async function loadAlbumImages(): Promise<void> {
     // Initialize lightbox after DOM update
     await nextTick()
     initLightbox()
+    setupObserver()
   }
 }
 
@@ -560,7 +609,7 @@ onUnmounted(() => {
             class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
           >
             <a
-              v-for="image in filteredImages"
+              v-for="image in displayedImages"
               :key="image.id"
               :href="`file://${image.localFilePath}`"
               :data-pswp-width="image.width || 1920"
@@ -569,7 +618,7 @@ onUnmounted(() => {
               class="group relative aspect-[4/5] rounded-xl overflow-hidden bg-slate-200 cursor-pointer shadow-sm hover:shadow-md transition-all duration-300 block"
             >
               <img
-              :src="`file://${getThumbnailPath(image.localFilePath)}?t=${Date.now()}`"
+              :src="`file://${getThumbnailPath(image.localFilePath)}`"
               :alt="image.originalFilename"
               loading="lazy"
               class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
@@ -644,6 +693,11 @@ onUnmounted(() => {
                 {{ image.uploadStatus }}
               </div>
             </a>
+          </div>
+          
+          <!-- Infinite Scroll Trigger -->
+          <div ref="loadMoreTrigger" class="h-10 w-full flex items-center justify-center p-4">
+            <Loader2 v-if="displayedImages.length < filteredImages.length" class="h-6 w-6 text-slate-400 animate-spin" />
           </div>
         </main>
       </div>

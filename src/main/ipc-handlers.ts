@@ -26,6 +26,12 @@ import { join } from 'path'
 import { watcherService } from './watcher'
 import { startAuth } from './oauth-handler'
 import { getAuth, clearAuth } from './auth-storage'
+import {
+  createAlbumMetadata,
+  writeAlbumMetadata,
+  getFolderStats,
+  updateMetadataAfterSync
+} from './album-metadata'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ==================== Auth Handlers ====================
@@ -362,6 +368,15 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
         // Update album total images count
         updateAlbum(album.id, { totalImages: imageFiles.length })
+
+        // Create .lumosnap metadata file in source folder
+        const folderStats = getFolderStats(data.sourceFolderPath)
+        const metadata = createAlbumMetadata(
+          album.id,
+          imageFiles.length,
+          folderStats.totalSize
+        )
+        writeAlbumMetadata(data.sourceFolderPath, metadata)
 
         // Start compression and upload pipeline
         uploadPipeline.startPipeline(album.id, mainWindow).catch((error) => {
@@ -958,6 +973,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         lastSyncedAt: new Date().toISOString()
       })
       console.log(`[Main] Sync: Album metadata updated`)
+
+      // Update .lumosnap metadata file in source folder
+      const folderStats = getFolderStats(album.sourceFolderPath)
+      updateMetadataAfterSync(album.sourceFolderPath, totalImages, folderStats.totalSize)
 
       // Clear scan cache for this folder to ensure fresh data
       clearScanCache(album.sourceFolderPath)

@@ -2,6 +2,7 @@
  * Secure Auth Storage using Electron's safeStorage
  *
  * Stores authentication token encrypted at rest using OS-level encryption.
+ * Implements in-memory caching to minimize disk I/O.
  */
 
 import { safeStorage, app } from 'electron'
@@ -20,6 +21,10 @@ interface AuthData {
   user: StoredUser
 }
 
+// In-memory cache to avoid reading from disk on every request
+let cachedAuth: AuthData | null = null
+let isCacheInitialized = false
+
 // Get auth file path in user data directory
 function getAuthFilePath(): string {
   const userDataPath = app.getPath('userData')
@@ -32,6 +37,10 @@ function getAuthFilePath(): string {
 export function saveAuth(token: string, user: StoredUser): void {
   const authData: AuthData = { token, user }
   const jsonData = JSON.stringify(authData)
+
+  // Update cache
+  cachedAuth = authData
+  isCacheInitialized = true
 
   // Encrypt the data
   if (!safeStorage.isEncryptionAvailable()) {
@@ -53,10 +62,17 @@ export function saveAuth(token: string, user: StoredUser): void {
  * Get stored authentication data
  */
 export function getAuth(): AuthData | null {
+  // Return cached data if available
+  if (isCacheInitialized) {
+    return cachedAuth
+  }
+
   const filePath = getAuthFilePath()
 
   if (!existsSync(filePath)) {
     console.log('[AuthStorage] No auth data found')
+    isCacheInitialized = true
+    cachedAuth = null
     return null
   }
 
@@ -68,11 +84,21 @@ export function getAuth(): AuthData | null {
       const decrypted = safeStorage.decryptString(fileContent)
       const authData = JSON.parse(decrypted) as AuthData
       console.log('[AuthStorage] Auth data loaded (encrypted)')
+      
+      // Update cache
+      cachedAuth = authData
+      isCacheInitialized = true
+      
       return authData
     } else {
       // Fallback: assume it's plain text
       const authData = JSON.parse(fileContent.toString('utf-8')) as AuthData
       console.log('[AuthStorage] Auth data loaded (plain text)')
+      
+      // Update cache
+      cachedAuth = authData
+      isCacheInitialized = true
+      
       return authData
     }
   } catch (error) {
@@ -103,6 +129,10 @@ export function getUser(): StoredUser | null {
  * Clear stored authentication data
  */
 export function clearAuth(): void {
+  // Clear cache
+  cachedAuth = null
+  isCacheInitialized = true
+
   const filePath = getAuthFilePath()
 
   if (existsSync(filePath)) {

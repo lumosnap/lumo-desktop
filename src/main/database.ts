@@ -143,6 +143,88 @@ function createIndexes(): void {
   `)
 }
 
+/**
+ * Execute multiple operations in a transaction for better performance
+ * Automatically commits on success, rolls back on error
+ */
+export function runInTransaction<T>(fn: () => T): T {
+  if (!db) throw new Error('Database not initialized')
+
+  const transaction = db.transaction(() => {
+    return fn()
+  })
+
+  return transaction()
+}
+
+/**
+ * Bulk create images in a single transaction for performance
+ * Much faster than creating images one by one
+ */
+export function createImagesBatch(
+  images: Array<Omit<Image, 'id' | 'createdAt'>>
+): Image[] {
+  if (!db) throw new Error('Database not initialized')
+
+  const createdAt = new Date().toISOString()
+
+  const stmt = db.prepare(`
+    INSERT INTO images (albumId, serverId, originalFilename, localFilePath, fileSize, width, height, mtime, sourceFileHash, uploadStatus, uploadOrder, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const insertMany = db.transaction((imgs: Array<Omit<Image, 'id' | 'createdAt'>>) => {
+    const results: Image[] = []
+    for (const image of imgs) {
+      const result = stmt.run(
+        image.albumId,
+        image.serverId,
+        image.originalFilename,
+        image.localFilePath,
+        image.fileSize,
+        image.width,
+        image.height,
+        image.mtime,
+        image.sourceFileHash,
+        image.uploadStatus,
+        image.uploadOrder,
+        createdAt
+      )
+      results.push({
+        ...image,
+        id: result.lastInsertRowid as number,
+        createdAt
+      })
+    }
+    return results
+  })
+
+  return insertMany(images)
+}
+
+/**
+ * Bulk update images in a single transaction
+ */
+export function updateImagesBatch(
+  updates: Array<{ id: number; changes: Partial<Image> }>
+): void {
+  if (!db) throw new Error('Database not initialized')
+
+  const updateMany = db.transaction((items: typeof updates) => {
+    for (const { id, changes } of items) {
+      const fields = Object.keys(changes)
+        .map((key) => `${key} = ?`)
+        .join(', ')
+      const values = Object.values(changes)
+
+      const stmt = db!.prepare(`UPDATE images SET ${fields} WHERE id = ?`)
+      stmt.run(...values, id)
+    }
+  })
+
+  updateMany(updates)
+}
+
 // Album CRUD operations
 export function createAlbum(album: Omit<Album, 'createdAt'>): Album {
   if (!db) throw new Error('Database not initialized')
@@ -184,6 +266,20 @@ export function getAllAlbums(): Album[] {
 
   const stmt = db.prepare('SELECT * FROM albums ORDER BY createdAt DESC')
   return stmt.all() as Album[]
+}
+
+export function getAlbumImageCounts(): Record<string, number> {
+  if (!db) throw new Error('Database not initialized')
+
+  const stmt = db.prepare('SELECT albumId, COUNT(*) as count FROM images GROUP BY albumId')
+  const results = stmt.all() as { albumId: string; count: number }[]
+  
+  const counts: Record<string, number> = {}
+  results.forEach(row => {
+    counts[row.albumId] = row.count
+  })
+  
+  return counts
 }
 
 export function getAlbumBySourcePath(sourceFolderPath: string): Album | null {

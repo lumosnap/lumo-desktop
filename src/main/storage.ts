@@ -64,7 +64,17 @@ export function clearScanCache(folderPath?: string): void {
   }
 }
 
-export function scanImagesInFolder(folderPath: string, useCache = true): FileStats[] {
+// Update function signature to support options
+interface ScanOptions {
+  useCache?: boolean
+  skipDimensions?: boolean
+}
+
+export function scanImagesInFolder(folderPath: string, options: ScanOptions | boolean = true): FileStats[] {
+  // Handle legacy boolean argument
+  const useCache = typeof options === 'boolean' ? options : options.useCache !== false
+  const skipDimensions = typeof options === 'object' ? options.skipDimensions : false
+
   // Check cache first
   if (useCache) {
     const cached = scanCache.get(folderPath)
@@ -90,6 +100,11 @@ export function scanImagesInFolder(folderPath: string, useCache = true): FileSta
     console.log(`[Storage] Found ${files.length} total files in folder`)
 
     for (const filename of files) {
+      // Skip hidden files (including .lumosnap metadata)
+      if (filename.startsWith('.')) {
+        continue
+      }
+
       const filePath = join(folderPath, filename)
       const ext = extname(filename).toLowerCase()
 
@@ -98,14 +113,16 @@ export function scanImagesInFolder(folderPath: string, useCache = true): FileSta
         continue
       }
 
-      console.log(`[Storage] Processing image file: ${filename}`)
+      // Verbose logging only if not skipping dimensions (implying full import)
+      if (!skipDimensions) {
+        console.log(`[Storage] Processing image file: ${filename}`)
+      }
 
       try {
         const stats = statSync(filePath)
 
         // Skip directories
         if (stats.isDirectory()) {
-          console.log(`[Storage] Skipping directory: ${filename}`)
           continue
         }
 
@@ -113,16 +130,19 @@ export function scanImagesInFolder(folderPath: string, useCache = true): FileSta
         let width: number | undefined = 1920
         let height: number | undefined = 1080
 
-        try {
-          if (typeof imageSize === 'function') {
-            const dimensions = imageSize(filePath)
-            width = dimensions?.width || 1920
-            height = dimensions?.height || 1080
-            console.log(`[Storage] Image dimensions for ${filename}: ${width}x${height}`)
+        // Only read dimensions if not skipped
+        if (!skipDimensions) {
+          try {
+            if (typeof imageSize === 'function') {
+              const dimensions = imageSize(filePath)
+              width = dimensions?.width || 1920
+              height = dimensions?.height || 1080
+              console.log(`[Storage] Image dimensions for ${filename}: ${width}x${height}`)
+            }
+          } catch {
+            console.warn(`[Storage] Could not read dimensions for ${filename}, using defaults`)
+            // Silently use defaults - dimensions are not critical
           }
-        } catch {
-          console.warn(`[Storage] Could not read dimensions for ${filename}, using defaults`)
-          // Silently use defaults - dimensions are not critical
         }
 
         const fileStats: FileStats = {
@@ -135,7 +155,9 @@ export function scanImagesInFolder(folderPath: string, useCache = true): FileSta
         }
 
         images.push(fileStats)
-        console.log(`[Storage] Added image: ${filename} (${formatBytes(stats.size)})`)
+        if (!skipDimensions) {
+          console.log(`[Storage] Added image: ${filename} (${formatBytes(stats.size)})`)
+        }
       } catch {
         console.warn(`[Storage] Failed to read file ${filename}`)
         continue
