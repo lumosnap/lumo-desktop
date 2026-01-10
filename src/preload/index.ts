@@ -171,6 +171,33 @@ const api = {
     openFolder: (folderPath: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('shell:openFolder', folderPath)
   },
+  settings: {
+    getAutoStart: (): Promise<{
+      success: boolean
+      enabled: boolean
+      openAsHidden: boolean
+      error?: string
+    }> => ipcRenderer.invoke('settings:getAutoStart'),
+    setAutoStart: (
+      enabled: boolean
+    ): Promise<{ success: boolean; enabled?: boolean; error?: string }> =>
+      ipcRenderer.invoke('settings:setAutoStart', enabled),
+    getMinimizeToTray: (): Promise<{ success: boolean; enabled: boolean; error?: string }> =>
+      ipcRenderer.invoke('settings:getMinimizeToTray'),
+    setMinimizeToTray: (
+      enabled: boolean
+    ): Promise<{ success: boolean; enabled?: boolean; error?: string }> =>
+      ipcRenderer.invoke('settings:setMinimizeToTray', enabled),
+    getAll: (): Promise<{
+      success: boolean
+      settings?: {
+        autoStart: boolean
+        autoStartHidden: boolean
+        minimizeToTray: boolean
+      }
+      error?: string
+    }> => ipcRenderer.invoke('settings:getAll')
+  },
 
   // Progress events listener
   // Event listeners

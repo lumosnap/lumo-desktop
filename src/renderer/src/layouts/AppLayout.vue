@@ -1,14 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import AppSidebar from '../components/AppSidebar.vue'
 import FloatingNavbar from '../components/FloatingNavbar.vue'
 import { AlertTriangle, X } from 'lucide-vue-next'
-
-const props = withDefaults(defineProps<{
-  showSidebar?: boolean
-}>(), {
-  showSidebar: true
-})
 
 const BANNER_DISMISSED_KEY = 'lumosnap:lowStorageBannerDismissed'
 const BANNER_DISMISSED_SPACE_KEY = 'lumosnap:lowStorageBannerDismissedAtSpace'
@@ -91,14 +84,12 @@ onMounted(() => {
       ></div>
     </div>
 
-    <AppSidebar v-if="props.showSidebar" />
     <FloatingNavbar />
 
     <!-- Main Content Area -->
-    <main :class="props.showSidebar ? 'ml-[280px]' : 'ml-0'" class="min-h-screen relative z-10 p-4" :style="props.showSidebar ? 'padding-left: 0' : ''">
+    <main class="min-h-screen relative z-10">
       <div
-        :class="props.showSidebar ? 'rounded-l-[24px]' : 'rounded-[24px]'"
-        class="h-[calc(100vh-2rem)] bg-[#f5f6f7] shadow-[-4px_0_24px_rgba(0,0,0,0.2)] overflow-hidden relative flex flex-col"
+        class="h-screen bg-[#f5f6f7] overflow-hidden relative flex flex-col"
       >
         <!-- Low Storage Banner -->
         <Transition name="slide-down">

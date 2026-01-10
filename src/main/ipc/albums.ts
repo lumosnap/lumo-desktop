@@ -15,8 +15,7 @@ import {
   createImage,
   getAlbumImages,
   deleteImages,
-  updateAlbum,
-  getAlbumImageCounts
+  updateAlbum
 } from '../database'
 import { albumsApi } from '../api-client'
 import { uploadPipeline } from '../pipeline'
@@ -114,9 +113,6 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       const albums = getAllAlbums()
       const storageLocation = getStorageLocation()
 
-      // Batch get image counts to avoid N+1 queries
-      const imageCounts = getAlbumImageCounts()
-
       if (!storageLocation) {
         logger.warn('No storage location configured')
         return { success: true, albums: [] }
@@ -133,19 +129,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
       // Get thumbnail and check sync status
       const albumsWithThumbnails = validAlbums.map((album) => {
-        // Use batched count if available, otherwise 0
-        // We do NOT scan folders here anymore - huge performance win
-        const dbImageCount = imageCounts[album.id] || 0
-        
-        // Construct thumbnail path derived from local folder - no DB query needed if we assume naming
-        // But for now, let's just do a quick DB lookup for ONE thumbnail if needed, 
-        // OR better: just return the count and let client fetch thumbnail lazily?
-        // To keep logic simple for now, we'll fetch just one image for thumbnail to be safe
-        // But ideally we'd cache the "cover image" path on the album record itself.
-        // For optimization, let's keep the getAlbumImages but LIMIT 1 if possible (std SQL)
-        // Since we don't have LIMIT 1 in getAlbumImages, we'll stick to current logic 
-        // BUT crucial change: we do NOT scan source folder here.
-        
+        // Performance: we don't scan folders here - just fetch minimal data from DB
         const images = getAlbumImages(album.id)
         const randomIndex = images.length > 0 ? Math.floor(Math.random() * images.length) : 0
         const thumbnail = images.length > 0 ? images[randomIndex].localFilePath : null

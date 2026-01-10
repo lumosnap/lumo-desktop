@@ -233,7 +233,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <AppLayout :show-sidebar="false">
+  <AppLayout>
     <div class="flex h-full overflow-hidden bg-slate-50 text-slate-900">
       <!-- Left Sidebar -->
       <aside

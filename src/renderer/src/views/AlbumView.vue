@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import CreateAlbumModal from '../components/CreateAlbumModal.vue'
@@ -18,9 +18,19 @@ import {
 } from 'lucide-vue-next'
 import type { Album } from '../stores/album'
 import { useUIStore } from '../stores/ui'
+import { useProfileStore } from '../stores/profile'
 
 const uiStore = useUIStore()
+const profileStore = useProfileStore()
 const router = useRouter()
+
+// Usage percentage for circular progress
+const usagePercentage = computed(() => {
+  if (!profileStore.profile) return 0
+  const total = profileStore.profile.totalImages || 0
+  const max = profileStore.profile.globalMaxImages || 50000
+  return Math.min((total / max) * 100, 100)
+})
 const showCreateModal = ref(false)
 const albums = ref<Album[]>([])
 const loading = ref(true)
@@ -228,6 +238,7 @@ const onAlbumsRefresh = (): void => {
 onMounted(() => {
   loadAlbums()
   loadMasterFolder()
+  profileStore.fetchProfile()
 
   // Register listeners
   if (window.api && window.api.on) {
@@ -297,6 +308,51 @@ onUnmounted(() => {
 
           <!-- Progress Popover -->
           <ProgressPopover :progress="uploadProgress" :is-processing="isProcessing" />
+
+          <!-- Profile Avatar with Usage Ring -->
+          <router-link
+            to="/profile"
+            class="flex items-center gap-3 bg-slate-50 rounded-2xl pl-1.5 pr-4 py-1.5 border border-slate-100 shadow-inner group hover:bg-slate-100/80 transition-all"
+            title="Profile & Settings"
+          >
+            <!-- Avatar with Ring -->
+            <div class="relative">
+              <!-- Circular Progress Ring -->
+              <svg class="w-10 h-10 -rotate-90" viewBox="0 0 44 44">
+                <!-- Background circle -->
+                <circle cx="22" cy="22" r="19" fill="none" stroke="#e2e8f0" stroke-width="3" />
+                <!-- Progress circle -->
+                <circle
+                  cx="22"
+                  cy="22"
+                  r="19"
+                  fill="none"
+                  stroke="url(#usageGradient)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  :stroke-dasharray="119.38"
+                  :stroke-dashoffset="119.38 - (119.38 * usagePercentage) / 100"
+                  class="transition-all duration-500"
+                />
+                <defs>
+                  <linearGradient id="usageGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#6366f1" />
+                    <stop offset="100%" stop-color="#8b5cf6" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <!-- Avatar inside the ring -->
+              <div class="absolute inset-0 flex items-center justify-center">
+                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-[11px] font-bold shadow-sm group-hover:scale-105 transition-transform">
+                  {{ profileStore.profile?.businessName?.charAt(0).toUpperCase() || 'P' }}
+                </div>
+              </div>
+            </div>
+            <!-- Name -->
+            <span class="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition-colors max-w-[100px] truncate hidden sm:block">
+              {{ (profileStore.profile?.businessName || 'Profile').slice(0, 15) }}{{ (profileStore.profile?.businessName || '').length > 15 ? '...' : '' }}
+            </span>
+          </router-link>
         </div>
       </div>
 

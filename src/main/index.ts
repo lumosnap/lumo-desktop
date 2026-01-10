@@ -3,15 +3,25 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { initDatabase, closeDatabase, getAllAlbums, getImagesByStatus } from './database'
-import { initConfig, getMasterFolder } from './config'
+import { initConfig, getMasterFolder, getConfig } from './config'
 import { registerIpcHandlers } from './ipc'
 import { protocol } from 'electron'
 import { watcherService } from './watcher'
 import { uploadPipeline } from './pipeline'
 import log, { createLogger, getErrorMessage } from './logger'
+import { trayManager } from './tray'
+import { compressionPool } from './compression-pool'
+import { copyWatcherRegistry } from './copy-watcher'
 
 // Scoped logger for main process
 const logger = createLogger('Main')
+
+// ==================== App State ====================
+let mainWindow: BrowserWindow | null = null
+let isQuitting = false // Track if app is actually quitting vs minimize-to-tray
+
+// Check if launched with --hidden flag (for Linux hidden start)
+const isHiddenLaunch = process.argv.includes('--hidden')
 
 // ==================== Global Error Handlers ====================
 // Catch unhandled exceptions to prevent silent crashes
@@ -43,8 +53,7 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-let mainWindow: BrowserWindow | null = null
-
+// ==================== Window Management ====================
 function createWindow(): void {
   logger.info('Creating browser window...')
   // Create the browser window.
@@ -65,10 +74,28 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     logger.info('Browser window ready to show')
     if (mainWindow) {
-      mainWindow.show()
+      // Only show window if not launched hidden
+      if (!isHiddenLaunch) {
+        mainWindow.show()
+      } else {
+        logger.info('App launched in hidden mode, staying in tray')
+      }
+
       if (is.dev) {
         logger.debug('Opening DevTools in dev mode')
         mainWindow.webContents.openDevTools()
+      }
+    }
+  })
+
+  // Close to tray instead of quitting (if enabled)
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      const config = getConfig()
+      if (config.minimizeToTray) {
+        event.preventDefault()
+        mainWindow?.hide()
+        logger.debug('Window hidden to tray')
       }
     }
   })
@@ -87,6 +114,30 @@ function createWindow(): void {
   }
 }
 
+/**
+ * Show main window - used by tray
+ */
+function showMainWindow(): void {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore()
+    }
+    mainWindow.show()
+    mainWindow.focus()
+  } else {
+    createWindow()
+  }
+}
+
+/**
+ * Actually quit the app
+ */
+function quitApp(): void {
+  isQuitting = true
+  app.quit()
+}
+
+// ==================== App Initialization ====================
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -112,6 +163,18 @@ app.whenReady().then(() => {
   } catch (error) {
     logger.error('✗ Failed to initialize config:', getErrorMessage(error))
   }
+
+  // ==================== System Tray ====================
+  logger.info('Creating system tray...')
+  trayManager.create({
+    onShowWindow: showMainWindow,
+    onQuit: quitApp,
+    onPauseResume: (isPaused) => {
+      // TODO: Implement pause/resume sync functionality
+      logger.info(`Sync ${isPaused ? 'paused' : 'resumed'}`)
+    }
+  })
+  logger.info('✓ System tray created')
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
@@ -233,28 +296,44 @@ app.whenReady().then(() => {
         // Re-initialize watcher if needed
         watcherService.initialize(mainWindow)
       }
+    } else {
+      // Show existing window
+      showMainWindow()
     }
   })
 })
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+// ==================== App Lifecycle ====================
+// Don't quit when all windows are closed - keep running in tray
 app.on('window-all-closed', () => {
-  logger.info('All windows closed, cleaning up...')
+  // On macOS, apps typically stay in dock. On other platforms, we stay in tray.
+  // Only quit if isQuitting is true (user explicitly quit)
+  if (isQuitting) {
+    logger.info('All windows closed and quitting, cleaning up...')
+    closeDatabase()
+    try {
+      watcherService.closeAll()
+    } catch {
+      // Ignore
+    }
+    if (process.platform !== 'darwin') {
+      app.quit()
+    }
+  } else {
+    logger.debug('All windows closed, but staying in tray')
+  }
+})
+
+app.on('before-quit', () => {
+  logger.info('App quitting, cleaning up...')
+  isQuitting = true
+  trayManager.destroy()
+  copyWatcherRegistry.disposeAll()
+  compressionPool.shutdown().catch(() => {})
   closeDatabase()
   try {
     watcherService.closeAll()
   } catch {
     // Ignore
   }
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
 })
-
-app.on('before-quit', () => {
-  logger.info('App quitting, closing database...')
-  closeDatabase()
-})
-

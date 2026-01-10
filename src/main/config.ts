@@ -7,13 +7,15 @@ export interface AppConfig {
   masterFolderPath: string | null // Root folder where user puts source photo subfolders
   isFirstLaunch: boolean
   userId: string | null
+  minimizeToTray: boolean // Whether to minimize to tray instead of closing
 }
 
 const defaultConfig: AppConfig = {
   storageLocation: null,
   masterFolderPath: null,
   isFirstLaunch: true,
-  userId: null
+  userId: null,
+  minimizeToTray: true // Default to true for background operation
 }
 
 
@@ -73,8 +75,17 @@ export function getConfig(): AppConfig {
   return { ...config }
 }
 
-export function setConfig(updates: Partial<AppConfig>): void {
-  config = { ...config, ...updates }
+export function setConfig<K extends keyof AppConfig>(key: K, value: AppConfig[K]): void
+export function setConfig(updates: Partial<AppConfig>): void
+export function setConfig<K extends keyof AppConfig>(
+  keyOrUpdates: K | Partial<AppConfig>,
+  value?: AppConfig[K]
+): void {
+  if (typeof keyOrUpdates === 'string') {
+    config = { ...config, [keyOrUpdates]: value }
+  } else {
+    config = { ...config, ...keyOrUpdates }
+  }
   saveConfig()
 }
 

@@ -166,6 +166,38 @@ declare global {
         ) => Promise<{ success: boolean; error?: string }>
         openFolder: (folderPath: string) => Promise<{ success: boolean; error?: string }>
       }
+      settings: {
+        getAutoStart: () => Promise<{
+          success: boolean
+          enabled: boolean
+          openAsHidden: boolean
+          error?: string
+        }>
+        setAutoStart: (enabled: boolean) => Promise<{
+          success: boolean
+          enabled?: boolean
+          error?: string
+        }>
+        getMinimizeToTray: () => Promise<{
+          success: boolean
+          enabled: boolean
+          error?: string
+        }>
+        setMinimizeToTray: (enabled: boolean) => Promise<{
+          success: boolean
+          enabled?: boolean
+          error?: string
+        }>
+        getAll: () => Promise<{
+          success: boolean
+          settings?: {
+            autoStart: boolean
+            autoStartHidden: boolean
+            minimizeToTray: boolean
+          }
+          error?: string
+        }>
+      }
       onUploadProgress: (callback: (event: any, progress: any) => void) => void
       offUploadProgress: (callback: (event: any, progress: any) => void) => void
       on: (channel: string, callback: (event: any, ...args: any[]) => void) => void

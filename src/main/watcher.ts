@@ -25,6 +25,7 @@ import {
   getAlbumIdFromMetadata,
   hasAlbumMetadata
 } from './album-metadata'
+import { copyWatcherRegistry } from './copy-watcher'
 
 const logger = createLogger('Watcher')
 
@@ -211,6 +212,121 @@ class WatcherService {
 
     // Start watching the folder for changes
     this.watch(album.id, sourceFolderPath)
+
+    // Start temporary copy watcher to detect files still being copied
+    this.startCopyWatcher(album.id, sourceFolderPath, localFolderPath)
+  }
+
+  /**
+   * Start a temporary copy watcher for newly created albums
+   * Detects files that are still being copied to the source folder
+   */
+  private startCopyWatcher(
+    albumId: string,
+    sourceFolderPath: string,
+    localFolderPath: string
+  ): void {
+    copyWatcherRegistry.create({
+      albumId,
+      folderPath: sourceFolderPath,
+      timeoutMs: 120000, // 2 minutes max
+      debounceMs: 5000, // 5 seconds of silence = copy complete
+      onNewFiles: (filePaths) => {
+        this.handleNewFilesFromCopyWatcher(albumId, filePaths, localFolderPath)
+      },
+      onComplete: () => {
+        logger.info(`Copy watcher completed for album ${albumId}`)
+      }
+    })
+  }
+
+  /**
+   * Handle new files detected by copy watcher
+   */
+  private async handleNewFilesFromCopyWatcher(
+    albumId: string,
+    filePaths: string[],
+    localFolderPath: string
+  ): Promise<void> {
+    if (filePaths.length === 0) return
+
+    logger.info(
+      `Copy watcher detected ${filePaths.length} new files for album ${albumId}`
+    )
+
+    const album = getAlbum(albumId)
+    if (!album) {
+      logger.error(`Album ${albumId} not found`)
+      return
+    }
+
+    // Get existing images to check for duplicates
+    const existingImages = getAlbumImages(albumId)
+    const existingFilenames = new Set(existingImages.map((img) => img.originalFilename))
+
+    // Get current max uploadOrder
+    let maxUploadOrder = existingImages.reduce(
+      (max, img) => Math.max(max, img.uploadOrder),
+      -1
+    )
+
+    let addedCount = 0
+
+    for (const filePath of filePaths) {
+      const filename = basename(filePath)
+
+      // Skip if already exists
+      if (existingFilenames.has(filename)) {
+        continue
+      }
+
+      // Get file info
+      try {
+        const scanResult = scanImagesInFolder(album.sourceFolderPath, {
+          skipDimensions: false
+        }).find((f) => f.filename === filename)
+
+        if (!scanResult) continue
+
+        maxUploadOrder++
+        createImage({
+          albumId,
+          serverId: null,
+          originalFilename: filename,
+          localFilePath: join(localFolderPath, filename),
+          fileSize: scanResult.size,
+          width: scanResult.width || 0,
+          height: scanResult.height || 0,
+          mtime: scanResult.mtime,
+          sourceFileHash: null,
+          uploadStatus: 'pending',
+          uploadOrder: maxUploadOrder
+        })
+
+        addedCount++
+        existingFilenames.add(filename)
+      } catch (error) {
+        logger.error(`Failed to add file ${filename}:`, error)
+      }
+    }
+
+    if (addedCount > 0) {
+      // Update album total images
+      const newTotal = existingImages.length + addedCount
+      updateAlbum(albumId, { totalImages: newTotal })
+
+      logger.info(`Added ${addedCount} new images to album ${albumId}`)
+
+      // Trigger pipeline if not already running
+      if (this.mainWindow) {
+        uploadPipeline.startPipeline(albumId, this.mainWindow).catch((error) => {
+          logger.error(`Pipeline failed for album ${albumId}:`, error)
+        })
+
+        // Notify renderer to refresh
+        this.mainWindow.webContents.send('albums:refresh')
+      }
+    }
   }
 
   stopMasterFolderWatcher(): void {

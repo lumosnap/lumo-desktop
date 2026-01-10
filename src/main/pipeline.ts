@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import { join, basename, dirname } from 'path'
 import { getAlbum, getAlbumImages, updateImage } from './database'
 import { albumsApi, uploadToPresignedUrl } from './api-client'
-import { compressImage } from './compresss-image'
+import { compressionPool } from './compression-pool'
 
 export interface UploadProgress {
   albumId: string
@@ -341,7 +341,7 @@ class UploadPipeline {
       if (!album) throw new Error(`Album ${image.albumId} not found`)
 
       const sourceFilePath = join(album.sourceFolderPath, image.originalFilename)
-      const result = await compressImage(sourceFilePath, {
+      const result = await compressionPool.compress(sourceFilePath, {
         outputDir: dirname(image.localFilePath)
       })
 
