@@ -11,6 +11,14 @@ export default defineConfig(({ mode }) => {
   return {
     main: {
       plugins: [externalizeDepsPlugin()],
+      build: {
+        rollupOptions: {
+          input: {
+            index: resolve(__dirname, 'src/main/index.ts'),
+            'compression-worker': resolve(__dirname, 'src/main/compression-worker.ts')
+          }
+        }
+      },
       define: {
         'process.env.APP_DOMAIN': JSON.stringify(env.VITE_APP_DOMAIN || 'https://lumosnap.app'),
         'process.env.API_URL': JSON.stringify(env.VITE_API_URL || 'http://localhost:8787/api/v1'),
