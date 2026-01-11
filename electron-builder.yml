@@ -41,5 +41,6 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: true
 publish:
-  provider: generic
-  url: https://lumosnap.com/auto-updates
+  provider: github
+  owner: lumosnap
+  repo: https://github.com/lumosnap/lumo-desktop
