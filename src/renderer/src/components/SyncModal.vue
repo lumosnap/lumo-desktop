@@ -69,8 +69,14 @@ async function handleSync() {
 
     const result = await window.api.sync.execute(props.albumId, plainChanges)
     if (result.success) {
-      emit('sync')
-      emit('close')
+      // Check for limit warning
+      if (result.limitWarning) {
+        syncError.value = result.limitWarning
+        // Keep modal open to show warning, don't emit sync/close
+      } else {
+        emit('sync')
+        emit('close')
+      }
     } else {
       syncError.value = result.error || 'Sync failed'
     }

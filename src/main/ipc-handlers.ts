@@ -19,7 +19,7 @@ import {
   updateAlbum,
   updateImage
 } from './database'
-import { albumsApi, profileApi } from './api-client'
+import { albumsApi, profileApi, plansApi } from './api-client'
 import { uploadPipeline } from './pipeline'
 import { existsSync, rmSync, copyFileSync, readdirSync } from 'fs'
 import { join } from 'path'
@@ -230,6 +230,30 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
     }
   )
+
+  // ==================== Plans Handlers ====================
+
+  ipcMain.handle('plans:list', async () => {
+    try {
+      const plans = await plansApi.list()
+      return { success: true, data: plans }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to get plans'
+      console.error('[IPC] Failed to get plans:', message)
+      return { success: false, error: message }
+    }
+  })
+
+  ipcMain.handle('plans:requestUpgrade', async (_, planId: number) => {
+    try {
+      await plansApi.requestUpgrade(planId)
+      return { success: true }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to request upgrade'
+      console.error('[IPC] Failed to request upgrade:', message)
+      return { success: false, error: message }
+    }
+  })
 
   // ==================== Master Folder Handlers ====================
 
@@ -841,6 +865,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       }
 
       console.log(`[Main] Sync: Images in DB before sync:`, getAlbumImages(albumId).length)
+      
+      // Track limit warning for response
+      let syncLimitWarning: string | null = null
 
       // Process deleted files FIRST
       if (changes.deleted && changes.deleted.length > 0) {
@@ -890,11 +917,32 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       // Process new files
       if (changes.new && changes.new.length > 0) {
         console.log(`[Main] Sync: Adding ${changes.new.length} new images`)
+        
+        // Check image limit before processing
+        let filesToProcess = changes.new
+        
+        try {
+          const profile = await profileApi.get()
+          const remaining = Math.max(0, profile.imageLimit - profile.totalImages)
+          
+          if (remaining === 0) {
+            console.log(`[Main] Sync: User at image limit (${profile.totalImages}/${profile.imageLimit}). Skipping all new files.`)
+            syncLimitWarning = `Image limit reached (${profile.totalImages.toLocaleString()}/${profile.imageLimit.toLocaleString()}). No new images were synced. Please upgrade your plan.`
+            filesToProcess = []
+          } else if (changes.new.length > remaining) {
+            console.log(`[Main] Sync: User can only add ${remaining} more images. Limiting sync.`)
+            syncLimitWarning = `Only ${remaining} of ${changes.new.length} images were synced due to your plan limit. Upgrade to sync more.`
+            filesToProcess = changes.new.slice(0, remaining)
+          }
+        } catch (err) {
+          console.error('[Main] Sync: Failed to check image limit, proceeding anyway:', err)
+        }
+        
         const currentImages = getAlbumImages(albumId)
         const maxOrder =
           currentImages.length > 0 ? Math.max(...currentImages.map((i) => i.uploadOrder)) : -1
 
-        changes.new.forEach((file: any, index: number) => {
+        filesToProcess.forEach((file: any, index: number) => {
           const localFilePath = join(album.localFolderPath, file.filename)
           const sourceFilePath = join(album.sourceFolderPath, file.filename)
 
@@ -992,7 +1040,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
       console.log(`[Main] Sync: Execution completed successfully for album ${albumId}`)
       console.log(`[Main] Sync: Final state - Total images: ${totalImages}`)
-      return { success: true }
+      return { success: true, limitWarning: syncLimitWarning }
     } catch (error: any) {
       console.error('[Main] Sync: Execution failed:', error)
       return { success: false, error: error.message }

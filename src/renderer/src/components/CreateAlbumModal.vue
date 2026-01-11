@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import Modal from './ui/Modal.vue'
-import { AlertCircle, Plus, Loader2 } from 'lucide-vue-next'
+import { AlertCircle, Plus, Loader2, AlertTriangle, ArrowUpCircle } from 'lucide-vue-next'
+import { useProfileStore } from '../stores/profile'
+
+const profileStore = useProfileStore()
 
 const props = defineProps<{
   show: boolean
@@ -15,6 +18,26 @@ const emit = defineEmits<{
 const title = ref<string>('')
 const isCreating = ref(false)
 const error = ref<string | null>(null)
+
+// Computed for limit warning message
+const limitWarning = computed(() => {
+  if (!profileStore.profile) return null
+  if (profileStore.isAtLimit) {
+    return {
+      type: 'error' as const,
+      message: 'You\'ve reached your image limit. Uploads will not be processed until you upgrade your plan.',
+      remaining: 0
+    }
+  }
+  if (profileStore.isNearLimit) {
+    return {
+      type: 'warning' as const,
+      message: `Only ${profileStore.remainingImages.toLocaleString()} images remaining in your plan. Consider upgrading.`,
+      remaining: profileStore.remainingImages
+    }
+  }
+  return null
+})
 
 async function createAlbum(): Promise<void> {
   if (!title.value.trim()) {
@@ -71,6 +94,35 @@ watch(
 <template>
   <Modal :show="show" title="Create New Album" @close="handleClose">
     <div class="space-y-5">
+      <!-- Limit Warning -->
+      <div
+        v-if="limitWarning"
+        class="flex items-start gap-3 p-4 rounded-xl border"
+        :class="limitWarning.type === 'error' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'"
+      >
+        <AlertTriangle
+          class="w-5 h-5 flex-shrink-0 mt-0.5"
+          :class="limitWarning.type === 'error' ? 'text-red-500' : 'text-amber-500'"
+        />
+        <div class="flex-1">
+          <p
+            class="text-sm"
+            :class="limitWarning.type === 'error' ? 'text-red-600' : 'text-amber-600'"
+          >
+            {{ limitWarning.message }}
+          </p>
+          <router-link
+            to="/profile"
+            class="inline-flex items-center gap-1 mt-2 text-sm font-medium"
+            :class="limitWarning.type === 'error' ? 'text-red-700 hover:text-red-800' : 'text-amber-700 hover:text-amber-800'"
+            @click="handleClose"
+          >
+            <ArrowUpCircle class="w-4 h-4" />
+            Upgrade Plan
+          </router-link>
+        </div>
+      </div>
+
       <!-- Album title -->
       <div>
         <label for="album-title" class="block text-sm font-medium text-slate-700 mb-2">

@@ -7,8 +7,12 @@ interface ProfileData {
   businessName: string | null
   phone: string | null
   storageUsed: number | null
-  totalImages?: number
-  globalMaxImages?: number
+  totalImages: number
+  globalMaxImages: number
+  imageLimit: number
+  planName: string
+  planExpiry: string | null
+  profileCompleted: boolean
   createdAt: string
   updatedAt: string
 }
@@ -25,6 +29,31 @@ export const useProfileStore = defineStore('profile', () => {
       return profile.value.businessName
     }
     return null // Let the component handle fallback
+  })
+
+  // Computed: is user near their image limit (>80%)
+  const isNearLimit = computed(() => {
+    if (!profile.value) return false
+    const usage = profile.value.totalImages / profile.value.imageLimit
+    return usage >= 0.8 && usage < 1
+  })
+
+  // Computed: is user at or over their image limit
+  const isAtLimit = computed(() => {
+    if (!profile.value) return false
+    return profile.value.totalImages >= profile.value.imageLimit
+  })
+
+  // Computed: remaining images that can be uploaded
+  const remainingImages = computed(() => {
+    if (!profile.value) return 0
+    return Math.max(0, profile.value.imageLimit - profile.value.totalImages)
+  })
+
+  // Computed: usage percentage for progress bars
+  const usagePercentage = computed(() => {
+    if (!profile.value) return 0
+    return Math.min((profile.value.totalImages / profile.value.imageLimit) * 100, 100)
   })
 
   /**
@@ -92,6 +121,10 @@ export const useProfileStore = defineStore('profile', () => {
     error,
     displayName,
     hasFetched,
+    isNearLimit,
+    isAtLimit,
+    remainingImages,
+    usagePercentage,
     fetchProfile,
     updateProfile,
     clearProfile

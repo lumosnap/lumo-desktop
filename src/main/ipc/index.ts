@@ -13,6 +13,7 @@ import { registerAlbumHandlers } from './albums'
 import { registerSyncHandlers } from './sync'
 import { registerApiHandlers } from './api'
 import { registerSettingsHandlers } from './settings'
+import { registerPlansHandlers } from './plans'
 import { createLogger } from '../logger'
 
 const logger = createLogger('IPC')
@@ -43,6 +44,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   // Settings handlers (auto-start, minimize-to-tray)
   registerSettingsHandlers()
+
+  // Plans handlers (subscription plans)
+  registerPlansHandlers()
 
   logger.info('✓ All IPC handlers registered')
 }

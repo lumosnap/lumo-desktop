@@ -21,7 +21,9 @@ import {
   ImageIcon,
   ArrowLeft,
   Settings2,
-  Eye
+  Eye,
+  Sparkles,
+  Clock
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -56,6 +58,22 @@ const user = computed(() => ({
   email: authStore.user?.email || ''
 }))
 
+// Plans state
+interface Plan {
+  id: number
+  name: string
+  displayName: string
+  imageLimit: number
+  priceMonthly: string
+  description: string
+}
+const availablePlans = ref<Plan[]>([])
+const isLoadingPlans = ref(false)
+const selectedPlanId = ref<number | null>(null)
+const isRequestingUpgrade = ref(false)
+const upgradeSuccess = ref(false)
+const upgradeError = ref<string | null>(null)
+
 // Storage settings state
 const storageLocation = ref<string | null>(null)
 const freeSpace = ref('')
@@ -72,6 +90,69 @@ const masterFolder = ref<string | null>(null)
 const isLoadingMasterFolder = ref(false)
 const isSettingMasterFolder = ref(false)
 const masterFolderError = ref<string | null>(null)
+
+// Format plan expiry date
+function formatExpiryDate(date: string | null): string {
+  if (!date) return 'Never'
+  const d = new Date(date)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// Format price (priceMonthly is in cents as string)
+function formatPrice(priceMonthly: string): string {
+  const cents = parseInt(priceMonthly, 10)
+  if (cents === 0) return 'Free'
+  return `₹${(cents / 100).toFixed(0)}`
+}
+
+// Check if plan is current
+function isCurrentPlan(plan: Plan): boolean {
+  return plan.displayName === profileStore.profile?.planName
+}
+
+// Check if plan is an upgrade
+function isPlanUpgrade(plan: Plan): boolean {
+  if (!profileStore.profile) return false
+  return plan.imageLimit > profileStore.profile.imageLimit
+}
+
+async function loadPlans(): Promise<void> {
+  isLoadingPlans.value = true
+  try {
+    const result = await window.api.plans.list()
+    if (result.success && result.data) {
+      availablePlans.value = result.data
+    }
+  } catch (err: unknown) {
+    console.error('Failed to load plans:', err)
+  } finally {
+    isLoadingPlans.value = false
+  }
+}
+
+async function requestUpgrade(planId: number): Promise<void> {
+  isRequestingUpgrade.value = true
+  upgradeError.value = null
+  upgradeSuccess.value = false
+  selectedPlanId.value = planId
+  
+  try {
+    const result = await window.api.plans.requestUpgrade(planId)
+    if (result.success) {
+      upgradeSuccess.value = true
+      setTimeout(() => {
+        upgradeSuccess.value = false
+        selectedPlanId.value = null
+      }, 3000)
+    } else {
+      upgradeError.value = result.error || 'Failed to request upgrade'
+    }
+  } catch (err: unknown) {
+    upgradeError.value = err instanceof Error ? err.message : 'Failed to request upgrade'
+  } finally {
+    isRequestingUpgrade.value = false
+  }
+}
 
 async function loadProfileData(): Promise<void> {
   isLoadingProfile.value = true
@@ -229,6 +310,7 @@ onMounted(() => {
   loadStorageInfo()
   loadProfileData()
   loadMasterFolder()
+  loadPlans()
 })
 </script>
 
@@ -574,7 +656,7 @@ onMounted(() => {
             <div>
               <h2 class="text-2xl font-bold text-slate-900 mb-1">Billing & Plan</h2>
               <p class="text-slate-500 text-sm">
-                Manage your subscription and payment methods.
+                View your subscription and request plan upgrades.
               </p>
             </div>
 
@@ -587,10 +669,15 @@ onMounted(() => {
               <div class="absolute -bottom-10 -left-10 w-32 h-32 bg-purple-200/30 rounded-full blur-2xl"></div>
               
               <div class="relative">
-                <div class="flex justify-between items-start mb-6">
+                <div class="flex justify-between items-start mb-4">
                   <div>
-                    <h3 class="font-bold text-slate-900 text-xl mb-1">Pro Plan</h3>
-                    <p class="text-slate-500 text-sm">Billed annually</p>
+                    <h3 class="font-bold text-slate-900 text-xl mb-1">
+                      {{ profileStore.profile?.planName || 'Loading...' }}
+                    </h3>
+                    <p class="text-slate-500 text-sm flex items-center gap-2">
+                      <Clock class="w-4 h-4" />
+                      Expires: {{ formatExpiryDate(profileStore.profile?.planExpiry || null) }}
+                    </p>
                   </div>
                   <span
                     class="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide flex items-center gap-1"
@@ -600,55 +687,124 @@ onMounted(() => {
                   </span>
                 </div>
 
-                <div class="flex items-baseline gap-1 mb-6">
-                  <span class="text-4xl font-bold text-slate-900">$29</span>
-                  <span class="text-slate-500">/month</span>
+                <!-- Usage Stats -->
+                <div class="flex items-center gap-3 mb-3">
+                  <div class="w-10 h-10 rounded-xl bg-white/70 flex items-center justify-center">
+                    <ImageIcon class="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex justify-between text-sm mb-1">
+                      <span class="text-slate-600 font-medium">Images</span>
+                      <span class="font-semibold text-slate-900">
+                        {{ (profileStore.profile?.totalImages || 0).toLocaleString() }} / {{ (profileStore.profile?.imageLimit || 500).toLocaleString() }}
+                      </span>
+                    </div>
+                    <div class="h-2.5 bg-white/50 rounded-full overflow-hidden">
+                      <div 
+                        class="h-full rounded-full transition-all duration-500"
+                        :class="profileStore.isAtLimit ? 'bg-red-500' : profileStore.isNearLimit ? 'bg-amber-500' : 'bg-gradient-to-r from-indigo-500 to-purple-500'"
+                        :style="{ width: `${profileStore.usagePercentage}%` }"
+                      ></div>
+                    </div>
+                  </div>
                 </div>
 
-                <div class="flex gap-3">
-                  <button
-                    class="flex-1 flex items-center justify-center gap-2 rounded-xl bg-white border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
-                  >
-                    Manage Subscription
-                  </button>
-                  <button
-                    class="flex items-center justify-center rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800 transition-colors shadow-sm"
-                  >
-                    Upgrade
-                  </button>
+                <!-- Limit Warning -->
+                <div
+                  v-if="profileStore.isAtLimit"
+                  class="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl p-3 mt-4"
+                >
+                  <AlertTriangle class="w-5 h-5 text-red-500 shrink-0" />
+                  <div>
+                    <p class="text-sm font-medium text-red-800">You've reached your image limit</p>
+                    <p class="text-xs text-red-600">Upgrade your plan to upload more images.</p>
+                  </div>
+                </div>
+                <div
+                  v-else-if="profileStore.isNearLimit"
+                  class="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3 mt-4"
+                >
+                  <AlertTriangle class="w-5 h-5 text-amber-500 shrink-0" />
+                  <div>
+                    <p class="text-sm font-medium text-amber-800">You're running low on space</p>
+                    <p class="text-xs text-amber-600">Only {{ profileStore.remainingImages.toLocaleString() }} images remaining.</p>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- Usage Stats -->
+            <!-- Available Plans -->
             <div class="bg-white rounded-2xl border border-slate-200 p-6">
-              <h3 class="font-semibold text-slate-900 mb-4">Current Usage</h3>
-              <div class="space-y-4">
-                <!-- Images Usage -->
-                <div>
-                  <div class="flex items-center gap-3 mb-3">
-                    <div class="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
-                      <ImageIcon class="w-5 h-5 text-indigo-600" />
-                    </div>
-                    <div class="flex-1">
-                      <div class="flex justify-between text-sm mb-1">
-                        <span class="text-slate-600 font-medium">Images</span>
-                        <span class="font-semibold text-slate-900">
-                          {{ (profileStore.profile?.totalImages || 0).toLocaleString() }} / {{ (profileStore.profile?.globalMaxImages || 50000).toLocaleString() }}
-                        </span>
-                      </div>
-                      <div class="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div 
-                          class="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
-                          :style="{ width: `${Math.min(((profileStore.profile?.totalImages || 0) / (profileStore.profile?.globalMaxImages || 50000)) * 100, 100)}%` }"
-                        ></div>
-                      </div>
-                    </div>
+              <h3 class="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                <Sparkles class="w-5 h-5 text-indigo-500" />
+                Available Plans
+              </h3>
+              
+              <!-- Loading State -->
+              <div v-if="isLoadingPlans" class="flex items-center justify-center py-8">
+                <Loader2 class="w-6 h-6 text-indigo-500 animate-spin" />
+              </div>
+
+              <!-- Plans Grid -->
+              <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div
+                  v-for="plan in availablePlans"
+                  :key="plan.id"
+                  class="border rounded-xl p-4 transition-all"
+                  :class="isCurrentPlan(plan) ? 'border-indigo-300 bg-indigo-50/50' : 'border-slate-200 hover:border-indigo-200'"
+                >
+                  <div class="flex items-start justify-between mb-2">
+                    <h4 class="font-semibold text-slate-900">{{ plan.displayName }}</h4>
+                    <span
+                      v-if="isCurrentPlan(plan)"
+                      class="text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full"
+                    >
+                      Current
+                    </span>
                   </div>
-                  <p class="text-xs text-slate-400 ml-[52px]">
-                    {{ Math.round(((profileStore.profile?.totalImages || 0) / (profileStore.profile?.globalMaxImages || 50000)) * 100) }}% of your image quota used
+                  <p class="text-2xl font-bold text-slate-900 mb-1">
+                    {{ formatPrice(plan.priceMonthly) }}
+                    <span v-if="plan.priceMonthly !== '0'" class="text-sm font-normal text-slate-500">/mo</span>
                   </p>
+                  <p class="text-xs text-slate-500 mb-3">
+                    {{ plan.imageLimit.toLocaleString() }} images
+                  </p>
+                  <p class="text-xs text-slate-600 mb-4">{{ plan.description }}</p>
+                  
+                  <button
+                    v-if="!isCurrentPlan(plan) && isPlanUpgrade(plan)"
+                    :disabled="isRequestingUpgrade && selectedPlanId === plan.id"
+                    class="w-full flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-2 text-sm font-semibold text-white hover:shadow-lg transition-all disabled:opacity-50"
+                    @click="requestUpgrade(plan.id)"
+                  >
+                    <Loader2 v-if="isRequestingUpgrade && selectedPlanId === plan.id" class="w-4 h-4 animate-spin" />
+                    <span>{{ isRequestingUpgrade && selectedPlanId === plan.id ? 'Requesting...' : 'Request Upgrade' }}</span>
+                  </button>
+                  <div
+                    v-else-if="isCurrentPlan(plan)"
+                    class="w-full text-center py-2 text-sm text-indigo-600 font-medium"
+                  >
+                    Your current plan
+                  </div>
                 </div>
+              </div>
+
+              <!-- Upgrade Success -->
+              <div
+                v-if="upgradeSuccess"
+                class="mt-4 flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl p-3"
+              >
+                <CheckCircle2 class="w-5 h-5 text-emerald-500" />
+                <p class="text-sm text-emerald-700">Upgrade request submitted! We'll review it shortly.</p>
+              </div>
+
+              <!-- Upgrade Error -->
+              <div
+                v-if="upgradeError"
+                class="mt-4 flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl p-3"
+              >
+                <AlertTriangle class="w-5 h-5 text-red-500" />
+                <p class="text-sm text-red-700">{{ upgradeError }}</p>
               </div>
             </div>
           </div>

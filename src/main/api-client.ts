@@ -182,6 +182,10 @@ export interface ApiProfile {
   storageUsed: number | null
   totalImages: number
   globalMaxImages: number
+  imageLimit: number
+  planName: string
+  planExpiry: string | null
+  profileCompleted: boolean
   createdAt: string
   updatedAt: string
 }
@@ -196,6 +200,17 @@ export interface ApiBillingAddress {
   country: string
   isDefault: boolean | null
   createdAt: string
+}
+
+// ==================== Plan Types ====================
+
+export interface ApiPlan {
+  id: number
+  name: string
+  displayName: string
+  imageLimit: number
+  priceMonthly: string
+  description: string
 }
 
 // ==================== Profile API ====================
@@ -285,6 +300,31 @@ export const profileApi = {
       throw new Error('No data in response')
     }
     return response.data
+  }
+}
+
+// ==================== Plans API ====================
+
+export const plansApi = {
+  /**
+   * Get all available subscription plans
+   */
+  async list(): Promise<ApiPlan[]> {
+    console.log('[API] Getting available plans')
+    const response = await apiFetch<ApiResponse<ApiPlan[]>>('/plans')
+    return response.data || []
+  },
+
+  /**
+   * Request upgrade to a specific plan
+   */
+  async requestUpgrade(planId: number): Promise<void> {
+    console.log(`[API] Requesting upgrade to plan ${planId}`)
+    await apiFetch<ApiResponse<void>>('/plans/request-upgrade', {
+      method: 'POST',
+      body: { planId }
+    })
+    console.log('[API] Upgrade request submitted')
   }
 }
 

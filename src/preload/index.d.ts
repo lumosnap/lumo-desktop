@@ -69,6 +69,24 @@ declare global {
         generateShareLink: (albumId: string) => Promise<any>
         getFavorites: (albumId: string, clientName?: string) => Promise<any>
       }
+      plans: {
+        list: () => Promise<{
+          success: boolean
+          data?: Array<{
+            id: number
+            name: string
+            displayName: string
+            imageLimit: number
+            priceMonthly: string
+            description: string
+          }>
+          error?: string
+        }>
+        requestUpgrade: (planId: number) => Promise<{
+          success: boolean
+          error?: string
+        }>
+      }
       profile: {
         get: () => Promise<{
           success: boolean
@@ -78,6 +96,12 @@ declare global {
             businessName: string | null
             phone: string | null
             storageUsed: number | null
+            totalImages: number
+            globalMaxImages: number
+            imageLimit: number
+            planName: string
+            planExpiry: string | null
+            profileCompleted: boolean
             createdAt: string
             updatedAt: string
           }
@@ -91,6 +115,12 @@ declare global {
             businessName: string | null
             phone: string | null
             storageUsed: number | null
+            totalImages: number
+            globalMaxImages: number
+            imageLimit: number
+            planName: string
+            planExpiry: string | null
+            profileCompleted: boolean
             createdAt: string
             updatedAt: string
           }

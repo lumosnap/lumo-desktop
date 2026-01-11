@@ -108,8 +108,11 @@ export function registerSyncHandlers(mainWindow: BrowserWindow): void {
         return { success: false, error: 'Album not found' }
       }
 
-      // Import albumsApi here to avoid circular dependency issues
-      const { albumsApi } = await import('../api-client')
+      // Import API clients
+      const { albumsApi, profileApi } = await import('../api-client')
+
+      // Track limit warning for response
+      let syncLimitWarning: string | null = null
 
       // Process deleted files FIRST
       if (changes.deleted && changes.deleted.length > 0) {
@@ -133,11 +136,32 @@ export function registerSyncHandlers(mainWindow: BrowserWindow): void {
       // Process new files
       if (changes.new && changes.new.length > 0) {
         logger.info(`Adding ${changes.new.length} new images`)
+        
+        // Check image limit before processing
+        let filesToProcess = changes.new
+        
+        try {
+          const profile = await profileApi.get()
+          const remaining = Math.max(0, profile.imageLimit - profile.totalImages)
+          
+          if (remaining === 0) {
+            logger.warn(`User at image limit (${profile.totalImages}/${profile.imageLimit}). Skipping all new files.`)
+            syncLimitWarning = `Image limit reached (${profile.totalImages.toLocaleString()}/${profile.imageLimit.toLocaleString()}). No new images were synced. Please upgrade your plan.`
+            filesToProcess = []
+          } else if (changes.new.length > remaining) {
+            logger.warn(`User can only add ${remaining} more images. Limiting sync.`)
+            syncLimitWarning = `Only ${remaining} of ${changes.new.length} images were synced due to your plan limit. Upgrade to sync more.`
+            filesToProcess = changes.new.slice(0, remaining)
+          }
+        } catch (err) {
+          logger.error('Failed to check image limit, proceeding anyway:', getErrorMessage(err))
+        }
+        
         const currentImages = getAlbumImages(albumId)
         const maxOrder =
           currentImages.length > 0 ? Math.max(...currentImages.map((i) => i.uploadOrder)) : -1
 
-        changes.new.forEach((file, index) => {
+        filesToProcess.forEach((file, index) => {
           const localFilePath = join(album.localFolderPath, file.filename)
           const sourceFilePath = join(album.sourceFolderPath, file.filename)
 
@@ -213,7 +237,7 @@ export function registerSyncHandlers(mainWindow: BrowserWindow): void {
       }
 
       logger.info(`Sync completed for album ${albumId}`)
-      return { success: true }
+      return { success: true, limitWarning: syncLimitWarning }
     } catch (error: unknown) {
       logger.error('Sync execution failed:', getErrorMessage(error))
       return { success: false, error: getErrorMessage(error) }

@@ -72,6 +72,24 @@ const api = {
       ipcRenderer.invoke('api:generateShareLink', albumId),
     getFavorites: (albumId: string, clientName?: string): Promise<any> => ipcRenderer.invoke('api:getFavorites', albumId, clientName)
   },
+  plans: {
+    list: (): Promise<{
+      success: boolean
+      data?: Array<{
+        id: number
+        name: string
+        displayName: string
+        imageLimit: number
+        priceMonthly: string
+        description: string
+      }>
+      error?: string
+    }> => ipcRenderer.invoke('plans:list'),
+    requestUpgrade: (planId: number): Promise<{
+      success: boolean
+      error?: string
+    }> => ipcRenderer.invoke('plans:requestUpgrade', planId)
+  },
   profile: {
     get: (): Promise<{
       success: boolean
@@ -81,6 +99,12 @@ const api = {
         businessName: string | null
         phone: string | null
         storageUsed: number | null
+        totalImages: number
+        globalMaxImages: number
+        imageLimit: number
+        planName: string
+        planExpiry: string | null
+        profileCompleted: boolean
         createdAt: string
         updatedAt: string
       }
