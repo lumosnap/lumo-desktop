@@ -38,10 +38,10 @@ jobs:
       - name: Package app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VITE_APP_DOMAIN: https://lumosnap.app
-          VITE_API_URL: https://lumosnap.app/api/v1
-          VITE_BACKEND_BASE: https://lumosnap.app
-          VITE_AUTH_URL: https://lumosnap.app/auth/desktop
+          VITE_APP_DOMAIN: https://lumosnap.com
+          VITE_API_URL: https://backend.lumosnap.com/api/v1
+          VITE_BACKEND_BASE: https://backend.lumosnap.com
+          VITE_AUTH_URL: https://connect.lumosnap.com
         run: pnpm exec electron-builder --publish never
 
       - name: Upload artifacts
