@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import AppLayout from '../layouts/AppLayout.vue'
 import {
   CalendarDays,
@@ -26,6 +26,31 @@ interface Booking {
 const bookings = ref<Booking[]>([])
 const isLoading = ref(true)
 const error = ref<string | null>(null)
+const activeTab = ref<'upcoming' | 'past'>('upcoming')
+
+const upcomingBookings = computed(() => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return bookings.value.filter(booking => {
+    const eventDate = new Date(booking.eventDate)
+    eventDate.setHours(0, 0, 0, 0)
+    return eventDate >= today
+  }).sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime())
+})
+
+const pastBookings = computed(() => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return bookings.value.filter(booking => {
+    const eventDate = new Date(booking.eventDate)
+    eventDate.setHours(0, 0, 0, 0)
+    return eventDate < today
+  }).sort((a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime()) // Sort past bookings decenting
+})
+
+const filteredBookings = computed(() => {
+  return activeTab.value === 'upcoming' ? upcomingBookings.value : pastBookings.value
+})
 
 async function fetchBookings(): Promise<void> {
   isLoading.value = true
@@ -62,8 +87,8 @@ onMounted(() => {
   <AppLayout>
     <div class="flex h-full flex-col overflow-hidden bg-slate-50 text-slate-900">
       <!-- Header -->
-      <div class="flex items-center justify-between border-b border-slate-200 bg-white px-8 py-5 shrink-0">
-        <div>
+      <div class="flex flex-col border-b border-slate-200 bg-white px-8 pt-5 shrink-0">
+        <div class="mb-5">
            <!-- Back Button -->
            <router-link
             to="/albums"
@@ -76,6 +101,30 @@ onMounted(() => {
             Management
           </div>
           <h1 class="text-2xl font-serif italic text-slate-900">Bookings</h1>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex items-center gap-6 -mb-px">
+          <button
+            @click="activeTab = 'upcoming'"
+            class="pb-3 text-sm font-medium transition-colors border-b-2"
+            :class="activeTab === 'upcoming' ? 'text-indigo-600 border-indigo-600' : 'text-slate-500 border-transparent hover:text-slate-700'"
+          >
+            Upcoming
+            <span class="ml-1.5 py-0.5 px-2 rounded-full text-xs" :class="activeTab === 'upcoming' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-600'">
+              {{ upcomingBookings.length }}
+            </span>
+          </button>
+           <button
+            @click="activeTab = 'past'"
+            class="pb-3 text-sm font-medium transition-colors border-b-2"
+            :class="activeTab === 'past' ? 'text-indigo-600 border-indigo-600' : 'text-slate-500 border-transparent hover:text-slate-700'"
+          >
+            Past
+            <span class="ml-1.5 py-0.5 px-2 rounded-full text-xs" :class="activeTab === 'past' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-600'">
+              {{ pastBookings.length }}
+            </span>
+          </button>
         </div>
       </div>
 
@@ -116,13 +165,16 @@ onMounted(() => {
              </div>
 
             <!-- Empty State -->
-            <div v-else-if="bookings.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
+            <div v-else-if="filteredBookings.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
                <div class="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-4">
                  <Inbox class="w-10 h-10 text-slate-400" />
                </div>
-               <h3 class="text-lg font-bold text-slate-900 mb-1">No bookings yet</h3>
+               <h3 class="text-lg font-bold text-slate-900 mb-1">No {{ activeTab }} bookings</h3>
                <p class="text-slate-500 max-w-sm">
-                 When clients book you through your public link, their requests will appear here.
+                 {{ activeTab === 'upcoming' 
+                    ? 'When clients book future events, they will appear here.'
+                    : 'History of your completed events will appear here.' 
+                 }}
                </p>
             </div>
 
@@ -139,7 +191,7 @@ onMounted(() => {
                      </tr>
                    </thead>
                    <tbody class="divide-y divide-slate-100">
-                     <tr v-for="booking in bookings" :key="booking.id" class="hover:bg-slate-50/50 transition-colors">
+                     <tr v-for="booking in filteredBookings" :key="booking.id" class="hover:bg-slate-50/50 transition-colors">
                        <td class="px-6 py-4 align-top">
                          <div class="font-medium text-slate-900 text-base mb-0.5">{{ booking.name }}</div>
                          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
