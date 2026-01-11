@@ -23,8 +23,13 @@ import {
   Settings2,
   Eye,
   Sparkles,
-  Clock
+  Clock,
+  Link as LinkIcon,
+  Copy,
+  Check,
+  ExternalLink
 } from 'lucide-vue-next'
+import Modal from '../components/ui/Modal.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -52,11 +57,63 @@ const isSavingProfile = ref(false)
 const profileError = ref<string | null>(null)
 const profileSaveSuccess = ref(false)
 
+// Booking URL state
+const bookingUrl = ref('')
+const isBookingUrlLoading = ref(false)
+const showBookingModal = ref(false)
+const bookingError = ref<string | null>(null)
+const bookingUrlCopied = ref(false)
+
 // Use auth store user data
 const user = computed(() => ({
   name: authStore.user?.name || '',
   email: authStore.user?.email || ''
 }))
+
+async function generateBookingUrl(): Promise<void> {
+  isBookingUrlLoading.value = true
+  bookingError.value = null
+  try {
+    const result = await window.api.profile.getBookingUrl()
+    if (result.success && result.bookingUrl) {
+      bookingUrl.value = result.bookingUrl
+      showBookingModal.value = true
+    } else {
+      bookingError.value = result.error || 'Failed to generate booking URL'
+    }
+  } catch (err: unknown) {
+    bookingError.value = err instanceof Error ? err.message : 'Failed to generate booking URL'
+  } finally {
+    isBookingUrlLoading.value = false
+  }
+}
+
+async function copyBookingUrl(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(bookingUrl.value)
+    bookingUrlCopied.value = true
+    setTimeout(() => {
+      bookingUrlCopied.value = false
+    }, 2000)
+  } catch {
+    // Fallback for older browsers
+    const textArea = document.createElement('textarea')
+    textArea.value = bookingUrl.value
+    document.body.appendChild(textArea)
+    textArea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textArea)
+    bookingUrlCopied.value = true
+    setTimeout(() => {
+      bookingUrlCopied.value = false
+    }, 2000)
+  }
+}
+
+function openBookingUrl(): void {
+  window.open(bookingUrl.value, '_blank')
+}
+
 
 // Plans state
 interface Plan {
@@ -396,89 +453,135 @@ onMounted(() => {
             </div>
 
             <!-- Loading State -->
-            <div v-if="isLoadingProfile" class="flex items-center justify-center py-12">
-              <Loader2 class="w-8 h-8 text-indigo-500 animate-spin" />
+            <div v-if="isLoadingProfile" class="space-y-6">
+              <div class="h-8 w-48 bg-slate-200 rounded animate-pulse"></div>
+              <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-6">
+                <div class="grid grid-cols-2 gap-6">
+                  <div class="space-y-2">
+                    <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
+                    <div class="h-12 w-full bg-slate-100 rounded-xl animate-pulse"></div>
+                  </div>
+                  <div class="space-y-2">
+                    <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
+                    <div class="h-12 w-full bg-slate-100 rounded-xl animate-pulse"></div>
+                  </div>
+                </div>
+                <div class="grid grid-cols-2 gap-6">
+                   <div class="space-y-2">
+                    <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
+                    <div class="h-12 w-full bg-slate-100 rounded-xl animate-pulse"></div>
+                  </div>
+                  <div class="space-y-2">
+                    <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
+                    <div class="h-12 w-full bg-slate-100 rounded-xl animate-pulse"></div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- Form Fields -->
-            <div v-else class="bg-white rounded-2xl border border-slate-200 p-6 space-y-6">
-              <div class="grid grid-cols-2 gap-6">
-                <div class="space-y-2">
-                  <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <User class="h-4 w-4 text-slate-400" />
-                    Full Name
-                  </label>
-                  <input
-                    :value="user.name"
-                    type="text"
-                    disabled
-                    class="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-500 cursor-not-allowed"
-                    placeholder="Your full name"
-                  />
-                  <p class="text-xs text-slate-400">Managed by your Google account</p>
+            <div v-else class="space-y-8 animate-fade-in">
+              <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-6">
+                <div class="grid grid-cols-2 gap-6">
+                  <div class="space-y-2">
+                    <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+                      <User class="h-4 w-4 text-slate-400" />
+                      Full Name
+                    </label>
+                    <input
+                      :value="user.name"
+                      type="text"
+                      disabled
+                      class="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-500 cursor-not-allowed"
+                      placeholder="Your full name"
+                    />
+                    <p class="text-xs text-slate-400">Managed by your Google account</p>
+                  </div>
+                  <div class="space-y-2">
+                    <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+                      <Building2 class="h-4 w-4 text-slate-400" />
+                      Business Name
+                    </label>
+                    <input
+                      v-model="profileData.businessName"
+                      type="text"
+                      class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white outline-none transition-all"
+                      placeholder="Your business name"
+                    />
+                  </div>
                 </div>
-                <div class="space-y-2">
-                  <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <Building2 class="h-4 w-4 text-slate-400" />
-                    Business Name
-                  </label>
-                  <input
-                    v-model="profileData.businessName"
-                    type="text"
-                    class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white outline-none transition-all"
-                    placeholder="Your business name"
-                  />
+
+                <div class="grid grid-cols-2 gap-6">
+                  <div class="space-y-2">
+                    <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+                      <Mail class="h-4 w-4 text-slate-400" />
+                      Email Address
+                    </label>
+                    <input
+                      :value="user.email"
+                      type="email"
+                      disabled
+                      class="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-500 cursor-not-allowed"
+                      placeholder="you@example.com"
+                    />
+                    <p class="text-xs text-slate-400">Managed by your Google account</p>
+                  </div>
+                  <div class="space-y-2">
+                    <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+                      <Phone class="h-4 w-4 text-slate-400" />
+                      Phone Number
+                    </label>
+                    <input
+                      v-model="profileData.phone"
+                      type="tel"
+                      class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white outline-none transition-all"
+                      placeholder="+1 (555) 000-0000"
+                    />
+                  </div>
+                </div>
+
+                <!-- Error Message -->
+                <div
+                  v-if="profileError"
+                  class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm"
+                >
+                  {{ profileError }}
                 </div>
               </div>
 
-              <div class="grid grid-cols-2 gap-6">
-                <div class="space-y-2">
-                  <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <Mail class="h-4 w-4 text-slate-400" />
-                    Email Address
-                  </label>
-                  <input
-                    :value="user.email"
-                    type="email"
-                    disabled
-                    class="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-500 cursor-not-allowed"
-                    placeholder="you@example.com"
-                  />
-                  <p class="text-xs text-slate-400">Managed by your Google account</p>
+               <!-- Booking URL Section -->
+              <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="font-semibold text-slate-900">Booking URL</h3>
+                    <p class="text-sm text-slate-500">Share this link with clients to let them book you directly.</p>
+                  </div>
+                  <button
+                    class="flex items-center gap-2 rounded-xl bg-indigo-50 text-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-100 transition-colors"
+                     @click="generateBookingUrl"
+                     :disabled="isBookingUrlLoading"
+                  >
+                    <LinkIcon v-if="!isBookingUrlLoading" class="h-4 w-4" />
+                    <Loader2 v-else class="h-4 w-4 animate-spin" />
+                    <span>Get Link</span>
+                  </button>
                 </div>
-                <div class="space-y-2">
-                  <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <Phone class="h-4 w-4 text-slate-400" />
-                    Phone Number
-                  </label>
-                  <input
-                    v-model="profileData.phone"
-                    type="tel"
-                    class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white outline-none transition-all"
-                    placeholder="+1 (555) 000-0000"
-                  />
-                </div>
+                 <div v-if="bookingError" class="text-sm text-red-600 bg-red-50 p-3 rounded-lg">
+                    {{ bookingError }}
+                 </div>
               </div>
 
-              <!-- Error Message -->
-              <div
-                v-if="profileError"
-                class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm"
-              >
-                {{ profileError }}
+              <!-- Save Button -->
+              <div class="flex justify-end">
+                <button
+                  :disabled="isSavingProfile"
+                  class="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  @click="saveProfile"
+                >
+                  <Loader2 v-if="isSavingProfile" class="w-4 h-4 animate-spin" />
+                  <span>{{ isSavingProfile ? 'Saving...' : 'Save Changes' }}</span>
+                </button>
               </div>
-            </div>
-
-            <!-- Save Button -->
-            <div class="flex justify-end">
-              <button
-                :disabled="isSavingProfile"
-                class="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                @click="saveProfile"
-              >
-                <Loader2 v-if="isSavingProfile" class="w-4 h-4 animate-spin" />
-                <span>{{ isSavingProfile ? 'Saving...' : 'Save Changes' }}</span>
-              </button>
             </div>
           </div>
 
@@ -498,9 +601,14 @@ onMounted(() => {
                 <h3 class="font-semibold text-slate-900 mb-4">Master Watch Folder</h3>
 
                 <!-- Loading State -->
-                <div v-if="isLoadingMasterFolder" class="flex items-center gap-3 text-slate-500">
-                  <div class="w-5 h-5 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin"></div>
-                  <span>Loading folder info...</span>
+                <div v-if="isLoadingMasterFolder" class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5">
+                   <div class="flex items-start gap-4">
+                      <div class="w-12 h-12 rounded-xl bg-slate-200 animate-pulse"></div>
+                      <div class="flex-1 space-y-2">
+                        <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
+                         <div class="h-5 w-48 bg-slate-200 rounded animate-pulse"></div>
+                      </div>
+                   </div>
                 </div>
 
                 <div v-else>
@@ -740,9 +848,20 @@ onMounted(() => {
                 Available Plans
               </h3>
               
+              
               <!-- Loading State -->
-              <div v-if="isLoadingPlans" class="flex items-center justify-center py-8">
-                <Loader2 class="w-6 h-6 text-indigo-500 animate-spin" />
+              <div v-if="isLoadingPlans" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                 <div
+                  v-for="i in 3"
+                  :key="i"
+                  class="border border-slate-200 rounded-xl p-4 transition-all"
+                 >
+                    <div class="h-6 w-24 bg-slate-200 rounded animate-pulse mb-3"></div>
+                    <div class="h-8 w-20 bg-slate-200 rounded animate-pulse mb-1"></div>
+                    <div class="h-4 w-16 bg-slate-200 rounded animate-pulse mb-3"></div>
+                    <div class="h-4 w-full bg-slate-200 rounded animate-pulse mb-4"></div>
+                    <div class="h-10 w-full bg-slate-200 rounded animate-pulse"></div>
+                 </div>
               </div>
 
               <!-- Plans Grid -->
@@ -828,9 +947,14 @@ onMounted(() => {
                 </p>
 
                 <!-- Loading State -->
-                <div v-if="isLoadingStorage" class="flex items-center gap-3 text-slate-500">
-                  <div class="w-5 h-5 border-2 border-slate-300 border-t-indigo-500 rounded-full animate-spin"></div>
-                  <span>Loading storage info...</span>
+                <div v-if="isLoadingStorage" class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5">
+                   <div class="flex items-start gap-4">
+                      <div class="w-12 h-12 rounded-xl bg-slate-200 animate-pulse"></div>
+                      <div class="flex-1 space-y-2">
+                        <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
+                         <div class="h-5 w-48 bg-slate-200 rounded animate-pulse"></div>
+                      </div>
+                   </div>
                 </div>
 
                 <!-- Storage Location Display -->
@@ -911,6 +1035,45 @@ onMounted(() => {
           </div>
         </div>
       </main>
+      <Teleport to="body">
+        <Transition name="fade">
+           <Modal :show="showBookingModal" @close="showBookingModal = false">
+            <div class="p-6">
+              <h3 class="text-xl font-bold text-slate-900 mb-2">Booking URL Generated</h3>
+              <p class="text-slate-500 mb-6">
+                Share this URL with your clients so they can book you directly.
+              </p>
+
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+                <div class="flex-1 font-mono text-sm text-slate-600 truncate select-all">
+                  {{ bookingUrl }}
+                </div>
+                <button
+                  class="p-2 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-slate-200 text-slate-400 hover:text-indigo-500"
+                  @click="copyBookingUrl"
+                  title="Copy to clipboard"
+                >
+                  <Check v-if="bookingUrlCopied" class="w-4 h-4 text-emerald-500" />
+                  <Copy v-else class="w-4 h-4" />
+                </button>
+              </div>
+
+              <div class="flex gap-3">
+                <Button variant="secondary" class="flex-1" @click="showBookingModal = false">
+                  Close
+                </Button>
+                <button
+                  class="flex-1 flex items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 text-sm font-semibold transition-colors"
+                  @click="openBookingUrl"
+                >
+                  <ExternalLink class="w-4 h-4 text-white" />
+                  Open Link
+                </button>
+              </div>
+            </div>
+           </Modal>
+        </Transition>
+      </Teleport>
     </div>
   </AppLayout>
 </template>

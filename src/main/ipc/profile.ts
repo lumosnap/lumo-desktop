@@ -32,6 +32,26 @@ export function registerProfileHandlers(): void {
     }
   )
 
+  ipcMain.handle('profile:getBookingUrl', async () => {
+    try {
+      const result = await profileApi.getBookingUrl()
+      return { success: true, bookingUrl: result.bookingUrl }
+    } catch (error: unknown) {
+      logger.error('Failed to get booking URL:', getErrorMessage(error))
+      return { success: false, error: getErrorMessage(error) }
+    }
+  })
+
+  ipcMain.handle('profile:getBookings', async () => {
+    try {
+      const bookings = await profileApi.getBookings()
+      return { success: true, data: bookings }
+    } catch (error: unknown) {
+      logger.error('Failed to get bookings:', getErrorMessage(error))
+      return { success: false, error: getErrorMessage(error) }
+    }
+  })
+
   ipcMain.handle('profile:getBillingAddresses', async () => {
     try {
       const addresses = await profileApi.getBillingAddresses()

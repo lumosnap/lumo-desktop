@@ -126,6 +126,27 @@ declare global {
           }
           error?: string
         }>
+        getBookingUrl: () => Promise<{
+          success: boolean
+          bookingUrl?: string
+          error?: string
+        }>
+        getBookings: () => Promise<{
+          success: boolean
+          data?: Array<{
+            id: number
+            photographerId: string
+            eventType: string
+            name: string
+            phone: string
+            eventDate: string
+            location: string
+            details: string
+            createdAt: string
+            updatedAt: string
+          }>
+          error?: string
+        }>
         getBillingAddresses: () => Promise<{
           success: boolean
           data?: Array<{

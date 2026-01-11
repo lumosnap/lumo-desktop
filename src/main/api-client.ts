@@ -244,6 +244,31 @@ export const profileApi = {
   },
 
   /**
+   * Get public booking URL
+   */
+  async getBookingUrl(): Promise<{ bookingUrl: string }> {
+    console.log('[API] Getting booking URL')
+    const response = await apiFetch<ApiResponse<{ bookingUrl: string }>>('/profile/booking-url')
+    if (!response.data) {
+      throw new Error('No data in response')
+    }
+    return response.data
+  },
+
+  /**
+   * Get bookings
+   */
+  async getBookings(): Promise<Array<any>> {
+    console.log('[API] Getting bookings')
+    const response = await apiFetch<ApiResponse<Array<any>>>('/profile/bookings')
+    if (!response.data) {
+      throw new Error('No data in response')
+    }
+    return response.data
+  },
+
+
+  /**
    * Get billing addresses
    */
   async getBillingAddresses(): Promise<ApiBillingAddress[]> {

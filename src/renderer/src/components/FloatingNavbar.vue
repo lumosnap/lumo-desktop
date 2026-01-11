@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import { LayoutGrid, User } from 'lucide-vue-next'
+import { LayoutGrid, User, Inbox } from 'lucide-vue-next'
 
 const route = useRoute()
 
@@ -23,6 +23,20 @@ const isActive = (path: string) => route.path.startsWith(path)
         <LayoutGrid
           class="h-5 w-5 transition-colors"
           :class="isActive('/albums') ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'"
+        />
+      </router-link>
+
+      <!-- Bookings Button -->
+      <router-link
+        to="/bookings"
+        class="group relative flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200"
+        :class="isActive('/bookings') 
+          ? 'bg-gradient-to-r from-indigo-500 to-purple-500 shadow-lg shadow-indigo-500/25' 
+          : 'hover:bg-slate-100'"
+      >
+        <Inbox
+          class="h-5 w-5 transition-colors"
+          :class="isActive('/bookings') ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'"
         />
       </router-link>
 

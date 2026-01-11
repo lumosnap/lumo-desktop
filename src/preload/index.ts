@@ -123,6 +123,16 @@ const api = {
       }
       error?: string
     }> => ipcRenderer.invoke('profile:update', data),
+    getBookingUrl: (): Promise<{
+      success: boolean
+      bookingUrl?: string
+      error?: string
+    }> => ipcRenderer.invoke('profile:getBookingUrl'),
+    getBookings: (): Promise<{
+      success: boolean
+      data?: Array<any>
+      error?: string
+    }> => ipcRenderer.invoke('profile:getBookings'),
     getBillingAddresses: (): Promise<{
       success: boolean
       data?: Array<{
