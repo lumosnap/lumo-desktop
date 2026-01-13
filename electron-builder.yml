@@ -1,5 +1,12 @@
 appId: com.lumosnap.desktop
 productName: Lumosnap
+
+# Deep link protocol registration
+protocols:
+  - name: Lumosnap
+    schemes:
+      - lumosnap
+
 directories:
   buildResources: build
 files:
@@ -27,6 +34,10 @@ mac:
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    # Deep link URL scheme for macOS
+    - CFBundleURLTypes:
+        - CFBundleURLSchemes:
+            - lumosnap
   notarize: false
 dmg:
   artifactName: ${name}-${version}.${ext}
@@ -37,6 +48,9 @@ linux:
     - deb
   maintainer: electronjs.org
   category: Utility
+  # Deep link MIME type for Linux desktop entries
+  mimeTypes:
+    - x-scheme-handler/lumosnap
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: true

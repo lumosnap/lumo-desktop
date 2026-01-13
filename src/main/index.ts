@@ -23,6 +23,56 @@ let isQuitting = false // Track if app is actually quitting vs minimize-to-tray
 // Check if launched with --hidden flag (for Linux hidden start)
 const isHiddenLaunch = process.argv.includes('--hidden')
 
+// ==================== Deep Link Protocol ====================
+const PROTOCOL = 'lumosnap'
+
+// Handle deep link URL - just opens the app for now
+function handleDeepLink(url: string): void {
+  logger.info('Deep link received:', url)
+  // Show the main window when app is opened via deep link
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore()
+    }
+    mainWindow.show()
+    mainWindow.focus()
+  }
+}
+
+// Request single instance lock to prevent multiple app instances
+// This is required for deep links on Windows and Linux
+const gotTheLock = app.requestSingleInstanceLock()
+
+if (!gotTheLock) {
+  logger.warn('Another instance is already running, quitting...')
+  app.quit()
+} else {
+  // Handle second-instance event (Windows/Linux deep link handling)
+  app.on('second-instance', (_event, commandLine) => {
+    logger.info('Second instance detected, command line:', commandLine)
+    // Find the deep link URL in command line arguments
+    const deepLinkUrl = commandLine.find((arg) => arg.startsWith(`${PROTOCOL}://`))
+    if (deepLinkUrl) {
+      handleDeepLink(deepLinkUrl)
+    } else {
+      // Just show the window if no deep link
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore()
+        }
+        mainWindow.show()
+        mainWindow.focus()
+      }
+    }
+  })
+
+  // Handle open-url event (macOS deep link handling)
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    handleDeepLink(url)
+  })
+}
+
 // ==================== Global Error Handlers ====================
 // Catch unhandled exceptions to prevent silent crashes
 process.on('uncaughtException', (error: Error) => {
@@ -146,6 +196,34 @@ app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.lumosnap')
 
+  // Register deep link protocol handler
+  // In development mode, we need to pass the path to the electron executable and script
+  if (process.defaultApp) {
+    // Development mode: running via 'electron .' or 'electron-vite dev'
+    if (process.argv.length >= 2) {
+      const success = app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
+        process.argv[1]
+      ])
+      if (success) {
+        logger.info(`✓ Registered as default protocol client for ${PROTOCOL}:// (dev mode)`)
+      } else {
+        logger.warn(`✗ Failed to register as default protocol client for ${PROTOCOL}:// (dev mode)`)
+      }
+    }
+  } else {
+    // Production mode: packaged app
+    if (!app.isDefaultProtocolClient(PROTOCOL)) {
+      const success = app.setAsDefaultProtocolClient(PROTOCOL)
+      if (success) {
+        logger.info(`✓ Registered as default protocol client for ${PROTOCOL}://`)
+      } else {
+        logger.warn(`✗ Failed to register as default protocol client for ${PROTOCOL}://`)
+      }
+    } else {
+      logger.info(`Already registered as default protocol client for ${PROTOCOL}://`)
+    }
+  }
+
   // Initialize database
   logger.info('Initializing database...')
   try {
@@ -198,6 +276,17 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+
+  // Handle cold start deep links (Windows/Linux)
+  // Check if app was launched via deep link URL in command line arguments
+  if (process.platform === 'win32' || process.platform === 'linux') {
+    const deepLinkUrl = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`))
+    if (deepLinkUrl) {
+      logger.info('Cold start deep link detected:', deepLinkUrl)
+      // Delay handling to ensure window is ready
+      setTimeout(() => handleDeepLink(deepLinkUrl), 100)
+    }
+  }
 
   // ==================== Renderer Crash Recovery ====================
   // Handle renderer process crashes - attempt to recreate window
