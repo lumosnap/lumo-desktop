@@ -140,6 +140,7 @@ function createIndexes(): void {
     CREATE INDEX IF NOT EXISTS idx_images_albumId ON images(albumId);
     CREATE INDEX IF NOT EXISTS idx_images_uploadStatus ON images(uploadStatus);
     CREATE INDEX IF NOT EXISTS idx_images_serverId ON images(serverId);
+    CREATE INDEX IF NOT EXISTS idx_images_hash ON images(sourceFileHash);
   `)
 }
 
@@ -394,6 +395,13 @@ export function getImageByFilename(albumId: string, filename: string): Image | n
 
   const stmt = db.prepare('SELECT * FROM images WHERE albumId = ? AND originalFilename = ?')
   return stmt.get(albumId, filename) as Image | null
+}
+
+export function getImageByHash(albumId: string, hash: string): Image | null {
+  if (!db) throw new Error('Database not initialized')
+
+  const stmt = db.prepare('SELECT * FROM images WHERE albumId = ? AND sourceFileHash = ?')
+  return stmt.get(albumId, hash) as Image | null
 }
 
 export function getImageStats(albumId: string): {

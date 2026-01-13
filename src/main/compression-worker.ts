@@ -9,11 +9,14 @@ import { parentPort } from 'worker_threads'
 import sharp from 'sharp'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { hashBuffer } from './hash'
 
 interface CompressionTask {
   taskId: string
   inputPath: string
   outputDir: string
+  precomputedHash?: string // If provided, skip hashing
+  sourceBuffer?: Buffer // If provided, skip file read
   options: {
     maxBytes?: number
     tolerance?: number
@@ -35,6 +38,7 @@ interface CompressionResult {
   width: number
   height: number
   fileSize: number
+  hash: string
   error?: string
 }
 
@@ -44,7 +48,7 @@ const DEFAULT_OPTIONS = {
   maxEdge: 2048,
   qualityStart: 86,
   qualityMin: 80,
-  effort: 3,
+  effort: 4,
   sharpConcurrency: 1,
   smartSubsample: true,
   preset: 'photo' as const
@@ -60,6 +64,17 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
       throw new Error('Input path is not a file')
     }
 
+    // Use provided buffer or read file
+    let sourceBuffer: Buffer
+    if (task.sourceBuffer) {
+      sourceBuffer = task.sourceBuffer
+    } else {
+      sourceBuffer = await fs.readFile(task.inputPath)
+    }
+
+    // Use provided hash or compute it
+    const hash = task.precomputedHash || hashBuffer(sourceBuffer)
+
     // Set Sharp concurrency
     sharp.concurrency(opts.sharpConcurrency)
 
@@ -71,8 +86,8 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
     // Ensure output directory exists
     await fs.mkdir(task.outputDir, { recursive: true })
 
-    // Load image and get metadata
-    const image = sharp(task.inputPath, { failOnError: false })
+    // Load image from buffer (we already have it in memory)
+    const image = sharp(sourceBuffer, { failOnError: false })
     const metadata = await image.metadata()
 
     if (!metadata.width || !metadata.height) {
@@ -102,7 +117,7 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
     const webpBaseOpts = {
       effort: opts.effort,
       smartSubsample: opts.smartSubsample,
-      progressive: true,
+      progressive: false,
       ...(opts.preset && { preset: opts.preset })
     }
 
@@ -139,7 +154,8 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
       thumbnailPath: '', // Thumbnails disabled for now
       width: outputMetadata.width || 0,
       height: outputMetadata.height || 0,
-      fileSize: finalBuffer.length
+      fileSize: finalBuffer.length,
+      hash
     }
   } catch (error) {
     return {
@@ -150,6 +166,7 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
       width: 0,
       height: 0,
       fileSize: 0,
+      hash: '',
       error: error instanceof Error ? error.message : 'Unknown error occurred'
     }
   }

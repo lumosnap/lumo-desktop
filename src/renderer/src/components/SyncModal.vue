@@ -1,11 +1,23 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { RefreshCw, Plus, Edit3, Trash2, ChevronDown, ChevronUp, X } from 'lucide-vue-next'
+import {
+  RefreshCw,
+  Plus,
+  Edit3,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+  X,
+  FileDiff,
+  AlertCircle
+} from 'lucide-vue-next'
 
 interface SyncChanges {
   new: Array<{ filename: string; size: number }>
   modified: Array<{ filename: string; existingId: number }>
   deleted: Array<{ id: number; serverId: number | null; originalFilename: string }>
+  renamed: Array<{ oldFilename: string; newFilename: string }>
+  skipped: Array<{ filename: string; reason: string }>
 }
 
 interface Props {
@@ -24,10 +36,18 @@ const emit = defineEmits<{
 
 const isSyncing = ref(false)
 const syncError = ref('')
-const expandedSections = ref<{ new: boolean; modified: boolean; deleted: boolean }>({
+const expandedSections = ref<{
+  new: boolean
+  modified: boolean
+  deleted: boolean
+  renamed: boolean
+  skipped: boolean
+}>({
   new: false,
   modified: false,
-  deleted: false
+  deleted: false,
+  renamed: false,
+  skipped: false
 })
 
 const hasChanges = computed(() => {
@@ -35,16 +55,22 @@ const hasChanges = computed(() => {
   return (
     props.changes.new.length > 0 ||
     props.changes.modified.length > 0 ||
-    props.changes.deleted.length > 0
+    props.changes.deleted.length > 0 ||
+    props.changes.renamed.length > 0
   )
 })
 
 const totalChanges = computed(() => {
   if (!props.changes) return 0
-  return props.changes.new.length + props.changes.modified.length + props.changes.deleted.length
+  return (
+    props.changes.new.length +
+    props.changes.modified.length +
+    props.changes.deleted.length +
+    props.changes.renamed.length
+  )
 })
 
-function toggleSection(section: 'new' | 'modified' | 'deleted') {
+function toggleSection(section: keyof typeof expandedSections.value): void {
   expandedSections.value[section] = !expandedSections.value[section]
 }
 
@@ -56,7 +82,7 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-async function handleSync() {
+async function handleSync(): Promise<void> {
   if (!props.changes) return
 
   isSyncing.value = true
@@ -96,7 +122,13 @@ watch(
     if (!show) {
       isSyncing.value = false
       syncError.value = ''
-      expandedSections.value = { new: false, modified: false, deleted: false }
+      expandedSections.value = {
+        new: false,
+        modified: false,
+        deleted: false,
+        renamed: false,
+        skipped: false
+      }
     }
   }
 )
@@ -138,7 +170,7 @@ watch(
       </div>
 
       <!-- No Changes -->
-      <div v-else-if="!hasChanges" class="py-8 text-center">
+      <div v-else-if="!hasChanges && (!changes?.skipped || changes.skipped.length === 0)" class="py-8 text-center">
         <div
           class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10 mx-auto mb-4"
         >
@@ -150,8 +182,11 @@ watch(
 
       <!-- Changes Summary -->
       <div v-else class="space-y-3 max-h-[60vh] overflow-y-auto">
-        <p class="text-sm text-gray-400 mb-4">
+        <p v-if="hasChanges" class="text-sm text-gray-400 mb-4">
           {{ totalChanges }} change{{ totalChanges !== 1 ? 's' : '' }} detected in source folder
+        </p>
+        <p v-else class="text-sm text-gray-400 mb-4">
+          All changes were skipped
         </p>
 
         <!-- New Files -->
@@ -219,6 +254,41 @@ watch(
           </div>
         </div>
 
+        <!-- Renamed Files -->
+        <div
+          v-if="changes?.renamed.length"
+          class="rounded-lg bg-blue-500/10 border border-blue-500/20 overflow-hidden"
+        >
+          <button
+            class="flex w-full items-center justify-between p-3 text-left"
+            @click="toggleSection('renamed')"
+          >
+            <div class="flex items-center gap-2">
+              <FileDiff class="h-4 w-4 text-blue-500" />
+              <span class="font-medium text-blue-400"
+                >{{ changes.renamed.length }} renamed file{{
+                  changes.renamed.length !== 1 ? 's' : ''
+                }}</span
+              >
+            </div>
+            <component
+              :is="expandedSections.renamed ? ChevronUp : ChevronDown"
+              class="h-4 w-4 text-blue-500"
+            />
+          </button>
+          <div v-if="expandedSections.renamed" class="px-3 pb-3 max-h-32 overflow-y-auto">
+            <div
+              v-for="file in changes.renamed"
+              :key="file.oldFilename"
+              class="py-1 text-sm text-gray-300 truncate flex items-center gap-2"
+            >
+              <span class="opacity-70">{{ file.oldFilename }}</span>
+              <span class="opacity-50">→</span>
+              <span>{{ file.newFilename }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Deleted Files -->
         <div
           v-if="changes?.deleted.length"
@@ -252,6 +322,38 @@ watch(
           </div>
         </div>
 
+        <!-- Skipped Files (Duplicates) -->
+        <div
+          v-if="changes?.skipped && changes.skipped.length"
+          class="rounded-lg bg-gray-500/10 border border-gray-500/20 overflow-hidden"
+        >
+          <button
+            class="flex w-full items-center justify-between p-3 text-left"
+            @click="toggleSection('skipped')"
+          >
+            <div class="flex items-center gap-2">
+              <AlertCircle class="h-4 w-4 text-gray-400" />
+              <span class="font-medium text-gray-300"
+                >{{ changes.skipped.length }} skipped (duplicate)</span
+              >
+            </div>
+            <component
+              :is="expandedSections.skipped ? ChevronUp : ChevronDown"
+              class="h-4 w-4 text-gray-400"
+            />
+          </button>
+          <div v-if="expandedSections.skipped" class="px-3 pb-3 max-h-32 overflow-y-auto">
+            <div
+              v-for="file in changes.skipped"
+              :key="file.filename"
+              class="py-1 text-sm text-gray-400 truncate flex flex-col"
+            >
+              <span>{{ file.filename }}</span>
+              <span class="text-[10px] opacity-60">{{ file.reason }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Error Message -->
         <p v-if="syncError" class="text-sm text-red-500 mt-2">{{ syncError }}</p>
 
@@ -265,6 +367,7 @@ watch(
             Cancel
           </button>
           <button
+            v-if="hasChanges"
             class="flex items-center gap-2 rounded-lg bg-[var(--color-turquoise)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-turquoise-dark)] disabled:opacity-50"
             :disabled="isSyncing"
             @click="handleSync"
@@ -272,11 +375,18 @@ watch(
             <RefreshCw v-if="isSyncing" class="h-4 w-4 animate-spin" />
             {{ isSyncing ? 'Syncing...' : 'Sync Now' }}
           </button>
+          <button
+            v-else
+            class="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20"
+            @click="emit('close')"
+          >
+            Close
+          </button>
         </div>
       </div>
 
       <!-- Close button for no-changes state -->
-      <div v-if="!isLoading && !hasChanges" class="flex justify-center pt-4">
+      <div v-if="!isLoading && !hasChanges && (!changes?.skipped || changes.skipped.length === 0)" class="flex justify-center pt-4">
         <button
           class="rounded-lg px-6 py-2 text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5"
           @click="emit('close')"

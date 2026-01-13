@@ -5,7 +5,6 @@ import {
   createAlbumFolder,
   ensureBaseDirectory,
   scanImagesInFolder,
-  clearScanCache,
   formatBytes
 } from './storage'
 import {
@@ -16,12 +15,11 @@ import {
   createImage,
   getAlbumImages,
   deleteImages,
-  updateAlbum,
-  updateImage
+  updateAlbum
 } from './database'
 import { albumsApi, profileApi, plansApi } from './api-client'
 import { uploadPipeline } from './pipeline'
-import { existsSync, rmSync, copyFileSync, readdirSync } from 'fs'
+import { existsSync, rmSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { watcherService } from './watcher'
 import { startAuth } from './oauth-handler'
@@ -29,8 +27,7 @@ import { getAuth, clearAuth } from './auth-storage'
 import {
   createAlbumMetadata,
   writeAlbumMetadata,
-  getFolderStats,
-  updateMetadataAfterSync
+  getFolderStats
 } from './album-metadata'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
@@ -761,291 +758,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   // ==================== Sync Handlers ====================
-
-  ipcMain.handle('sync:detectChanges', (_event, albumId: string) => {
-    console.log(`[Main] sync:detectChanges called for albumId: ${albumId}`)
-    try {
-      const album = getAlbum(albumId)
-      if (!album) {
-        console.error(`[Main] Album not found: ${albumId}`)
-        return { success: false, error: 'Album not found' }
-      }
-
-      // Scan source folder
-      console.log(`[Main] Scanning source folder: ${album.sourceFolderPath}`)
-      const sourceFiles = scanImagesInFolder(album.sourceFolderPath)
-      const dbImages = getAlbumImages(albumId)
-      console.log(
-        `[Main] Source files count: ${sourceFiles.length}, DB images count: ${dbImages.length}`
-      )
-
-      // Detect changes
-      const changes = {
-        new: [] as any[],
-        modified: [] as any[],
-        deleted: [] as any[]
-      }
-
-      // Get last sync time for optimization
-      const lastSync = album.lastSyncedAt ? new Date(album.lastSyncedAt) : null
-      if (lastSync) {
-        console.log(`[Main] Last sync time: ${lastSync.toISOString()}`)
-      } else {
-        console.log(`[Main] No previous sync - will check all files`)
-      }
-
-      // Check for new and modified files
-      sourceFiles.forEach((file) => {
-        const existing = dbImages.find((img) => img.originalFilename === file.filename)
-
-        if (!existing) {
-          changes.new.push(file)
-        } else {
-          // Only check for modifications if file mtime is after lastSyncedAt
-          const fileMtime = new Date(file.mtime)
-          if (!lastSync || fileMtime > lastSync) {
-            // Compare using Date timestamps (not string comparison) and file size
-            const existingMtime = new Date(existing.mtime).getTime()
-            const currentMtime = fileMtime.getTime()
-            const mtimeChanged = existingMtime !== currentMtime
-            const sizeChanged = existing.fileSize !== file.size
-
-            if (mtimeChanged || sizeChanged) {
-              changes.modified.push({
-                ...file,
-                existingId: existing.id,
-                serverId: existing.serverId
-              })
-            }
-          }
-        }
-      })
-
-      // Check for deleted files
-      dbImages.forEach((img) => {
-        const exists = sourceFiles.find((file) => file.filename === img.originalFilename)
-        if (!exists) {
-          // Only include serializable properties for IPC transfer
-          changes.deleted.push({
-            id: img.id,
-            serverId: img.serverId,
-            originalFilename: img.originalFilename,
-            localFilePath: img.localFilePath
-          })
-        }
-      })
-
-      console.log(
-        `[Main] Detected changes: new=${changes.new.length}, modified=${changes.modified.length}, deleted=${changes.deleted.length}`
-      )
-      return {
-        success: true,
-        changes,
-        summary: {
-          new: changes.new.length,
-          modified: changes.modified.length,
-          deleted: changes.deleted.length
-        }
-      }
-    } catch (error: any) {
-      console.error('[Main] Failed to detect sync changes:', error)
-      return { success: false, error: error.message }
-    }
-  })
-
-  ipcMain.handle('sync:execute', async (_event, albumId: string, changes: any) => {
-    console.log(`[Main] sync:execute called for albumId: ${albumId}`)
-    console.log(`[Main] Changes to process:`, JSON.stringify(changes, null, 2))
-
-    try {
-      const album = getAlbum(albumId)
-      if (!album) {
-        console.error(`[Main] Album not found for sync: ${albumId}`)
-        return { success: false, error: 'Album not found' }
-      }
-
-      console.log(`[Main] Sync: Images in DB before sync:`, getAlbumImages(albumId).length)
-      
-      // Track limit warning for response
-      let syncLimitWarning: string | null = null
-
-      // Process deleted files FIRST
-      if (changes.deleted && changes.deleted.length > 0) {
-        console.log(`[Main] Sync: Processing ${changes.deleted.length} deleted images`)
-        console.log(`[Main] Sync: Deleted images:`, changes.deleted)
-
-        // Get server IDs for API call (only synced images have serverIds)
-        const serverIds = changes.deleted
-          .filter((img: any) => img.serverId != null)
-          .map((img: any) => {
-            console.log(
-              `[Main] Sync: Will delete from cloud - serverId: ${img.serverId}, filename: ${img.originalFilename}`
-            )
-            return img.serverId
-          })
-
-        // Call API only if there are server IDs to delete
-        if (serverIds.length > 0) {
-          console.log(`[Main] Sync: Calling albumsApi.deleteImages with serverIds:`, serverIds)
-          await albumsApi.deleteImages(albumId, serverIds)
-          console.log(`[Main] Sync: API deletion completed`)
-        } else {
-          console.log(`[Main] Sync: No synced images to delete from cloud`)
-        }
-
-        // Delete from local database using local IDs
-        const localIds = changes.deleted.map((img: any) => {
-          console.log(
-            `[Main] Sync: Will delete from DB - localId: ${img.id}: ${img.originalFilename}`
-          )
-          return img.id
-        })
-
-        console.log(`[Main] Sync: Deleting from local database...`)
-        deleteImages(localIds)
-        console.log(`[Main] Sync: Database deletion completed`)
-
-        // Verify deletion
-        const remainingImages = getAlbumImages(albumId)
-        console.log(`[Main] Sync: Images in DB after deletion:`, remainingImages.length)
-        console.log(
-          `[Main] Sync: Remaining images:`,
-          remainingImages.map((img) => img.originalFilename)
-        )
-      }
-
-      // Process new files
-      if (changes.new && changes.new.length > 0) {
-        console.log(`[Main] Sync: Adding ${changes.new.length} new images`)
-        
-        // Check image limit before processing
-        let filesToProcess = changes.new
-        
-        try {
-          const profile = await profileApi.get()
-          const remaining = Math.max(0, profile.imageLimit - profile.totalImages)
-          
-          if (remaining === 0) {
-            console.log(`[Main] Sync: User at image limit (${profile.totalImages}/${profile.imageLimit}). Skipping all new files.`)
-            syncLimitWarning = `Image limit reached (${profile.totalImages.toLocaleString()}/${profile.imageLimit.toLocaleString()}). No new images were synced. Please upgrade your plan.`
-            filesToProcess = []
-          } else if (changes.new.length > remaining) {
-            console.log(`[Main] Sync: User can only add ${remaining} more images. Limiting sync.`)
-            syncLimitWarning = `Only ${remaining} of ${changes.new.length} images were synced due to your plan limit. Upgrade to sync more.`
-            filesToProcess = changes.new.slice(0, remaining)
-          }
-        } catch (err) {
-          console.error('[Main] Sync: Failed to check image limit, proceeding anyway:', err)
-        }
-        
-        const currentImages = getAlbumImages(albumId)
-        const maxOrder =
-          currentImages.length > 0 ? Math.max(...currentImages.map((i) => i.uploadOrder)) : -1
-
-        filesToProcess.forEach((file: any, index: number) => {
-          const localFilePath = join(album.localFolderPath, file.filename)
-          const sourceFilePath = join(album.sourceFolderPath, file.filename)
-
-          console.log(`[Main] Sync: Copying ${file.filename} to local storage...`)
-          try {
-            copyFileSync(sourceFilePath, localFilePath)
-            console.log(`[Main] Sync: Copy successful: ${localFilePath}`)
-          } catch (err) {
-            console.error(`[Main] Sync: Failed to copy file ${file.filename}:`, err)
-          }
-
-          console.log(`[Main] Sync: Creating DB record for ${file.filename}`)
-          const newImage = createImage({
-            albumId: album.id,
-            serverId: null,
-            originalFilename: file.filename,
-            localFilePath,
-            fileSize: file.size,
-            width: file.width || 0,
-            height: file.height || 0,
-            mtime: file.mtime,
-            sourceFileHash: null,
-            uploadStatus: 'pending',
-            uploadOrder: maxOrder + index + 1
-          })
-          console.log(`[Main] Sync: DB record created with ID: ${newImage.id}`)
-        })
-      }
-
-      // Process modified files
-      if (changes.modified && changes.modified.length > 0) {
-        console.log(`[Main] Sync: Processing ${changes.modified.length} modified files`)
-        console.log(
-          `[Main] Sync: Modified files:`,
-          changes.modified.map((f: any) => f.filename)
-        )
-
-        // For each modified file:
-        // 1. Update the local mtime/fileSize in database
-        // 2. Reset uploadStatus to 'pending' so pipeline will re-process
-        // The pipeline will handle compression, upload, and calling PATCH endpoint
-        for (const file of changes.modified) {
-          const localFilePath = join(album.localFolderPath, file.filename)
-          const sourceFilePath = join(album.sourceFolderPath, file.filename)
-
-          console.log(`[Main] Sync: Updating modified file ${file.filename} (id: ${file.existingId})`)
-
-          // Copy updated source file to local storage (overwrite existing)
-          try {
-            copyFileSync(sourceFilePath, localFilePath)
-            console.log(`[Main] Sync: Copied updated file to ${localFilePath}`)
-          } catch (err) {
-            console.error(`[Main] Sync: Failed to copy updated file ${file.filename}:`, err)
-            continue
-          }
-
-          // Update database record: reset status to pending, update mtime/size
-          updateImage(file.existingId, {
-            uploadStatus: 'pending',
-            mtime: file.mtime,
-            fileSize: file.size,
-            width: file.width || 0,
-            height: file.height || 0
-          })
-          console.log(`[Main] Sync: Reset image ${file.existingId} to pending for re-upload`)
-        }
-      }
-
-      // Update album metadata
-      const totalImages = getAlbumImages(albumId).length
-      console.log(`[Main] Sync: Final image count in DB: ${totalImages}`)
-      console.log(`[Main] Sync: Updating album metadata...`)
-      updateAlbum(albumId, {
-        totalImages,
-        needsSync: 0,
-        lastSyncedAt: new Date().toISOString()
-      })
-      console.log(`[Main] Sync: Album metadata updated`)
-
-      // Update .lumosnap metadata file in source folder
-      const folderStats = getFolderStats(album.sourceFolderPath)
-      updateMetadataAfterSync(album.sourceFolderPath, totalImages, folderStats.totalSize)
-
-      // Clear scan cache for this folder to ensure fresh data
-      clearScanCache(album.sourceFolderPath)
-
-      // Start upload for new and modified images (both are now marked as 'pending')
-      const hasPendingImages = (changes.new && changes.new.length > 0) || (changes.modified && changes.modified.length > 0)
-      if (hasPendingImages) {
-        console.log('[Main] Sync: Triggering upload pipeline for new/modified images...')
-        uploadPipeline.startPipeline(albumId, mainWindow).catch((error) => {
-          console.error('[Main] Sync: Pipeline trigger failed:', error)
-        })
-      }
-
-      console.log(`[Main] Sync: Execution completed successfully for album ${albumId}`)
-      console.log(`[Main] Sync: Final state - Total images: ${totalImages}`)
-      return { success: true, limitWarning: syncLimitWarning }
-    } catch (error: any) {
-      console.error('[Main] Sync: Execution failed:', error)
-      return { success: false, error: error.message }
-    }
-  })
+  // NOTE: Sync handlers are registered in ipc/sync.ts for better modularity
+  // They include hash-based rename detection and duplicate content checking
 
   // ==================== API Handlers ====================
 

@@ -13,6 +13,7 @@ const logger = createLogger('CompressionPool')
 
 export interface CompressionOptions {
   outputDir: string
+  precomputedHash?: string // If provided, skip hashing in worker
   maxBytes?: number
   tolerance?: number
   maxEdge?: number
@@ -31,6 +32,7 @@ export interface CompressionResult {
   width: number
   height: number
   fileSize: number
+  hash: string
   error?: string
 }
 
@@ -129,6 +131,7 @@ class CompressionPool {
             width: message.width,
             height: message.height,
             fileSize: message.fileSize,
+            hash: message.hash || '',
             error: message.error
           }
 
@@ -202,6 +205,7 @@ class CompressionPool {
       taskId: task.taskId,
       inputPath: task.inputPath,
       outputDir: task.options.outputDir,
+      precomputedHash: task.options.precomputedHash,
       options: task.options
     })
 
@@ -220,6 +224,7 @@ class CompressionPool {
           width: 0,
           height: 0,
           fileSize: 0,
+          hash: '',
           error: 'Compression timed out'
         })
       }
@@ -259,6 +264,7 @@ class CompressionPool {
           taskId,
           inputPath,
           outputDir: options.outputDir,
+          precomputedHash: options.precomputedHash,
           options
         })
 
@@ -277,6 +283,7 @@ class CompressionPool {
               width: 0,
               height: 0,
               fileSize: 0,
+              hash: '',
               error: 'Compression timed out'
             })
           }

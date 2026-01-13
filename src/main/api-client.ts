@@ -116,7 +116,6 @@ export interface ApiUploadUrl {
 export interface ApiImage {
   id: number
   albumId: string
-  b2FileId: string
   b2FileName: string
   originalFilename: string
   fileSize: number
@@ -124,7 +123,6 @@ export interface ApiImage {
   height: number
   uploadOrder: number
   uploadStatus: 'pending' | 'uploading' | 'complete' | 'failed'
-  thumbnailB2FileId?: string
   thumbnailB2FileName?: string
   createdAt: string
   url: string | null
@@ -412,14 +410,12 @@ export const albumsApi = {
     albumId: string,
     images: Array<{
       filename: string
-      b2FileId: string
+      sourceImageHash: string | null
       key: string
       fileSize: number
       width: number
       height: number
       uploadOrder: number
-      thumbnailB2FileId?: string
-      thumbnailKey?: string
     }>
   ): Promise<Array<{ id: number; originalFilename: string; b2FileName: string }>> {
     console.log(`[API] Confirming upload of ${images.length} images in album ${albumId}`)
@@ -489,13 +485,13 @@ export const albumsApi = {
 
   /**
    * Update existing images with new file references (for modified files)
-   * Called after re-uploading modified files to update their B2 file IDs
+   * Called after re-uploading modified files
    */
   async updateImages(
     albumId: string,
     images: Array<{
       imageId: number
-      b2FileId: string
+      sourceImageHash: string | null
       b2FileName: string
       fileSize: number
       width: number
@@ -520,7 +516,7 @@ export const albumsApi = {
 export async function uploadToPresignedUrl(
   presignedUrl: string,
   filePath: string
-): Promise<{ success: boolean; b2FileId?: string; error?: string }> {
+): Promise<{ success: boolean; error?: string }> {
   console.log(`[API] Uploading file to presigned URL: ${filePath}`)
 
   // Use dynamic import for https to avoid issues with Electron
@@ -559,14 +555,9 @@ export async function uploadToPresignedUrl(
         })
 
         res.on('end', () => {
-          // Get b2FileId from response headers (Backblaze returns it as x-bz-file-id)
-          const b2FileId = res.headers['x-bz-file-id'] as string | undefined
-
           if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-            console.log('[API] Upload successful, b2FileId:', b2FileId)
-            // For S3-compatible uploads, we may need to extract ETag as file ID
-            const etag = res.headers['etag'] as string | undefined
-            resolve({ success: true, b2FileId: b2FileId || etag?.replace(/"/g, '') })
+            console.log('[API] Upload successful')
+            resolve({ success: true })
           } else {
             console.error('[API] Upload failed:', res.statusCode, responseData)
             resolve({ success: false, error: `HTTP ${res.statusCode}: ${responseData}` })

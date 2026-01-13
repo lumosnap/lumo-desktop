@@ -172,10 +172,8 @@ class UploadPipeline {
         localId: number
         serverId: number | null  // If set, this is a modified file that needs PATCH
         filename: string
-        b2FileId: string
+        sourceImageHash: string | null
         key: string
-        thumbnailB2FileId: string
-        thumbnailKey: string
         fileSize: number
         width: number
         height: number
@@ -202,31 +200,13 @@ class UploadPipeline {
               // Upload main image
               const result = await uploadToPresignedUrl(signedUrl.uploadUrl, img.localFilePath)
 
-              if (result.success && result.b2FileId) {
-                // Upload thumbnail
-                let thumbnailB2FileId = ''
-                if (img.thumbnailPath && signedUrl.thumbnailUploadUrl) {
-                  console.log(`[Pipeline] Uploading thumbnail for ${img.originalFilename}`)
-                  const thumbResult = await uploadToPresignedUrl(
-                    signedUrl.thumbnailUploadUrl,
-                    img.thumbnailPath
-                  )
-                  if (thumbResult.success && thumbResult.b2FileId) {
-                    thumbnailB2FileId = thumbResult.b2FileId
-                    console.log(`[Pipeline] Thumbnail uploaded successfully: ${thumbnailB2FileId}`)
-                  } else {
-                    console.warn(`[Pipeline] Thumbnail upload failed for ${img.originalFilename}`)
-                  }
-                }
-
+              if (result.success) {
                 uploadedImages.push({
                   localId: img.id,
                   serverId: img.serverId,  // Track if this was a modified file
                   filename: signedUrl.filename,
-                  b2FileId: result.b2FileId,
+                  sourceImageHash: img.sourceFileHash,  // Use hash from DB (computed during compression)
                   key: signedUrl.key,
-                  thumbnailB2FileId,
-                  thumbnailKey: signedUrl.thumbnailKey || '',
                   fileSize: img.fileSize,
                   width: img.width,
                   height: img.height,
@@ -264,14 +244,12 @@ class UploadPipeline {
 
           const confirmPayload = newImages.map((u) => ({
             filename: u.filename,
-            b2FileId: u.b2FileId,
+            sourceImageHash: u.sourceImageHash,
             key: u.key,
             fileSize: u.fileSize,
             width: u.width,
             height: u.height,
-            uploadOrder: u.uploadOrder,
-            thumbnailB2FileId: u.thumbnailB2FileId || undefined,
-            thumbnailKey: u.thumbnailKey || undefined
+            uploadOrder: u.uploadOrder
           }))
 
           const confirmed = await albumsApi.confirmUpload(albumId, confirmPayload)
@@ -304,7 +282,7 @@ class UploadPipeline {
 
           const updatePayload = modifiedImages.map((u) => ({
             imageId: u.serverId!,
-            b2FileId: u.b2FileId,
+            sourceImageHash: u.sourceImageHash,
             b2FileName: u.key,
             fileSize: u.fileSize,
             width: u.width,
@@ -353,7 +331,8 @@ class UploadPipeline {
           fileSize: result.fileSize,
           width: result.width,
           height: result.height,
-          localFilePath: result.compressedPath
+          localFilePath: result.compressedPath,
+          sourceFileHash: result.hash
         })
 
         // Update in-memory object for next steps
