@@ -3,6 +3,7 @@ import { join, basename, dirname } from 'path'
 import { getAlbum, getAlbumImages, updateImage } from './database'
 import { albumsApi, uploadToPresignedUrl } from './api-client'
 import { compressionPool } from './compression-pool'
+import { notificationService } from './notifications'
 
 export interface UploadProgress {
   albumId: string
@@ -85,6 +86,13 @@ class UploadPipeline {
       }
 
       console.log(`[Pipeline] Pipeline completed successfully for album ${albumId}`)
+
+      // Show notification for sync complete
+      const completedAlbum = getAlbum(albumId)
+      if (completedAlbum) {
+        notificationService.syncComplete(completedAlbum.title)
+      }
+
       if (mainWindow) {
         mainWindow.webContents.send('upload:complete', { albumId })
       }

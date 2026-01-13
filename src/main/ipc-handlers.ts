@@ -33,6 +33,7 @@ import { startAuth } from './oauth-handler'
 import { getAuth, clearAuth } from './auth-storage'
 import { createAlbumMetadata, writeAlbumMetadata, getFolderStats } from './album-metadata'
 import { networkService } from './network'
+import { notificationService } from './notifications'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ==================== Auth Handlers ====================
@@ -403,6 +404,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
         // Start watching the folder
         watcherService.watch(album.id, data.sourceFolderPath)
+
+        // Notify user of successful album creation
+        notificationService.albumCreated(data.title)
 
         return { success: true, album: { ...album, totalImages: imageFiles.length } }
       } catch (error: any) {

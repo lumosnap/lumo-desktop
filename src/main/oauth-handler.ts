@@ -11,6 +11,7 @@
 import { shell } from 'electron'
 import http from 'http'
 import { saveAuth, StoredUser } from './auth-storage'
+import { notificationService } from './notifications'
 
 export interface AuthResult {
   success: boolean
@@ -100,6 +101,9 @@ export async function startAuth(): Promise<AuthResult> {
 
                 // Store auth data securely
                 saveAuth(token, user)
+
+                // Notify user of successful connection
+                notificationService.authConnected(user.name || user.email)
 
                 // Send success response
                 res.writeHead(200, { 'Content-Type': 'text/html' })
