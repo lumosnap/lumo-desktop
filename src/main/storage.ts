@@ -70,7 +70,10 @@ interface ScanOptions {
   skipDimensions?: boolean
 }
 
-export function scanImagesInFolder(folderPath: string, options: ScanOptions | boolean = true): FileStats[] {
+export function scanImagesInFolder(
+  folderPath: string,
+  options: ScanOptions | boolean = true
+): FileStats[] {
   // Handle legacy boolean argument
   const useCache = typeof options === 'boolean' ? options : options.useCache !== false
   const skipDimensions = typeof options === 'object' ? options.skipDimensions : false

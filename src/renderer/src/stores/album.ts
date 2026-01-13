@@ -173,7 +173,9 @@ export const useAlbumStore = defineStore('album', () => {
         if (currentAlbum.value) {
           currentAlbum.value.totalImages = Math.max(0, currentAlbum.value.totalImages - 1)
           if (currentAlbum.value.photos) {
-            currentAlbum.value.photos = currentAlbum.value.photos.filter((img) => img.id !== imageId)
+            currentAlbum.value.photos = currentAlbum.value.photos.filter(
+              (img) => img.id !== imageId
+            )
           }
         }
         return { success: true }
@@ -200,7 +202,10 @@ export const useAlbumStore = defineStore('album', () => {
         currentImages.value = currentImages.value.filter((img) => !imageIds.includes(img.id))
         // Update album photo count
         if (currentAlbum.value) {
-          currentAlbum.value.totalImages = Math.max(0, currentAlbum.value.totalImages - imageIds.length)
+          currentAlbum.value.totalImages = Math.max(
+            0,
+            currentAlbum.value.totalImages - imageIds.length
+          )
           if (currentAlbum.value.photos) {
             currentAlbum.value.photos = currentAlbum.value.photos.filter(
               (img) => !imageIds.includes(img.id)

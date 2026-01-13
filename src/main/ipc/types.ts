@@ -9,9 +9,7 @@ import { createLogger, getErrorMessage } from '../logger'
 /**
  * Standardized IPC result type
  */
-export type IpcResult<T = void> =
-  | { success: true; data?: T }
-  | { success: false; error: string }
+export type IpcResult<T = void> = { success: true; data?: T } | { success: false; error: string }
 
 /**
  * Wrap an async handler with error handling and logging

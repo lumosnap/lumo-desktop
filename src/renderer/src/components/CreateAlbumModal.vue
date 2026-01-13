@@ -25,7 +25,8 @@ const limitWarning = computed(() => {
   if (profileStore.isAtLimit) {
     return {
       type: 'error' as const,
-      message: 'You\'ve reached your image limit. Uploads will not be processed until you upgrade your plan.',
+      message:
+        "You've reached your image limit. Uploads will not be processed until you upgrade your plan.",
       remaining: 0
     }
   }
@@ -98,7 +99,11 @@ watch(
       <div
         v-if="limitWarning"
         class="flex items-start gap-3 p-4 rounded-xl border"
-        :class="limitWarning.type === 'error' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'"
+        :class="
+          limitWarning.type === 'error'
+            ? 'bg-red-50 border-red-200'
+            : 'bg-amber-50 border-amber-200'
+        "
       >
         <AlertTriangle
           class="w-5 h-5 flex-shrink-0 mt-0.5"
@@ -114,7 +119,11 @@ watch(
           <router-link
             to="/profile"
             class="inline-flex items-center gap-1 mt-2 text-sm font-medium"
-            :class="limitWarning.type === 'error' ? 'text-red-700 hover:text-red-800' : 'text-amber-700 hover:text-amber-800'"
+            :class="
+              limitWarning.type === 'error'
+                ? 'text-red-700 hover:text-red-800'
+                : 'text-amber-700 hover:text-amber-800'
+            "
             @click="handleClose"
           >
             <ArrowUpCircle class="w-4 h-4" />
@@ -154,8 +163,8 @@ watch(
       <!-- Info note -->
       <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
         <p class="text-sm text-slate-600">
-          <strong class="text-indigo-600">Tip:</strong> After creating the album,
-          add photos to the folder. The app will automatically detect and process them.
+          <strong class="text-indigo-600">Tip:</strong> After creating the album, add photos to the
+          folder. The app will automatically detect and process them.
         </p>
       </div>
 

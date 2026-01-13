@@ -170,7 +170,10 @@ watch(
       </div>
 
       <!-- No Changes -->
-      <div v-else-if="!hasChanges && (!changes?.skipped || changes.skipped.length === 0)" class="py-8 text-center">
+      <div
+        v-else-if="!hasChanges && (!changes?.skipped || changes.skipped.length === 0)"
+        class="py-8 text-center"
+      >
         <div
           class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10 mx-auto mb-4"
         >
@@ -185,9 +188,7 @@ watch(
         <p v-if="hasChanges" class="text-sm text-gray-400 mb-4">
           {{ totalChanges }} change{{ totalChanges !== 1 ? 's' : '' }} detected in source folder
         </p>
-        <p v-else class="text-sm text-gray-400 mb-4">
-          All changes were skipped
-        </p>
+        <p v-else class="text-sm text-gray-400 mb-4">All changes were skipped</p>
 
         <!-- New Files -->
         <div
@@ -386,7 +387,10 @@ watch(
       </div>
 
       <!-- Close button for no-changes state -->
-      <div v-if="!isLoading && !hasChanges && (!changes?.skipped || changes.skipped.length === 0)" class="flex justify-center pt-4">
+      <div
+        v-if="!isLoading && !hasChanges && (!changes?.skipped || changes.skipped.length === 0)"
+        class="flex justify-center pt-4"
+      >
         <button
           class="rounded-lg px-6 py-2 text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5"
           @click="emit('close')"

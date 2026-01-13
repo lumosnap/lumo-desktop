@@ -170,7 +170,7 @@ class UploadPipeline {
       // Track uploaded images with their local IDs for reliable matching
       const uploadedImages: Array<{
         localId: number
-        serverId: number | null  // If set, this is a modified file that needs PATCH
+        serverId: number | null // If set, this is a modified file that needs PATCH
         filename: string
         sourceImageHash: string | null
         key: string
@@ -203,9 +203,9 @@ class UploadPipeline {
               if (result.success) {
                 uploadedImages.push({
                   localId: img.id,
-                  serverId: img.serverId,  // Track if this was a modified file
+                  serverId: img.serverId, // Track if this was a modified file
                   filename: signedUrl.filename,
-                  sourceImageHash: img.sourceFileHash,  // Use hash from DB (computed during compression)
+                  sourceImageHash: img.sourceFileHash, // Use hash from DB (computed during compression)
                   key: signedUrl.key,
                   fileSize: img.fileSize,
                   width: img.width,
@@ -278,7 +278,9 @@ class UploadPipeline {
 
         // Update modified images via PATCH
         if (modifiedImages.length > 0) {
-          console.log(`[Pipeline] Batch: Updating ${modifiedImages.length} modified images via PATCH...`)
+          console.log(
+            `[Pipeline] Batch: Updating ${modifiedImages.length} modified images via PATCH...`
+          )
 
           const updatePayload = modifiedImages.map((u) => ({
             imageId: u.serverId!,

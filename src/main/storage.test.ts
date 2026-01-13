@@ -1,6 +1,6 @@
 /**
  * Unit tests for storage module
- * 
+ *
  * Tests file scanning, folder operations, and utilities.
  * These don't require Electron mocking.
  */

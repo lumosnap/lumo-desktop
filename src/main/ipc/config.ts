@@ -13,12 +13,7 @@ import {
   getMasterFolder,
   setMasterFolder
 } from '../config'
-import {
-  getFreeSpace,
-  ensureBaseDirectory,
-  scanImagesInFolder,
-  formatBytes
-} from '../storage'
+import { getFreeSpace, ensureBaseDirectory, scanImagesInFolder, formatBytes } from '../storage'
 import { watcherService } from '../watcher'
 import { createLogger, getErrorMessage } from '../logger'
 

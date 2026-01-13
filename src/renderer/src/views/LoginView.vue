@@ -46,7 +46,9 @@ const handleCancel = (): void => {
         <div class="text-container">
           <span class="step-indicator">Welcome Back</span>
           <h1>Connect to Cloud</h1>
-          <p>Sign in to your LumoSnap account to access your albums and continue where you left off.</p>
+          <p>
+            Sign in to your LumoSnap account to access your albums and continue where you left off.
+          </p>
         </div>
 
         <div>
@@ -75,11 +77,7 @@ const handleCancel = (): void => {
 
           <!-- Button Group -->
           <div class="btn-group">
-            <button
-              v-if="!authStore.loading"
-              class="btn btn-primary"
-              @click="handleConnect"
-            >
+            <button v-if="!authStore.loading" class="btn btn-primary" @click="handleConnect">
               <ExternalLink :size="16" />
               <span>Connect to LumoSnap</span>
             </button>
@@ -159,7 +157,9 @@ const handleCancel = (): void => {
   height: 520px;
   background: var(--white);
   border-radius: 12px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 20px 50px -10px rgba(0, 0, 0, 0.15),
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 20px 50px -10px rgba(0, 0, 0, 0.15),
     0 0 0 1px rgba(255, 255, 255, 0.5) inset;
   display: flex;
   overflow: hidden;

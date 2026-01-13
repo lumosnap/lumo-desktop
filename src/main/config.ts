@@ -18,7 +18,6 @@ const defaultConfig: AppConfig = {
   minimizeToTray: true // Default to true for background operation
 }
 
-
 let config: AppConfig = { ...defaultConfig }
 let configPath: string
 
@@ -49,12 +48,12 @@ export function initConfig(): void {
   if (!config.storageLocation) {
     const documentsPath = app.getPath('documents')
     const defaultStoragePath = join(documentsPath, 'LumoSnap')
-    
+
     // Ensure the default storage directory exists
     if (!existsSync(defaultStoragePath)) {
       mkdirSync(defaultStoragePath, { recursive: true })
     }
-    
+
     config.storageLocation = defaultStoragePath
     config.isFirstLaunch = false
     saveConfig()
@@ -117,4 +116,3 @@ export function setMasterFolder(path: string): void {
 export function isMasterFolderConfigured(): boolean {
   return config.masterFolderPath !== null && existsSync(config.masterFolderPath)
 }
-

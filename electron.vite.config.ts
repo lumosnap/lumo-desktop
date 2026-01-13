@@ -21,9 +21,11 @@ export default defineConfig(({ mode }) => {
       },
       define: {
         'process.env.APP_DOMAIN': JSON.stringify(env.VITE_APP_DOMAIN || 'https://lumosnap.com'),
-        'process.env.API_URL': JSON.stringify(env.VITE_API_URL || 'https://backend.lumosnap.com/api/v1'),
+        'process.env.API_URL': JSON.stringify(
+          env.VITE_API_URL || 'https://backend.lumosnap.com/api/v1'
+        ),
         'process.env.BACKEND_BASE': JSON.stringify(backendUrl),
-        'process.env.AUTH_URL': JSON.stringify(env.VITE_AUTH_URL || 'https://connect.lumosnap.com'),
+        'process.env.AUTH_URL': JSON.stringify(env.VITE_AUTH_URL || 'https://connect.lumosnap.com')
       }
     },
     preload: {

@@ -19,18 +19,15 @@ export function registerProfileHandlers(): void {
     }
   })
 
-  ipcMain.handle(
-    'profile:update',
-    async (_, data: { businessName?: string; phone?: string }) => {
-      try {
-        const profile = await profileApi.update(data)
-        return { success: true, data: profile }
-      } catch (error: unknown) {
-        logger.error('Failed to update profile:', getErrorMessage(error))
-        return { success: false, error: getErrorMessage(error) }
-      }
+  ipcMain.handle('profile:update', async (_, data: { businessName?: string; phone?: string }) => {
+    try {
+      const profile = await profileApi.update(data)
+      return { success: true, data: profile }
+    } catch (error: unknown) {
+      logger.error('Failed to update profile:', getErrorMessage(error))
+      return { success: false, error: getErrorMessage(error) }
     }
-  )
+  })
 
   ipcMain.handle('profile:getBookingUrl', async () => {
     try {

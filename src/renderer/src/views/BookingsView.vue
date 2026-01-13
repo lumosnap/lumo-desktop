@@ -1,8 +1,24 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import AppLayout from '../layouts/AppLayout.vue'
-import { CalendarDays, MapPin, Phone, AlertTriangle, Inbox, ArrowLeft, Info } from 'lucide-vue-next'
+import {
+  CalendarDays,
+  MapPin,
+  Phone,
+  AlertTriangle,
+  Inbox,
+  ArrowLeft,
+  Info,
+  Link as LinkIcon,
+  Loader2,
+  Copy,
+  Check,
+  ExternalLink
+} from 'lucide-vue-next'
 import Dropdown from '../components/ui/Dropdown.vue'
+import Modal from '../components/ui/Modal.vue'
+import Button from '../components/ui/Button.vue'
+import { useAuthStore } from '../stores/auth'
 
 interface Booking {
   id: number
@@ -79,6 +95,72 @@ function formatDate(dateString: string): string {
 onMounted(() => {
   fetchBookings()
 })
+
+const authStore = useAuthStore()
+
+// Booking URL state
+const bookingUrl = ref('')
+const isBookingUrlLoading = ref(false)
+const showBookingModal = ref(false)
+const bookingError = ref<string | null>(null)
+const bookingUrlCopied = ref(false)
+
+async function generateBookingUrl(): Promise<void> {
+  isBookingUrlLoading.value = true
+  bookingError.value = null
+
+  // Check local storage first
+  const storageKey = `bookingUrl_${authStore.user?.email || 'default'}`
+  const cachedUrl = localStorage.getItem(storageKey)
+
+  if (cachedUrl) {
+    bookingUrl.value = cachedUrl
+    showBookingModal.value = true
+    isBookingUrlLoading.value = false
+    return
+  }
+
+  try {
+    const result = await window.api.profile.getBookingUrl()
+    if (result.success && result.bookingUrl) {
+      bookingUrl.value = result.bookingUrl
+      localStorage.setItem(storageKey, result.bookingUrl)
+      showBookingModal.value = true
+    } else {
+      bookingError.value = result.error || 'Failed to generate booking URL'
+    }
+  } catch (err: unknown) {
+    bookingError.value = err instanceof Error ? err.message : 'Failed to generate booking URL'
+  } finally {
+    isBookingUrlLoading.value = false
+  }
+}
+
+async function copyBookingUrl(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(bookingUrl.value)
+    bookingUrlCopied.value = true
+    setTimeout(() => {
+      bookingUrlCopied.value = false
+    }, 2000)
+  } catch {
+    // Fallback for older browsers
+    const textArea = document.createElement('textarea')
+    textArea.value = bookingUrl.value
+    document.body.appendChild(textArea)
+    textArea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textArea)
+    bookingUrlCopied.value = true
+    setTimeout(() => {
+      bookingUrlCopied.value = false
+    }, 2000)
+  }
+}
+
+function openBookingUrl(): void {
+  window.open(bookingUrl.value, '_blank')
+}
 </script>
 
 <template>
@@ -86,31 +168,44 @@ onMounted(() => {
     <div class="flex h-full flex-col overflow-hidden bg-slate-50 text-slate-900">
       <!-- Header -->
       <div class="flex flex-col border-b border-slate-200 bg-white px-8 pt-5 shrink-0">
-        <div class="mb-5">
-          <!-- Back Button -->
-          <router-link
-            to="/albums"
-            class="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors mb-2"
-          >
-            <ArrowLeft class="w-4 h-4" />
-            Back to Albums
-          </router-link>
-          <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1">
-            Management
+        <div class="mb-5 flex items-end justify-between">
+          <div>
+            <!-- Back Button -->
+            <router-link
+              to="/albums"
+              class="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors mb-2"
+            >
+              <ArrowLeft class="w-4 h-4" />
+              Back to Albums
+            </router-link>
+            <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1">
+              Management
+            </div>
+            <h1 class="text-2xl font-serif italic text-slate-900">Bookings</h1>
           </div>
-          <h1 class="text-2xl font-serif italic text-slate-900">Bookings</h1>
+
+          <!-- Get Booking Link Button -->
+          <button
+            class="flex items-center gap-2 rounded-xl bg-indigo-50 text-indigo-600 px-4 py-2.5 text-sm font-semibold hover:bg-indigo-100 transition-colors mb-1"
+            :disabled="isBookingUrlLoading"
+            @click="generateBookingUrl"
+          >
+            <LinkIcon v-if="!isBookingUrlLoading" class="h-4 w-4" />
+            <Loader2 v-else class="h-4 w-4 animate-spin" />
+            <span>Get Booking Link</span>
+          </button>
         </div>
 
         <!-- Tabs -->
         <div class="flex items-center gap-6 -mb-px">
           <button
-            @click="activeTab = 'upcoming'"
             class="pb-3 text-sm font-medium transition-colors border-b-2"
             :class="
               activeTab === 'upcoming'
                 ? 'text-indigo-600 border-indigo-600'
                 : 'text-slate-500 border-transparent hover:text-slate-700'
             "
+            @click="activeTab = 'upcoming'"
           >
             Upcoming
             <span
@@ -125,13 +220,13 @@ onMounted(() => {
             </span>
           </button>
           <button
-            @click="activeTab = 'past'"
             class="pb-3 text-sm font-medium transition-colors border-b-2"
             :class="
               activeTab === 'past'
                 ? 'text-indigo-600 border-indigo-600'
                 : 'text-slate-500 border-transparent hover:text-slate-700'
             "
+            @click="activeTab = 'past'"
           >
             Past
             <span
@@ -159,8 +254,8 @@ onMounted(() => {
             <AlertTriangle class="w-5 h-5 shrink-0" />
             <p>{{ error }}</p>
             <button
-              @click="fetchBookings"
               class="text-sm font-medium underline hover:text-red-800 ml-auto"
+              @click="fetchBookings"
             >
               Try Again
             </button>
@@ -306,4 +401,60 @@ onMounted(() => {
       </div>
     </div>
   </AppLayout>
+
+  <!-- Booking Link Modal -->
+  <Teleport to="body">
+    <Transition name="fade">
+      <Modal :show="showBookingModal" @close="showBookingModal = false">
+        <div class="p-6">
+          <h3 class="text-xl font-bold text-slate-900 mb-2">Booking URL Generated</h3>
+          <p class="text-slate-500 mb-6">
+            Share this URL with your clients so they can book you directly.
+          </p>
+
+          <div
+            class="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 flex items-center gap-3"
+          >
+            <div class="flex-1 font-mono text-sm text-slate-600 truncate select-all">
+              {{ bookingUrl }}
+            </div>
+            <button
+              class="p-2 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-slate-200 text-slate-400 hover:text-indigo-500"
+              title="Copy to clipboard"
+              @click="copyBookingUrl"
+            >
+              <Check v-if="bookingUrlCopied" class="w-4 h-4 text-emerald-500" />
+              <Copy v-else class="w-4 h-4" />
+            </button>
+          </div>
+
+          <div class="flex gap-3">
+            <Button variant="secondary" class="flex-1" @click="showBookingModal = false">
+              Close
+            </Button>
+            <button
+              class="flex-1 flex items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 text-sm font-semibold transition-colors"
+              @click="openBookingUrl"
+            >
+              <ExternalLink class="w-4 h-4 text-white" />
+              Open Link
+            </button>
+          </div>
+        </div>
+      </Modal>
+    </Transition>
+  </Teleport>
 </template>
+
+<style>
+/* Modal transitions */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

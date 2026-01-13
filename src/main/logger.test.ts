@@ -1,6 +1,6 @@
 /**
  * Unit tests for logger module
- * 
+ *
  * These tests don't require electron mocking since they test pure utility functions.
  */
 import { describe, it, expect } from 'vitest'

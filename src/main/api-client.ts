@@ -265,7 +265,6 @@ export const profileApi = {
     return response.data
   },
 
-
   /**
    * Get billing addresses
    */
@@ -363,7 +362,7 @@ export const albumsApi = {
     if (data.eventDate) {
       body.eventDate = data.eventDate
     }
-    
+
     console.log('[API] Creating album:', body)
     const response = await apiFetch<ApiResponse<ApiAlbum>>('/albums', {
       method: 'POST',
@@ -453,12 +452,16 @@ export const albumsApi = {
    * Returns both favorites data and list of unique client names for filtering
    */
   async getFavorites(albumId: string, clientName?: string): Promise<ApiFavoritesResponse> {
-    console.log(`[API] Getting favorites for album ${albumId}${clientName ? ` (filter: ${clientName})` : ''}`)
+    console.log(
+      `[API] Getting favorites for album ${albumId}${clientName ? ` (filter: ${clientName})` : ''}`
+    )
     const endpoint = clientName
       ? `/albums/${albumId}/favorites?clientName=${encodeURIComponent(clientName)}`
       : `/albums/${albumId}/favorites`
     const response = await apiFetch<ApiResponse<ApiFavoriteImage[]>>(endpoint)
-    console.log(`[API] Received ${response.data?.length || 0} favorites, ${response.clientNames?.length || 0} unique clients`)
+    console.log(
+      `[API] Received ${response.data?.length || 0} favorites, ${response.clientNames?.length || 0} unique clients`
+    )
     return {
       data: response.data || [],
       clientNames: response.clientNames || []

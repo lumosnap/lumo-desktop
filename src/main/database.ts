@@ -162,9 +162,7 @@ export function runInTransaction<T>(fn: () => T): T {
  * Bulk create images in a single transaction for performance
  * Much faster than creating images one by one
  */
-export function createImagesBatch(
-  images: Array<Omit<Image, 'id' | 'createdAt'>>
-): Image[] {
+export function createImagesBatch(images: Array<Omit<Image, 'id' | 'createdAt'>>): Image[] {
   if (!db) throw new Error('Database not initialized')
 
   const createdAt = new Date().toISOString()
@@ -206,9 +204,7 @@ export function createImagesBatch(
 /**
  * Bulk update images in a single transaction
  */
-export function updateImagesBatch(
-  updates: Array<{ id: number; changes: Partial<Image> }>
-): void {
+export function updateImagesBatch(updates: Array<{ id: number; changes: Partial<Image> }>): void {
   if (!db) throw new Error('Database not initialized')
 
   const updateMany = db.transaction((items: typeof updates) => {
@@ -274,12 +270,12 @@ export function getAlbumImageCounts(): Record<string, number> {
 
   const stmt = db.prepare('SELECT albumId, COUNT(*) as count FROM images GROUP BY albumId')
   const results = stmt.all() as { albumId: string; count: number }[]
-  
+
   const counts: Record<string, number> = {}
-  results.forEach(row => {
+  results.forEach((row) => {
     counts[row.albumId] = row.count
   })
-  
+
   return counts
 }
 

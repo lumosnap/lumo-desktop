@@ -138,7 +138,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         // This runs asynchronously and will notify frontend if status changes
         // Don't await this!
         if (album.sourceFolderPath && existsSync(album.sourceFolderPath)) {
-          watcherService.checkSyncStatus(album.id).catch(err => {
+          watcherService.checkSyncStatus(album.id).catch((err) => {
             logger.error(`Background sync check failed for ${album.id}:`, getErrorMessage(err))
           })
         }

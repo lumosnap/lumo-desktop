@@ -26,8 +26,7 @@ const api = {
       isLowStorage: boolean
       error?: string
     }> => ipcRenderer.invoke('config:getCurrentStorageInfo'),
-    getMasterFolder: (): Promise<string | null> =>
-      ipcRenderer.invoke('config:getMasterFolder'),
+    getMasterFolder: (): Promise<string | null> => ipcRenderer.invoke('config:getMasterFolder'),
     setMasterFolder: (path: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('config:setMasterFolder', path),
     scanMasterFolder: (): Promise<{
@@ -70,7 +69,8 @@ const api = {
   api: {
     generateShareLink: (albumId: string): Promise<any> =>
       ipcRenderer.invoke('api:generateShareLink', albumId),
-    getFavorites: (albumId: string, clientName?: string): Promise<any> => ipcRenderer.invoke('api:getFavorites', albumId, clientName)
+    getFavorites: (albumId: string, clientName?: string): Promise<any> =>
+      ipcRenderer.invoke('api:getFavorites', albumId, clientName)
   },
   plans: {
     list: (): Promise<{
@@ -85,7 +85,9 @@ const api = {
       }>
       error?: string
     }> => ipcRenderer.invoke('plans:list'),
-    requestUpgrade: (planId: number): Promise<{
+    requestUpgrade: (
+      planId: number
+    ): Promise<{
       success: boolean
       error?: string
     }> => ipcRenderer.invoke('plans:requestUpgrade', planId)
@@ -110,7 +112,10 @@ const api = {
       }
       error?: string
     }> => ipcRenderer.invoke('profile:get'),
-    update: (data: { businessName?: string; phone?: string }): Promise<{
+    update: (data: {
+      businessName?: string
+      phone?: string
+    }): Promise<{
       success: boolean
       data?: {
         id: number

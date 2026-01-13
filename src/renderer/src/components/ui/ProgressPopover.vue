@@ -22,9 +22,7 @@ const progressPercentage = computed(() => {
   if (!props.progress || !props.progress.total) return 0
   // Weight progress: compressing = 25%, uploading = 75%, complete = 100%
   const weightedProgress =
-    props.progress.complete +
-    props.progress.uploading * 0.75 +
-    props.progress.compressing * 0.25
+    props.progress.complete + props.progress.uploading * 0.75 + props.progress.compressing * 0.25
   return (weightedProgress / props.progress.total) * 100
 })
 
@@ -70,13 +68,18 @@ const statusText = computed(() => {
               </defs>
             </svg>
             <div class="absolute inset-0 flex items-center justify-center">
-              <Loader2 v-if="progressPercentage < 100" class="h-4 w-4 text-indigo-500 animate-spin" />
+              <Loader2
+                v-if="progressPercentage < 100"
+                class="h-4 w-4 text-indigo-500 animate-spin"
+              />
               <CheckCircle2 v-else class="h-4 w-4 text-emerald-500" />
             </div>
           </div>
 
           <div class="flex flex-col items-start">
-            <span class="text-xs font-bold text-slate-900">{{ Math.round(progressPercentage) }}%</span>
+            <span class="text-xs font-bold text-slate-900"
+              >{{ Math.round(progressPercentage) }}%</span
+            >
             <span class="text-[10px] text-slate-500">{{ statusText }}</span>
           </div>
         </button>
@@ -86,7 +89,9 @@ const statusText = computed(() => {
         <div class="w-72 p-4">
           <div class="mb-4 flex items-center justify-between">
             <h3 class="text-sm font-bold text-slate-900">Upload Progress</h3>
-            <span class="text-xs text-slate-500">{{ progress?.complete || 0 }} / {{ progress?.total || 0 }}</span>
+            <span class="text-xs text-slate-500"
+              >{{ progress?.complete || 0 }} / {{ progress?.total || 0 }}</span
+            >
           </div>
 
           <div class="space-y-3">

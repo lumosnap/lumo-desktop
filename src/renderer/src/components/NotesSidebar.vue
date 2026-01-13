@@ -39,8 +39,6 @@ function formatDate(dateString: string): string {
     minute: '2-digit'
   })
 }
-
-
 </script>
 
 <template>

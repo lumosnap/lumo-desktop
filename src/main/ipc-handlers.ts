@@ -1,5 +1,12 @@
 import { ipcMain, BrowserWindow, shell } from 'electron'
-import { isConfigured, getStorageLocation, setStorageLocation, getConfig, getMasterFolder, setMasterFolder } from './config'
+import {
+  isConfigured,
+  getStorageLocation,
+  setStorageLocation,
+  getConfig,
+  getMasterFolder,
+  setMasterFolder
+} from './config'
 import {
   getFreeSpace,
   createAlbumFolder,
@@ -24,11 +31,7 @@ import { join } from 'path'
 import { watcherService } from './watcher'
 import { startAuth } from './oauth-handler'
 import { getAuth, clearAuth } from './auth-storage'
-import {
-  createAlbumMetadata,
-  writeAlbumMetadata,
-  getFolderStats
-} from './album-metadata'
+import { createAlbumMetadata, writeAlbumMetadata, getFolderStats } from './album-metadata'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ==================== Auth Handlers ====================
@@ -154,19 +157,16 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
-  ipcMain.handle(
-    'profile:update',
-    async (_, data: { businessName?: string; phone?: string }) => {
-      try {
-        const profile = await profileApi.update(data)
-        return { success: true, data: profile }
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Failed to update profile'
-        console.error('[IPC] Failed to update profile:', message)
-        return { success: false, error: message }
-      }
+  ipcMain.handle('profile:update', async (_, data: { businessName?: string; phone?: string }) => {
+    try {
+      const profile = await profileApi.update(data)
+      return { success: true, data: profile }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to update profile'
+      console.error('[IPC] Failed to update profile:', message)
+      return { success: false, error: message }
     }
-  )
+  })
 
   ipcMain.handle('profile:getBillingAddresses', async () => {
     try {
@@ -392,11 +392,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
         // Create .lumosnap metadata file in source folder
         const folderStats = getFolderStats(data.sourceFolderPath)
-        const metadata = createAlbumMetadata(
-          album.id,
-          imageFiles.length,
-          folderStats.totalSize
-        )
+        const metadata = createAlbumMetadata(album.id, imageFiles.length, folderStats.totalSize)
         writeAlbumMetadata(data.sourceFolderPath, metadata)
 
         // Start compression and upload pipeline
@@ -595,7 +591,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         notesCount: number
         comments: Array<{ clientName: string; notes: string | null; createdAt: string }>
       }> = []
-      
+
       console.log(`[IPC] Fetching favorites from API...`)
       try {
         const favoritesResult = await albumsApi.getFavorites(albumId)
@@ -676,7 +672,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   ipcMain.handle('album:deleteImages', async (_event, albumId: string, imageIds: number[]) => {
-    console.log(`[IPC] album:deleteImages called for albumId: ${albumId}, count: ${imageIds.length}`)
+    console.log(
+      `[IPC] album:deleteImages called for albumId: ${albumId}, count: ${imageIds.length}`
+    )
     try {
       const images = getAlbumImages(albumId)
       const imagesToDelete = images.filter((img) => imageIds.includes(img.id))
@@ -795,46 +793,43 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   // ==================== Shell Handlers ====================
 
-  ipcMain.handle(
-    'shell:showItemInFolder',
-    (_event, albumId: string, imageId: number) => {
-      try {
-        console.log(
-          `[IPC] shell:showItemInFolder called for albumId: ${albumId}, imageId: ${imageId}`
-        )
+  ipcMain.handle('shell:showItemInFolder', (_event, albumId: string, imageId: number) => {
+    try {
+      console.log(
+        `[IPC] shell:showItemInFolder called for albumId: ${albumId}, imageId: ${imageId}`
+      )
 
-        // Get album to get source folder path
-        const album = getAlbum(albumId)
-        if (!album) {
-          return { success: false, error: 'Album not found' }
-        }
-
-        // Get image to get original filename
-        const images = getAlbumImages(albumId)
-        const image = images.find((img) => img.id === imageId)
-        if (!image) {
-          return { success: false, error: 'Image not found' }
-        }
-
-        // Construct original file path
-        const originalPath = join(album.sourceFolderPath, image.originalFilename)
-
-        // Check if file exists
-        if (!existsSync(originalPath)) {
-          console.error(`[IPC] Original file not found: ${originalPath}`)
-          return { success: false, error: 'Original file not found' }
-        }
-
-        // Show in folder
-        console.log(`[IPC] Showing file in folder: ${originalPath}`)
-        shell.showItemInFolder(originalPath)
-
-        return { success: true }
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error'
-        console.error('[IPC] Failed to show item in folder:', message)
-        return { success: false, error: message }
+      // Get album to get source folder path
+      const album = getAlbum(albumId)
+      if (!album) {
+        return { success: false, error: 'Album not found' }
       }
+
+      // Get image to get original filename
+      const images = getAlbumImages(albumId)
+      const image = images.find((img) => img.id === imageId)
+      if (!image) {
+        return { success: false, error: 'Image not found' }
+      }
+
+      // Construct original file path
+      const originalPath = join(album.sourceFolderPath, image.originalFilename)
+
+      // Check if file exists
+      if (!existsSync(originalPath)) {
+        console.error(`[IPC] Original file not found: ${originalPath}`)
+        return { success: false, error: 'Original file not found' }
+      }
+
+      // Show in folder
+      console.log(`[IPC] Showing file in folder: ${originalPath}`)
+      shell.showItemInFolder(originalPath)
+
+      return { success: true }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[IPC] Failed to show item in folder:', message)
+      return { success: false, error: message }
     }
-  )
+  })
 }

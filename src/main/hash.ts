@@ -49,7 +49,9 @@ export function hashFileSync(filePath: string): string {
  * Read file and compute hash in one operation
  * Returns both buffer and hash to avoid re-reading the file
  */
-export async function readFileWithHash(filePath: string): Promise<{ buffer: Buffer; hash: string }> {
+export async function readFileWithHash(
+  filePath: string
+): Promise<{ buffer: Buffer; hash: string }> {
   const buffer = await fs.readFile(filePath)
   const hash = hashBuffer(buffer)
   return { buffer, hash }

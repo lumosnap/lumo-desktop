@@ -84,21 +84,21 @@ export function getAuth(): AuthData | null {
       const decrypted = safeStorage.decryptString(fileContent)
       const authData = JSON.parse(decrypted) as AuthData
       console.log('[AuthStorage] Auth data loaded (encrypted)')
-      
+
       // Update cache
       cachedAuth = authData
       isCacheInitialized = true
-      
+
       return authData
     } else {
       // Fallback: assume it's plain text
       const authData = JSON.parse(fileContent.toString('utf-8')) as AuthData
       console.log('[AuthStorage] Auth data loaded (plain text)')
-      
+
       // Update cache
       cachedAuth = authData
       isCacheInitialized = true
-      
+
       return authData
     }
   } catch (error) {

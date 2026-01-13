@@ -82,7 +82,7 @@ export function writeAlbumMetadata(folderPath: string, metadata: AlbumMetadata):
   try {
     const content = JSON.stringify(metadata, null, 2)
     writeFileSync(metadataPath, content, 'utf-8')
-    
+
     // On Windows, hide the file using 'attrib +h'
     if (process.platform === 'win32') {
       exec(`attrib +h "${metadataPath}"`, (error) => {
@@ -91,7 +91,7 @@ export function writeAlbumMetadata(folderPath: string, metadata: AlbumMetadata):
         }
       })
     }
-    
+
     console.log(`[AlbumMetadata] Wrote metadata for album ${metadata.albumId} to ${folderPath}`)
     return true
   } catch (error) {

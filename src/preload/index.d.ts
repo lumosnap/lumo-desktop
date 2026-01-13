@@ -51,8 +51,14 @@ declare global {
         get: (albumId: string) => Promise<any>
         delete: (albumId: string) => Promise<any>
         getImages: (albumId: string) => Promise<any>
-        deleteImage: (albumId: string, imageId: number) => Promise<{ success: boolean; error?: string }>
-        deleteImages: (albumId: string, imageIds: number[]) => Promise<{ success: boolean; deletedCount?: number; error?: string }>
+        deleteImage: (
+          albumId: string,
+          imageId: number
+        ) => Promise<{ success: boolean; error?: string }>
+        deleteImages: (
+          albumId: string,
+          imageIds: number[]
+        ) => Promise<{ success: boolean; deletedCount?: number; error?: string }>
         scanSourceFolder: (path: string) => Promise<any>
         startUpload: (albumId: string) => Promise<any>
         getProgress: (albumId: string) => Promise<any>

@@ -110,40 +110,50 @@ const formattedEventDate = computed(() => {
 })
 
 // Setup Intersection Observer for Infinite Scroll
-function setupObserver() {
+function setupObserver(): void {
   if (observer) observer.disconnect()
-  
-  observer = new IntersectionObserver((entries) => {
-    const target = entries[0]
-    if (target.isIntersecting) {
-      if (displayedImages.value.length < filteredImages.value.length) {
-        page.value++
+
+  observer = new IntersectionObserver(
+    (entries) => {
+      const target = entries[0]
+      if (target.isIntersecting) {
+        if (displayedImages.value.length < filteredImages.value.length) {
+          page.value++
+        }
       }
+    },
+    {
+      root: null,
+      rootMargin: '200px', // Load before reaching bottom
+      threshold: 0.1
     }
-  }, {
-    root: null,
-    rootMargin: '200px', // Load before reaching bottom
-    threshold: 0.1
-  })
-  
+  )
+
   if (loadMoreTrigger.value) {
     observer.observe(loadMoreTrigger.value)
   }
 }
 
 // Watch for loading trigger visibility
-watch(() => [loadMoreTrigger.value, filteredImages.value.length], () => {
-    if(loadMoreTrigger.value) setupObserver()
-}, { flush: 'post' })
+watch(
+  () => [loadMoreTrigger.value, filteredImages.value.length],
+  () => {
+    if (loadMoreTrigger.value) setupObserver()
+  },
+  { flush: 'post' }
+)
 
 // Reset page when filter changes
-watch(() => [showFavoritesOnly.value, selectedClientName.value], () => {
-  page.value = 1
-  // Wait for DOM update then re-init lightbox
-  nextTick(() => {
-    initLightbox()
-  })
-})
+watch(
+  () => [showFavoritesOnly.value, selectedClientName.value],
+  () => {
+    page.value = 1
+    // Wait for DOM update then re-init lightbox
+    nextTick(() => {
+      initLightbox()
+    })
+  }
+)
 
 // Get thumbnail path for an image (stored in .thumbnails subfolder)
 // Falls back to original if thumbnail doesn't exist
@@ -152,7 +162,7 @@ function getThumbnailPath(localFilePath: string): string {
   // thumbnail:     /path/to/album/.thumbnails/image.webp
   const lastSlash = localFilePath.lastIndexOf('/')
   if (lastSlash === -1) return localFilePath
-  
+
   const dir = localFilePath.substring(0, lastSlash)
   const filename = localFilePath.substring(lastSlash + 1)
   return `${dir}/.thumbnails/${filename}`
@@ -208,9 +218,10 @@ async function loadFavorites(clientNameFilter?: string): Promise<void> {
         for (const fav of result.favorites) {
           const baseName = getBaseName(fav.originalFilename)
           // Extract unique client names from comments
-          const clients = fav.comments
-            ?.map((c: Comment) => c.clientName)
-            .filter((name: string, idx: number, arr: string[]) => arr.indexOf(name) === idx) || []
+          const clients =
+            fav.comments
+              ?.map((c: Comment) => c.clientName)
+              .filter((name: string, idx: number, arr: string[]) => arr.indexOf(name) === idx) || []
           favoritedByMap.set(baseName, clients)
         }
       }
@@ -275,7 +286,7 @@ async function generateShareLink(): Promise<void> {
   // Check local storage first
   const storageKey = `shareLink_album_${albumId}`
   const cachedLink = localStorage.getItem(storageKey)
-  
+
   if (cachedLink) {
     shareLink.value = cachedLink
     showShareModal.value = true
@@ -384,7 +395,9 @@ function initLightbox(): void {
           const anchor = currSlide.data.element as HTMLAnchorElement
           const imageSrc = anchor.href
           const image = images.value.find(
-            (img) => `file://${img.localFilePath}` === imageSrc || imageSrc.startsWith(`file://${img.localFilePath}`)
+            (img) =>
+              `file://${img.localFilePath}` === imageSrc ||
+              imageSrc.startsWith(`file://${img.localFilePath}`)
           )
           if (image) {
             openNotesSidebar(image)
@@ -397,10 +410,7 @@ function initLightbox(): void {
   lightbox.init()
 }
 
-const onAlbumStatusChanged = (
-  _e: unknown,
-  data: { albumId: string; needsSync: number }
-): void => {
+const onAlbumStatusChanged = (_e: unknown, data: { albumId: string; needsSync: number }): void => {
   if (data.albumId === albumId && data.needsSync) {
     window.api.albums.get(albumId).then((result) => {
       if (result.success) {
@@ -448,7 +458,9 @@ onUnmounted(() => {
           </div>
 
           <div class="bg-slate-50 rounded-2xl p-5 border border-slate-100 shadow-inner">
-            <div class="h-10 w-full bg-white rounded-xl border border-slate-200 animate-pulse"></div>
+            <div
+              class="h-10 w-full bg-white rounded-xl border border-slate-200 animate-pulse"
+            ></div>
           </div>
         </aside>
 
@@ -514,37 +526,39 @@ onUnmounted(() => {
           <div class="bg-slate-50 rounded-2xl p-5 border border-slate-100 shadow-inner space-y-3">
             <!-- Favorites Toggle -->
             <button
-              @click="toggleShowFavorites"
               class="w-full flex items-center justify-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl shadow-sm border transition-all duration-200"
               :class="
                 showFavoritesOnly
                   ? 'bg-rose-50 text-rose-600 border-rose-100 ring-2 ring-rose-100'
                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               "
+              @click="toggleShowFavorites"
             >
               <Heart class="h-4 w-4" :fill="showFavoritesOnly ? 'currentColor' : 'none'" />
               <span>{{
-                showFavoritesOnly
-                  ? 'Show All Images'
-                  : `Show Favorites (${favoritedPhotosCount})`
+                showFavoritesOnly ? 'Show All Images' : `Show Favorites (${favoritedPhotosCount})`
               }}</span>
             </button>
 
             <!-- Client Filter Dropdown -->
             <div v-if="clientNames.length > 0" class="relative">
-              <label class="text-xs font-medium text-slate-500 mb-1.5 block">Filter by Client</label>
+              <label class="text-xs font-medium text-slate-500 mb-1.5 block"
+                >Filter by Client</label
+              >
               <div class="relative">
                 <select
                   v-model="selectedClientName"
-                  @change="onClientFilterChange"
                   class="w-full appearance-none bg-white border border-slate-200 rounded-xl px-4 py-2.5 pr-10 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 cursor-pointer transition-all"
+                  @change="onClientFilterChange"
                 >
                   <option value="">All Clients ({{ clientNames.length }})</option>
                   <option v-for="name in clientNames" :key="name" :value="name">
                     {{ name }}
                   </option>
                 </select>
-                <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <ChevronDown
+                  class="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none"
+                />
               </div>
             </div>
 
@@ -607,8 +621,8 @@ onUnmounted(() => {
             </p>
             <button
               v-if="showFavoritesOnly"
-              @click="toggleShowFavorites"
               class="mt-6 px-6 py-2 bg-white border border-slate-200 rounded-full text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
+              @click="toggleShowFavorites"
             >
               View All Photos
             </button>
@@ -630,12 +644,14 @@ onUnmounted(() => {
               class="group relative aspect-[4/5] rounded-xl overflow-hidden bg-slate-200 cursor-pointer shadow-sm hover:shadow-md transition-all duration-300 block"
             >
               <img
-              :src="`file://${getThumbnailPath(image.localFilePath)}`"
-              :alt="image.originalFilename"
-              loading="lazy"
-              class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-              @error="(e) => (e.target as HTMLImageElement).src = `file://${image.localFilePath}`"
-            />
+                :src="`file://${getThumbnailPath(image.localFilePath)}`"
+                :alt="image.originalFilename"
+                loading="lazy"
+                class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                @error="
+                  (e) => ((e.target as HTMLImageElement).src = `file://${image.localFilePath}`)
+                "
+              />
 
               <!-- Gradient Overlay -->
               <div
@@ -643,11 +659,10 @@ onUnmounted(() => {
               ></div>
 
               <!-- Favorite Badge (Top Right) -->
-              <div
-                v-if="image.isFavorite"
-                class="absolute top-3 right-3 group/fav z-10"
-              >
-                <div class="h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-rose-500 text-white shadow-lg">
+              <div v-if="image.isFavorite" class="absolute top-3 right-3 group/fav z-10">
+                <div
+                  class="h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-rose-500 text-white shadow-lg"
+                >
                   <Heart class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
                   <span v-if="(image.favoriteCount || 0) > 0" class="text-xs font-bold">{{
                     image.favoriteCount
@@ -658,9 +673,13 @@ onUnmounted(() => {
                   v-if="image.favoritedBy && image.favoritedBy.length > 0"
                   class="absolute top-full right-0 mt-1.5 opacity-0 group-hover/fav:opacity-100 transition-opacity pointer-events-none"
                 >
-                  <div class="bg-slate-800/95 backdrop-blur-sm text-white text-xs rounded-lg px-3 py-2 shadow-xl whitespace-nowrap">
+                  <div
+                    class="bg-slate-800/95 backdrop-blur-sm text-white text-xs rounded-lg px-3 py-2 shadow-xl whitespace-nowrap"
+                  >
                     <div class="font-medium text-slate-300 mb-1">Favorited by:</div>
-                    <div v-for="name in image.favoritedBy" :key="name" class="text-white">{{ name }}</div>
+                    <div v-for="name in image.favoritedBy" :key="name" class="text-white">
+                      {{ name }}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -668,8 +687,8 @@ onUnmounted(() => {
               <!-- Notes Badge (Top Left) -->
               <button
                 v-if="(image.notesCount || 0) > 0"
-                @click.stop.prevent="openNotesSidebar(image)"
                 class="absolute top-3 left-3 h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-indigo-500 text-white shadow-md z-10 hover:bg-indigo-600 transition-colors"
+                @click.stop.prevent="openNotesSidebar(image)"
               >
                 <MessageSquare class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
                 <span class="text-xs font-bold">{{ image.notesCount }}</span>
@@ -706,10 +725,13 @@ onUnmounted(() => {
               </div>
             </a>
           </div>
-          
+
           <!-- Infinite Scroll Trigger -->
           <div ref="loadMoreTrigger" class="h-10 w-full flex items-center justify-center p-4">
-            <Loader2 v-if="displayedImages.length < filteredImages.length" class="h-6 w-6 text-slate-400 animate-spin" />
+            <Loader2
+              v-if="displayedImages.length < filteredImages.length"
+              class="h-6 w-6 text-slate-400 animate-spin"
+            />
           </div>
         </main>
       </div>

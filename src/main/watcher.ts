@@ -40,12 +40,9 @@ class WatcherService {
   private mainWindow: BrowserWindow | null = null
 
   // Debounced file change handler - batches rapid events
-  private debouncedHandleFileChange = debounceByKey(
-    (albumId: string) => {
-      this.processFileChange(albumId)
-    },
-    FILE_CHANGE_DEBOUNCE_MS
-  )
+  private debouncedHandleFileChange = debounceByKey((albumId: string) => {
+    this.processFileChange(albumId)
+  }, FILE_CHANGE_DEBOUNCE_MS)
 
   initialize(mainWindow: BrowserWindow): void {
     this.mainWindow = mainWindow
@@ -105,7 +102,7 @@ class WatcherService {
             if (existingById) {
               // It's a match! This is a rename operation.
               logger.info(`Detected renamed album: "${existingById.title}" -> "${folderName}"`)
-              
+
               updateAlbum(existingById.id, {
                 title: folderName,
                 sourceFolderPath: folderPath,
@@ -120,7 +117,7 @@ class WatcherService {
               if (this.mainWindow) {
                 this.mainWindow.webContents.send('albums:refresh')
               }
-              
+
               return // Skip auto-creation
             }
           }
@@ -132,7 +129,7 @@ class WatcherService {
       // Auto-create album
       try {
         await this.autoCreateAlbum(folderName, folderPath)
-        
+
         // Notify renderer to refresh album list
         if (this.mainWindow) {
           this.mainWindow.webContents.send('albums:refresh')
@@ -148,10 +145,10 @@ class WatcherService {
       if (album) {
         console.log(`[Watcher] Marking album ${album.id} as orphaned`)
         updateAlbum(album.id, { isOrphaned: 1 })
-        
+
         // Stop watching this folder
         this.unwatch(album.id)
-        
+
         // Notify renderer to refresh
         if (this.mainWindow) {
           this.mainWindow.webContents.send('albums:refresh')
@@ -229,11 +226,7 @@ class WatcherService {
 
     // Create .lumosnap metadata file in source folder
     const folderStats = getFolderStats(sourceFolderPath)
-    const metadata = createAlbumMetadata(
-      album.id,
-      imageFiles.length,
-      folderStats.totalSize
-    )
+    const metadata = createAlbumMetadata(album.id, imageFiles.length, folderStats.totalSize)
     writeAlbumMetadata(sourceFolderPath, metadata)
 
     console.log(`[Watcher] Album created: ${album.id} with ${imageFiles.length} images`)
@@ -285,9 +278,7 @@ class WatcherService {
   ): Promise<void> {
     if (filePaths.length === 0) return
 
-    logger.info(
-      `Copy watcher detected ${filePaths.length} new files for album ${albumId}`
-    )
+    logger.info(`Copy watcher detected ${filePaths.length} new files for album ${albumId}`)
 
     const album = getAlbum(albumId)
     if (!album) {
@@ -300,10 +291,7 @@ class WatcherService {
     const existingFilenames = new Set(existingImages.map((img) => img.originalFilename))
 
     // Get current max uploadOrder
-    let maxUploadOrder = existingImages.reduce(
-      (max, img) => Math.max(max, img.uploadOrder),
-      -1
-    )
+    let maxUploadOrder = existingImages.reduce((max, img) => Math.max(max, img.uploadOrder), -1)
 
     let addedCount = 0
 
@@ -394,30 +382,34 @@ class WatcherService {
       const newFolders = subfolders.filter((f) => !existingPaths.has(f.path))
 
       if (newFolders.length > 0) {
-        console.log(`[Watcher] Found ${newFolders.length} new folders - checking for existing albums`)
+        console.log(
+          `[Watcher] Found ${newFolders.length} new folders - checking for existing albums`
+        )
 
         for (const folder of newFolders) {
           try {
             // Check if folder has .lumosnap metadata (moved/renamed album)
             if (hasAlbumMetadata(folder.path)) {
               const existingAlbumId = getAlbumIdFromMetadata(folder.path)
-              
+
               if (existingAlbumId && existingAlbumIds.has(existingAlbumId)) {
                 // Album exists but with different path - update the path
                 console.log(`[Watcher] Detected moved album ${existingAlbumId} at ${folder.path}`)
-                updateAlbum(existingAlbumId, { 
+                updateAlbum(existingAlbumId, {
                   sourceFolderPath: folder.path,
-                  isOrphaned: 0 
+                  isOrphaned: 0
                 })
                 this.watch(existingAlbumId, folder.path)
                 continue
               } else if (existingAlbumId) {
                 // Metadata points to album not in DB - could be from another installation
                 // or copied folder. Skip and let user handle manually.
-                console.log(`[Watcher] Found metadata for unknown album ${existingAlbumId} in ${folder.path}`)
+                console.log(
+                  `[Watcher] Found metadata for unknown album ${existingAlbumId} in ${folder.path}`
+                )
               }
             }
-            
+
             // No existing metadata or album not found - create new album
             await this.autoCreateAlbum(folder.name, folder.path)
             console.log(`[Watcher] Auto-created album for: ${folder.name}`)
@@ -483,11 +475,11 @@ class WatcherService {
     // Smart Sync: Detect changes first to decide if we need to show badge or auto-sync
     try {
       const result = await detectAlbumChanges(albumId)
-      
+
       if (!result.success || !result.changes) {
-         // Fallback to safe default: just show sync badge if detection failed
-         this.setNeedsSync(albumId, 1)
-         return
+        // Fallback to safe default: just show sync badge if detection failed
+        this.setNeedsSync(albumId, 1)
+        return
       }
 
       const { new: newFiles, modified, deleted, renamed, skipped } = result.changes
@@ -502,13 +494,12 @@ class WatcherService {
         // Only trivial changes (renames/duplicates) -> Auto-sync silently
         logger.info(`Only trivial changes detected for ${albumId}. Auto-syncing silently.`)
         await executeAlbumSync(albumId, result.changes, this.mainWindow)
-        
+
         // Ensure needsSync is 0 (should be done by execute, but good to be sure)
         // We don't need to call setNeedsSync(0) because executeSync does it.
       } else {
         logger.info(`No relevant changes detected for ${albumId}`)
       }
-
     } catch (error) {
       logger.error(`Failed to process file changes for ${albumId}:`, error)
       this.setNeedsSync(albumId, 1) // Safe fallback
@@ -525,7 +516,7 @@ class WatcherService {
         })
       }
     } catch (error) {
-       logger.error(`Failed to update album status:`, error)
+      logger.error(`Failed to update album status:`, error)
     }
   }
 
@@ -540,17 +531,17 @@ class WatcherService {
 
       // Use smart detection logic to check for actual changes
       const result = await detectAlbumChanges(albumId)
-      
+
       if (!result.success || !result.changes) {
         return
       }
-      
+
       const { new: newFiles, modified, deleted, renamed, skipped } = result.changes
       const hasRealChanges = newFiles.length > 0 || modified.length > 0 || deleted.length > 0
       const hasTrivialChanges = renamed.length > 0 || skipped.length > 0
-      
+
       const needsSync = hasRealChanges ? 1 : 0
-      
+
       // If we have trivial changes but no real changes, execute silent sync to update metadata
       if (!hasRealChanges && hasTrivialChanges) {
         logger.info(`[CheckSync] Trivial changes detected for ${albumId}, syncing silently...`)
@@ -560,7 +551,7 @@ class WatcherService {
         // Just update status if changed
         if (album.needsSync !== needsSync) {
           updateAlbum(albumId, { needsSync })
-          
+
           if (this.mainWindow) {
             this.mainWindow.webContents.send('album:status-changed', {
               albumId,
@@ -579,16 +570,16 @@ class WatcherService {
    */
   async refreshSyncStatus(): Promise<void> {
     const albums = getAllAlbums()
-    
+
     logger.info(`Starting background sync check for ${albums.length} albums...`)
-    
+
     // Process sequentially to avoid IO spikes
     for (const album of albums) {
       await this.checkSyncStatus(album.id)
       // Small delay to yield to other tasks
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await new Promise((resolve) => setTimeout(resolve, 50))
     }
-    
+
     logger.info('Background sync check completed')
   }
 
@@ -600,4 +591,3 @@ class WatcherService {
 }
 
 export const watcherService = new WatcherService()
-

@@ -73,10 +73,23 @@ const user = computed(() => ({
 async function generateBookingUrl(): Promise<void> {
   isBookingUrlLoading.value = true
   bookingError.value = null
+
+  // Check local storage first
+  const storageKey = `bookingUrl_${authStore.user?.email || 'default'}`
+  const cachedUrl = localStorage.getItem(storageKey)
+
+  if (cachedUrl) {
+    bookingUrl.value = cachedUrl
+    showBookingModal.value = true
+    isBookingUrlLoading.value = false
+    return
+  }
+
   try {
     const result = await window.api.profile.getBookingUrl()
     if (result.success && result.bookingUrl) {
       bookingUrl.value = result.bookingUrl
+      localStorage.setItem(storageKey, result.bookingUrl)
       showBookingModal.value = true
     } else {
       bookingError.value = result.error || 'Failed to generate booking URL'
@@ -113,7 +126,6 @@ async function copyBookingUrl(): Promise<void> {
 function openBookingUrl(): void {
   window.open(bookingUrl.value, '_blank')
 }
-
 
 // Plans state
 interface Plan {
@@ -192,7 +204,7 @@ async function requestUpgrade(planId: number): Promise<void> {
   upgradeError.value = null
   upgradeSuccess.value = false
   selectedPlanId.value = planId
-  
+
   try {
     const result = await window.api.plans.requestUpgrade(planId)
     if (result.success) {
@@ -292,10 +304,10 @@ async function selectNewFolder(): Promise<void> {
 
 async function confirmChangeStorage(): Promise<void> {
   if (!pendingNewPath.value) return
-  
+
   isChangingStorage.value = true
   storageError.value = null
-  
+
   try {
     const result = await window.api.config.setStorageLocation(pendingNewPath.value)
     if (result.success) {
@@ -375,14 +387,10 @@ onMounted(() => {
   <AppLayout>
     <div class="flex h-full overflow-hidden bg-slate-50 text-slate-900">
       <!-- Left Sidebar -->
-      <aside
-        class="w-80 border-r border-slate-200 bg-white p-6 flex flex-col shrink-0 shadow-sm"
-      >
+      <aside class="w-80 border-r border-slate-200 bg-white p-6 flex flex-col shrink-0 shadow-sm">
         <!-- Header -->
         <div class="mb-8">
-          <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2">
-            Account
-          </div>
+          <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2">Account</div>
           <h1 class="text-3xl font-serif italic text-slate-900">Settings</h1>
         </div>
 
@@ -447,9 +455,7 @@ onMounted(() => {
                   Saved
                 </div>
               </div>
-              <p class="text-slate-500 text-sm">
-                This will be displayed on your shared albums.
-              </p>
+              <p class="text-slate-500 text-sm">This will be displayed on your shared albums.</p>
             </div>
 
             <!-- Loading State -->
@@ -467,7 +473,7 @@ onMounted(() => {
                   </div>
                 </div>
                 <div class="grid grid-cols-2 gap-6">
-                   <div class="space-y-2">
+                  <div class="space-y-2">
                     <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
                     <div class="h-12 w-full bg-slate-100 rounded-xl animate-pulse"></div>
                   </div>
@@ -549,26 +555,28 @@ onMounted(() => {
                 </div>
               </div>
 
-               <!-- Booking URL Section -->
+              <!-- Booking URL Section -->
               <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
                 <div class="flex items-center justify-between">
                   <div>
                     <h3 class="font-semibold text-slate-900">Booking URL</h3>
-                    <p class="text-sm text-slate-500">Share this link with clients to let them book you directly.</p>
+                    <p class="text-sm text-slate-500">
+                      Share this link with clients to let them book you directly.
+                    </p>
                   </div>
                   <button
                     class="flex items-center gap-2 rounded-xl bg-indigo-50 text-indigo-600 px-4 py-2 text-sm font-semibold hover:bg-indigo-100 transition-colors"
-                     @click="generateBookingUrl"
-                     :disabled="isBookingUrlLoading"
+                    :disabled="isBookingUrlLoading"
+                    @click="generateBookingUrl"
                   >
                     <LinkIcon v-if="!isBookingUrlLoading" class="h-4 w-4" />
                     <Loader2 v-else class="h-4 w-4 animate-spin" />
                     <span>Get Link</span>
                   </button>
                 </div>
-                 <div v-if="bookingError" class="text-sm text-red-600 bg-red-50 p-3 rounded-lg">
-                    {{ bookingError }}
-                 </div>
+                <div v-if="bookingError" class="text-sm text-red-600 bg-red-50 p-3 rounded-lg">
+                  {{ bookingError }}
+                </div>
               </div>
 
               <!-- Save Button -->
@@ -601,14 +609,17 @@ onMounted(() => {
                 <h3 class="font-semibold text-slate-900 mb-4">Master Watch Folder</h3>
 
                 <!-- Loading State -->
-                <div v-if="isLoadingMasterFolder" class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                   <div class="flex items-start gap-4">
-                      <div class="w-12 h-12 rounded-xl bg-slate-200 animate-pulse"></div>
-                      <div class="flex-1 space-y-2">
-                        <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
-                         <div class="h-5 w-48 bg-slate-200 rounded animate-pulse"></div>
-                      </div>
-                   </div>
+                <div
+                  v-if="isLoadingMasterFolder"
+                  class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5"
+                >
+                  <div class="flex items-start gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-slate-200 animate-pulse"></div>
+                    <div class="flex-1 space-y-2">
+                      <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
+                      <div class="h-5 w-48 bg-slate-200 rounded animate-pulse"></div>
+                    </div>
+                  </div>
                 </div>
 
                 <div v-else>
@@ -649,7 +660,10 @@ onMounted(() => {
                     class="mt-4 flex items-start gap-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3"
                   >
                     <AlertTriangle class="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>Changing the watch folder will stop tracking changes for albums in the current folder.</span>
+                    <span
+                      >Changing the watch folder will stop tracking changes for albums in the
+                      current folder.</span
+                    >
                   </div>
                 </div>
               </div>
@@ -717,14 +731,20 @@ onMounted(() => {
                   </button>
 
                   <div class="flex items-start gap-4 mb-6">
-                    <div class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                    <div
+                      class="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0"
+                    >
                       <AlertTriangle class="w-6 h-6 text-amber-600" />
                     </div>
                     <div>
-                      <h3 class="text-lg font-bold text-slate-900 mb-2">Change Storage Location?</h3>
+                      <h3 class="text-lg font-bold text-slate-900 mb-2">
+                        Change Storage Location?
+                      </h3>
                       <p class="text-sm text-slate-500">
-                        Changing the storage location will not move existing albums. 
-                        <strong class="text-slate-700">Albums in the old location will not be accessible from the app.</strong>
+                        Changing the storage location will not move existing albums.
+                        <strong class="text-slate-700"
+                          >Albums in the old location will not be accessible from the app.</strong
+                        >
                       </p>
                     </div>
                   </div>
@@ -737,11 +757,7 @@ onMounted(() => {
                   </div>
 
                   <div class="flex gap-3">
-                    <Button
-                      variant="secondary"
-                      class="flex-1"
-                      @click="cancelChangeStorage"
-                    >
+                    <Button variant="secondary" class="flex-1" @click="cancelChangeStorage">
                       Cancel
                     </Button>
                     <button
@@ -773,9 +789,13 @@ onMounted(() => {
               class="bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 border border-indigo-100 rounded-2xl p-6 relative overflow-hidden"
             >
               <!-- Decorative circles -->
-              <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-200/30 rounded-full blur-2xl"></div>
-              <div class="absolute -bottom-10 -left-10 w-32 h-32 bg-purple-200/30 rounded-full blur-2xl"></div>
-              
+              <div
+                class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-200/30 rounded-full blur-2xl"
+              ></div>
+              <div
+                class="absolute -bottom-10 -left-10 w-32 h-32 bg-purple-200/30 rounded-full blur-2xl"
+              ></div>
+
               <div class="relative">
                 <div class="flex justify-between items-start mb-4">
                   <div>
@@ -804,13 +824,20 @@ onMounted(() => {
                     <div class="flex justify-between text-sm mb-1">
                       <span class="text-slate-600 font-medium">Images</span>
                       <span class="font-semibold text-slate-900">
-                        {{ (profileStore.profile?.totalImages || 0).toLocaleString() }} / {{ (profileStore.profile?.imageLimit || 500).toLocaleString() }}
+                        {{ (profileStore.profile?.totalImages || 0).toLocaleString() }} /
+                        {{ (profileStore.profile?.imageLimit || 500).toLocaleString() }}
                       </span>
                     </div>
                     <div class="h-2.5 bg-white/50 rounded-full overflow-hidden">
-                      <div 
+                      <div
                         class="h-full rounded-full transition-all duration-500"
-                        :class="profileStore.isAtLimit ? 'bg-red-500' : profileStore.isNearLimit ? 'bg-amber-500' : 'bg-gradient-to-r from-indigo-500 to-purple-500'"
+                        :class="
+                          profileStore.isAtLimit
+                            ? 'bg-red-500'
+                            : profileStore.isNearLimit
+                              ? 'bg-amber-500'
+                              : 'bg-gradient-to-r from-indigo-500 to-purple-500'
+                        "
                         :style="{ width: `${profileStore.usagePercentage}%` }"
                       ></div>
                     </div>
@@ -835,7 +862,9 @@ onMounted(() => {
                   <AlertTriangle class="w-5 h-5 text-amber-500 shrink-0" />
                   <div>
                     <p class="text-sm font-medium text-amber-800">You're running low on space</p>
-                    <p class="text-xs text-amber-600">Only {{ profileStore.remainingImages.toLocaleString() }} images remaining.</p>
+                    <p class="text-xs text-amber-600">
+                      Only {{ profileStore.remainingImages.toLocaleString() }} images remaining.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -847,21 +876,20 @@ onMounted(() => {
                 <Sparkles class="w-5 h-5 text-indigo-500" />
                 Available Plans
               </h3>
-              
-              
+
               <!-- Loading State -->
               <div v-if="isLoadingPlans" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                 <div
+                <div
                   v-for="i in 3"
                   :key="i"
                   class="border border-slate-200 rounded-xl p-4 transition-all"
-                 >
-                    <div class="h-6 w-24 bg-slate-200 rounded animate-pulse mb-3"></div>
-                    <div class="h-8 w-20 bg-slate-200 rounded animate-pulse mb-1"></div>
-                    <div class="h-4 w-16 bg-slate-200 rounded animate-pulse mb-3"></div>
-                    <div class="h-4 w-full bg-slate-200 rounded animate-pulse mb-4"></div>
-                    <div class="h-10 w-full bg-slate-200 rounded animate-pulse"></div>
-                 </div>
+                >
+                  <div class="h-6 w-24 bg-slate-200 rounded animate-pulse mb-3"></div>
+                  <div class="h-8 w-20 bg-slate-200 rounded animate-pulse mb-1"></div>
+                  <div class="h-4 w-16 bg-slate-200 rounded animate-pulse mb-3"></div>
+                  <div class="h-4 w-full bg-slate-200 rounded animate-pulse mb-4"></div>
+                  <div class="h-10 w-full bg-slate-200 rounded animate-pulse"></div>
+                </div>
               </div>
 
               <!-- Plans Grid -->
@@ -870,7 +898,11 @@ onMounted(() => {
                   v-for="plan in availablePlans"
                   :key="plan.id"
                   class="border rounded-xl p-4 transition-all"
-                  :class="isCurrentPlan(plan) ? 'border-indigo-300 bg-indigo-50/50' : 'border-slate-200 hover:border-indigo-200'"
+                  :class="
+                    isCurrentPlan(plan)
+                      ? 'border-indigo-300 bg-indigo-50/50'
+                      : 'border-slate-200 hover:border-indigo-200'
+                  "
                 >
                   <div class="flex items-start justify-between mb-2">
                     <h4 class="font-semibold text-slate-900">{{ plan.displayName }}</h4>
@@ -883,21 +915,32 @@ onMounted(() => {
                   </div>
                   <p class="text-2xl font-bold text-slate-900 mb-1">
                     {{ formatPrice(plan.priceMonthly) }}
-                    <span v-if="plan.priceMonthly !== '0'" class="text-sm font-normal text-slate-500">/mo</span>
+                    <span
+                      v-if="plan.priceMonthly !== '0'"
+                      class="text-sm font-normal text-slate-500"
+                      >/mo</span
+                    >
                   </p>
                   <p class="text-xs text-slate-500 mb-3">
                     {{ plan.imageLimit.toLocaleString() }} images
                   </p>
                   <p class="text-xs text-slate-600 mb-4">{{ plan.description }}</p>
-                  
+
                   <button
                     v-if="!isCurrentPlan(plan) && isPlanUpgrade(plan)"
                     :disabled="isRequestingUpgrade && selectedPlanId === plan.id"
                     class="w-full flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-2 text-sm font-semibold text-white hover:shadow-lg transition-all disabled:opacity-50"
                     @click="requestUpgrade(plan.id)"
                   >
-                    <Loader2 v-if="isRequestingUpgrade && selectedPlanId === plan.id" class="w-4 h-4 animate-spin" />
-                    <span>{{ isRequestingUpgrade && selectedPlanId === plan.id ? 'Requesting...' : 'Request Upgrade' }}</span>
+                    <Loader2
+                      v-if="isRequestingUpgrade && selectedPlanId === plan.id"
+                      class="w-4 h-4 animate-spin"
+                    />
+                    <span>{{
+                      isRequestingUpgrade && selectedPlanId === plan.id
+                        ? 'Requesting...'
+                        : 'Request Upgrade'
+                    }}</span>
                   </button>
                   <div
                     v-else-if="isCurrentPlan(plan)"
@@ -914,7 +957,9 @@ onMounted(() => {
                 class="mt-4 flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl p-3"
               >
                 <CheckCircle2 class="w-5 h-5 text-emerald-500" />
-                <p class="text-sm text-emerald-700">Upgrade request submitted! We'll review it shortly.</p>
+                <p class="text-sm text-emerald-700">
+                  Upgrade request submitted! We'll review it shortly.
+                </p>
               </div>
 
               <!-- Upgrade Error -->
@@ -947,14 +992,17 @@ onMounted(() => {
                 </p>
 
                 <!-- Loading State -->
-                <div v-if="isLoadingStorage" class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                   <div class="flex items-start gap-4">
-                      <div class="w-12 h-12 rounded-xl bg-slate-200 animate-pulse"></div>
-                      <div class="flex-1 space-y-2">
-                        <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
-                         <div class="h-5 w-48 bg-slate-200 rounded animate-pulse"></div>
-                      </div>
-                   </div>
+                <div
+                  v-if="isLoadingStorage"
+                  class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5"
+                >
+                  <div class="flex items-start gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-slate-200 animate-pulse"></div>
+                    <div class="flex-1 space-y-2">
+                      <div class="h-4 w-24 bg-slate-200 rounded animate-pulse"></div>
+                      <div class="h-5 w-48 bg-slate-200 rounded animate-pulse"></div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Storage Location Display -->
@@ -979,14 +1027,15 @@ onMounted(() => {
                     </div>
                   </button>
 
-                  <p class="mt-3 text-xs text-slate-400">
-                    Click to change the storage location.
-                  </p>
+                  <p class="mt-3 text-xs text-slate-400">Click to change the storage location.</p>
                 </div>
               </div>
 
               <!-- Free Space Indicator -->
-              <div v-if="storageLocation && !isLoadingStorage" class="pt-4 border-t border-slate-100">
+              <div
+                v-if="storageLocation && !isLoadingStorage"
+                class="pt-4 border-t border-slate-100"
+              >
                 <div class="flex items-center gap-4">
                   <div
                     class="w-12 h-12 rounded-xl flex items-center justify-center"
@@ -1037,21 +1086,23 @@ onMounted(() => {
       </main>
       <Teleport to="body">
         <Transition name="fade">
-           <Modal :show="showBookingModal" @close="showBookingModal = false">
+          <Modal :show="showBookingModal" @close="showBookingModal = false">
             <div class="p-6">
               <h3 class="text-xl font-bold text-slate-900 mb-2">Booking URL Generated</h3>
               <p class="text-slate-500 mb-6">
                 Share this URL with your clients so they can book you directly.
               </p>
 
-              <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+              <div
+                class="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 flex items-center gap-3"
+              >
                 <div class="flex-1 font-mono text-sm text-slate-600 truncate select-all">
                   {{ bookingUrl }}
                 </div>
                 <button
                   class="p-2 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-slate-200 text-slate-400 hover:text-indigo-500"
-                  @click="copyBookingUrl"
                   title="Copy to clipboard"
+                  @click="copyBookingUrl"
                 >
                   <Check v-if="bookingUrlCopied" class="w-4 h-4 text-emerald-500" />
                   <Copy v-else class="w-4 h-4" />
@@ -1071,7 +1122,7 @@ onMounted(() => {
                 </button>
               </div>
             </div>
-           </Modal>
+          </Modal>
         </Transition>
       </Teleport>
     </div>

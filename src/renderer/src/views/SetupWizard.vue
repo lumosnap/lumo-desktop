@@ -163,7 +163,7 @@ function handleCancel(): void {
 
       <!-- Right: Content Pane -->
       <div class="content-pane">
-        <div class="text-container" :key="currentStep">
+        <div :key="currentStep" class="text-container">
           <span class="step-indicator">{{ currentStepData.step }}</span>
           <h1>{{ currentStepData.title }}</h1>
           <p>{{ currentStepData.desc }}</p>
@@ -193,7 +193,9 @@ function handleCancel(): void {
                 <Folder :size="16" />
               </div>
               <div class="folder-text">
-                {{ isSelectingFolder ? 'Scanning...' : (selectedFolder || 'Select a Watch Folder...') }}
+                {{
+                  isSelectingFolder ? 'Scanning...' : selectedFolder || 'Select a Watch Folder...'
+                }}
               </div>
               <div class="folder-action">Change</div>
             </div>
@@ -216,7 +218,10 @@ function handleCancel(): void {
                 <ExternalLink :size="16" />
               </template>
               <span>{{ currentStepData.btn }}</span>
-              <ArrowRight v-if="currentStep !== 3 && !(currentStep === 1 && !authStore.loading)" :size="16" />
+              <ArrowRight
+                v-if="currentStep !== 3 && !(currentStep === 1 && !authStore.loading)"
+                :size="16"
+              />
             </button>
           </div>
         </div>
@@ -302,7 +307,9 @@ function handleCancel(): void {
   height: 520px;
   background: var(--white);
   border-radius: 12px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 20px 50px -10px rgba(0, 0, 0, 0.15),
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 20px 50px -10px rgba(0, 0, 0, 0.15),
     0 0 0 1px rgba(255, 255, 255, 0.5) inset;
   display: flex;
   overflow: hidden;

@@ -104,7 +104,7 @@ let loadDebounceTimer: ReturnType<typeof setTimeout> | null = null
 async function loadAlbums(): Promise<void> {
   // Simple debounce
   if (loadDebounceTimer) clearTimeout(loadDebounceTimer)
-  
+
   loadDebounceTimer = setTimeout(async () => {
     loading.value = true
     try {
@@ -265,9 +265,7 @@ onUnmounted(() => {
       <!-- Header -->
       <div class="flex items-center justify-between px-8 py-6 border-b border-slate-200 bg-white">
         <div>
-          <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1">
-            Library
-          </div>
+          <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1">Library</div>
           <h1 class="text-3xl font-bold text-slate-900">Albums</h1>
         </div>
 
@@ -339,21 +337,28 @@ onUnmounted(() => {
               </svg>
               <!-- Avatar inside the ring -->
               <div class="absolute inset-0 flex items-center justify-center">
-                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-[11px] font-bold shadow-sm group-hover:scale-105 transition-transform">
+                <div
+                  class="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-[11px] font-bold shadow-sm group-hover:scale-105 transition-transform"
+                >
                   {{ profileStore.profile?.businessName?.charAt(0).toUpperCase() || 'P' }}
                 </div>
               </div>
             </div>
             <!-- Name -->
-            <span class="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition-colors max-w-[100px] truncate hidden sm:block">
-              {{ (profileStore.profile?.businessName || 'Profile').slice(0, 15) }}{{ (profileStore.profile?.businessName || '').length > 15 ? '...' : '' }}
+            <span
+              class="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition-colors max-w-[100px] truncate hidden sm:block"
+            >
+              {{ (profileStore.profile?.businessName || 'Profile').slice(0, 15)
+              }}{{ (profileStore.profile?.businessName || '').length > 15 ? '...' : '' }}
             </span>
 
             <!-- Upgrade Badge -->
             <span
               v-if="profileStore.isAtLimit || profileStore.isNearLimit"
               class="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold transition-colors"
-              :class="profileStore.isAtLimit ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'"
+              :class="
+                profileStore.isAtLimit ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+              "
             >
               <ArrowUpCircle class="w-3 h-3" />
               <span class="hidden sm:inline">Upgrade</span>
@@ -398,9 +403,7 @@ onUnmounted(() => {
             v-for="(album, index) in albums"
             :key="album.id"
             class="group relative bg-white rounded-2xl border border-slate-200 transition-all duration-300 hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1 cursor-pointer hover:z-30 focus-within:z-30"
-            :class="[
-              uiStore.selectedAlbumId === album.id ? 'ring-2 ring-indigo-500' : ''
-            ]"
+            :class="[uiStore.selectedAlbumId === album.id ? 'ring-2 ring-indigo-500' : '']"
             @click="openAlbum(album)"
           >
             <!-- Thumbnail / Color Block -->
@@ -415,12 +418,9 @@ onUnmounted(() => {
                 :alt="album.title"
                 class="w-full h-full object-cover"
               />
-              
+
               <!-- Empty State Icon -->
-              <div
-                v-else
-                class="absolute inset-0 flex items-center justify-center"
-              >
+              <div v-else class="absolute inset-0 flex items-center justify-center">
                 <FolderOpen
                   class="w-12 h-12 opacity-40"
                   :style="{ color: getAlbumColor(index).text }"
@@ -563,8 +563,9 @@ onUnmounted(() => {
       <div class="w-full max-w-md rounded-2xl bg-white border border-slate-200 p-6 shadow-2xl">
         <h3 class="mb-2 text-xl font-bold text-slate-900">Delete Album</h3>
         <p class="mb-4 text-sm text-slate-500">
-          This will permanently delete <strong class="text-slate-900">{{ albumToDelete?.title }}</strong> from the cloud
-          and your local device. This action cannot be undone.
+          This will permanently delete
+          <strong class="text-slate-900">{{ albumToDelete?.title }}</strong> from the cloud and your
+          local device. This action cannot be undone.
         </p>
 
         <div class="mb-4">

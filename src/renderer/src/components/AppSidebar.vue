@@ -144,8 +144,12 @@ function goToProfile(): void {
     class="fixed left-0 top-0 z-40 flex h-screen w-[280px] flex-col overflow-hidden border-r border-white/[0.08] bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950"
   >
     <!-- Ambient glow effects -->
-    <div class="pointer-events-none absolute -top-20 -left-20 h-40 w-40 rounded-full bg-indigo-500/10 blur-3xl"></div>
-    <div class="pointer-events-none absolute -bottom-20 -right-20 h-40 w-40 rounded-full bg-purple-500/10 blur-3xl"></div>
+    <div
+      class="pointer-events-none absolute -top-20 -left-20 h-40 w-40 rounded-full bg-indigo-500/10 blur-3xl"
+    ></div>
+    <div
+      class="pointer-events-none absolute -bottom-20 -right-20 h-40 w-40 rounded-full bg-purple-500/10 blur-3xl"
+    ></div>
 
     <!-- Scrollable Content -->
     <div class="sidebar-scrollable relative flex-1 space-y-4 overflow-y-auto p-4">
@@ -178,13 +182,16 @@ function goToProfile(): void {
           <div class="flex items-center justify-between text-xs mb-2">
             <span class="text-white/40 font-medium">Image Usage</span>
             <span class="text-white/70 font-semibold">
-              {{ (profileStore.profile.totalImages || 0).toLocaleString() }} / {{ (profileStore.profile.globalMaxImages || 50000).toLocaleString() }}
+              {{ (profileStore.profile.totalImages || 0).toLocaleString() }} /
+              {{ (profileStore.profile.globalMaxImages || 50000).toLocaleString() }}
             </span>
           </div>
           <div class="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
-            <div 
+            <div
               class="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
-              :style="{ width: `${Math.min(((profileStore.profile.totalImages || 0) / (profileStore.profile.globalMaxImages || 50000)) * 100, 100)}%` }"
+              :style="{
+                width: `${Math.min(((profileStore.profile.totalImages || 0) / (profileStore.profile.globalMaxImages || 50000)) * 100, 100)}%`
+              }"
             ></div>
           </div>
         </div>
@@ -249,9 +256,7 @@ function goToProfile(): void {
       <!-- CARD 2: Recent Albums -->
       <div class="sidebar-card">
         <div class="mb-4 flex items-center justify-between">
-          <h3
-            class="text-[10px] font-bold uppercase tracking-widest text-white/30"
-          >
+          <h3 class="text-[10px] font-bold uppercase tracking-widest text-white/30">
             Recent Albums
           </h3>
         </div>
@@ -287,9 +292,7 @@ function goToProfile(): void {
                 {{ album.title }}
               </p>
               <div class="flex items-center gap-2 mt-0.5">
-                <span class="text-[11px] text-white/40">
-                  {{ album.totalImages || 0 }} photos
-                </span>
+                <span class="text-[11px] text-white/40"> {{ album.totalImages || 0 }} photos </span>
                 <span class="text-white/20">•</span>
                 <span class="text-[11px] text-white/40">
                   {{ formatDate(album.createdAt) }}
@@ -298,18 +301,16 @@ function goToProfile(): void {
             </div>
           </div>
 
-          <div
-            v-if="recentAlbums.length === 0"
-            class="py-8 text-center"
-          >
-            <div class="w-12 h-12 mx-auto mb-3 rounded-xl bg-white/[0.04] flex items-center justify-center">
+          <div v-if="recentAlbums.length === 0" class="py-8 text-center">
+            <div
+              class="w-12 h-12 mx-auto mb-3 rounded-xl bg-white/[0.04] flex items-center justify-center"
+            >
               <Images class="h-5 w-5 text-white/20" />
             </div>
             <p class="text-xs text-white/40">No albums yet</p>
           </div>
         </div>
       </div>
-
     </div>
   </aside>
 </template>
@@ -378,4 +379,3 @@ function goToProfile(): void {
   background: rgba(255, 255, 255, 0.15);
 }
 </style>
-

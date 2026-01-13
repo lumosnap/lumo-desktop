@@ -146,11 +146,14 @@ export async function startAuth(): Promise<AuthResult> {
       })
 
       // Timeout after 5 minutes
-      timeoutId = setTimeout(() => {
-        console.log('[Auth] Auth timed out')
-        cleanup()
-        resolve({ success: false, error: 'Authentication timed out' })
-      }, 5 * 60 * 1000)
+      timeoutId = setTimeout(
+        () => {
+          console.log('[Auth] Auth timed out')
+          cleanup()
+          resolve({ success: false, error: 'Authentication timed out' })
+        },
+        5 * 60 * 1000
+      )
     })
   } catch (err) {
     console.error('[Auth] Failed to start auth:', err)

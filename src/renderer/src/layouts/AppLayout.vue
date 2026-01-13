@@ -13,12 +13,12 @@ async function checkStorageStatus(): Promise<void> {
   isCheckingStorage.value = true
   try {
     const info = await window.api.config.getCurrentStorageInfo()
-    
+
     if (info.success && info.isLowStorage) {
       // Check if banner was previously dismissed
       const dismissedAt = localStorage.getItem(BANNER_DISMISSED_KEY)
       const dismissedSpace = localStorage.getItem(BANNER_DISMISSED_SPACE_KEY)
-      
+
       // If storage has gotten worse (less space) since dismissal, show again
       if (dismissedAt && dismissedSpace) {
         const previousSpace = parseInt(dismissedSpace, 10)
@@ -50,7 +50,7 @@ function dismissBanner(): void {
   showLowStorageBanner.value = false
   localStorage.setItem(BANNER_DISMISSED_KEY, Date.now().toString())
   // Store current space to detect if it gets worse
-  window.api.config.getCurrentStorageInfo().then(info => {
+  window.api.config.getCurrentStorageInfo().then((info) => {
     if (info.success) {
       localStorage.setItem(BANNER_DISMISSED_SPACE_KEY, info.freeSpace.toString())
     }
@@ -88,9 +88,7 @@ onMounted(() => {
 
     <!-- Main Content Area -->
     <main class="min-h-screen relative z-10">
-      <div
-        class="h-screen bg-[#f5f6f7] overflow-hidden relative flex flex-col"
-      >
+      <div class="h-screen bg-[#f5f6f7] overflow-hidden relative flex flex-col">
         <!-- Low Storage Banner -->
         <Transition name="slide-down">
           <div
@@ -100,7 +98,8 @@ onMounted(() => {
             <div class="flex items-center gap-3">
               <AlertTriangle class="w-5 h-5 text-white shrink-0" />
               <p class="text-sm font-medium text-white">
-                You're running low on storage space. Consider freeing up space or changing your storage location in Settings.
+                You're running low on storage space. Consider freeing up space or changing your
+                storage location in Settings.
               </p>
             </div>
             <button

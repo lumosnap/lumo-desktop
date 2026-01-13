@@ -7,21 +7,59 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { copyFileSync } from 'fs'
 import { join } from 'path'
-import { getAlbum, getAlbumImages, updateAlbum, createImage, deleteImages, updateImage, getImageByHash } from '../database'
+import {
+  getAlbum,
+  getAlbumImages,
+  updateAlbum,
+  createImage,
+  deleteImages,
+  updateImage,
+  getImageByHash
+} from '../database'
 import { scanImagesInFolder, clearScanCache } from '../storage'
 import { uploadPipeline } from '../pipeline'
 import { createLogger, getErrorMessage } from '../logger'
 // import { hashFileSync } from '../hash' // removed
 
-import { needsSync as metadataNeedsSync, updateMetadataAfterSync, getFolderStats } from '../album-metadata'
+import {
+  needsSync as metadataNeedsSync,
+  updateMetadataAfterSync,
+  getFolderStats
+} from '../album-metadata'
 
 const logger = createLogger('IPC:Sync')
 
 export type SyncChanges = {
-  new: Array<{ filename: string; size: number; mtime: string; width?: number; height?: number; hash?: string }>
-  modified: Array<{ filename: string; size: number; mtime: string; width?: number; height?: number; existingId: number; serverId: number | null }>
-  deleted: Array<{ id: number; serverId: number | null; originalFilename: string; localFilePath: string }>
-  renamed: Array<{ id: number; serverId: number | null; oldFilename: string; newFilename: string; localFilePath: string }>
+  new: Array<{
+    filename: string
+    size: number
+    mtime: string
+    width?: number
+    height?: number
+    hash?: string
+  }>
+  modified: Array<{
+    filename: string
+    size: number
+    mtime: string
+    width?: number
+    height?: number
+    existingId: number
+    serverId: number | null
+  }>
+  deleted: Array<{
+    id: number
+    serverId: number | null
+    originalFilename: string
+    localFilePath: string
+  }>
+  renamed: Array<{
+    id: number
+    serverId: number | null
+    oldFilename: string
+    newFilename: string
+    localFilePath: string
+  }>
   skipped: Array<{ filename: string; reason: string }>
 }
 
@@ -143,28 +181,30 @@ export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
     const newFileHashes = new Map<string, string>()
     if (changes.new.length > 0) {
       logger.debug(`Computing hashes for ${changes.new.length} new files...`)
-      
+
       // Process in batches to avoid blocking UI
-      const BATCH_SIZE = 10;
+      const BATCH_SIZE = 10
       for (let i = 0; i < changes.new.length; i += BATCH_SIZE) {
-        const batch = changes.new.slice(i, i + BATCH_SIZE);
-        
+        const batch = changes.new.slice(i, i + BATCH_SIZE)
+
         // Yield to event loop to keep UI responsive
-        await new Promise(resolve => setImmediate(resolve));
-        
-        await Promise.all(batch.map(async (newFile) => {
-          try {
-            const filePath = join(album.sourceFolderPath, newFile.filename)
-            // Use async hashFile from ../hash
-            const { hashFile } = await import('../hash')
-            const hash = await hashFile(filePath)
-            newFileHashes.set(newFile.filename, hash)
-            // Store hash for later use in sync:execute
-            newFile.hash = hash
-          } catch {
-            // Skip files that can't be read
-          }
-        }));
+        await new Promise((resolve) => setImmediate(resolve))
+
+        await Promise.all(
+          batch.map(async (newFile) => {
+            try {
+              const filePath = join(album.sourceFolderPath, newFile.filename)
+              // Use async hashFile from ../hash
+              const { hashFile } = await import('../hash')
+              const hash = await hashFile(filePath)
+              newFileHashes.set(newFile.filename, hash)
+              // Store hash for later use in sync:execute
+              newFile.hash = hash
+            } catch {
+              // Skip files that can't be read
+            }
+          })
+        )
       }
     }
 
@@ -178,7 +218,9 @@ export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
         const existingByHash = getImageByHash(albumId, hash)
         if (existingByHash) {
           // Duplicate content detected - skip this file
-          logger.info(`Skipping duplicate: ${newFile.filename} (hash matches ${existingByHash.originalFilename})`)
+          logger.info(
+            `Skipping duplicate: ${newFile.filename} (hash matches ${existingByHash.originalFilename})`
+          )
           changes.skipped.push({
             filename: newFile.filename,
             reason: `Duplicate of ${existingByHash.originalFilename}`
@@ -192,7 +234,9 @@ export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
 
     // Now check for renames (deleted + new with matching hash)
     if (imagesWithHash.length > 0 && changes.new.length > 0) {
-      logger.debug(`Checking ${imagesWithHash.length} deleted images for renames against ${changes.new.length} new files`)
+      logger.debug(
+        `Checking ${imagesWithHash.length} deleted images for renames against ${changes.new.length} new files`
+      )
 
       // Match by hash
       for (const deleted of imagesWithHash) {
@@ -204,7 +248,7 @@ export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
         for (const [filename, hash] of newFileHashes) {
           if (hash === dbImage.sourceFileHash) {
             // Make sure this file is still in the new list (not already matched as duplicate)
-            if (changes.new.some(f => f.filename === filename)) {
+            if (changes.new.some((f) => f.filename === filename)) {
               matchedNewFile = filename
               break
             }
@@ -267,7 +311,11 @@ export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
 /**
  * Execute sync for an album
  */
-export async function executeAlbumSync(albumId: string, changes: Partial<SyncChanges>, mainWindow?: BrowserWindow | null): Promise<ExecuteSyncResult> {
+export async function executeAlbumSync(
+  albumId: string,
+  changes: Partial<SyncChanges>,
+  mainWindow?: BrowserWindow | null
+): Promise<ExecuteSyncResult> {
   logger.info(`Executing sync for album: ${albumId}`)
 
   try {
@@ -329,7 +377,7 @@ export async function executeAlbumSync(albumId: string, changes: Partial<SyncCha
         // Update DB record
         updateImage(rename.id, {
           originalFilename: rename.newFilename,
-          localFilePath: join(album.localFolderPath, rename.newFilename),
+          localFilePath: join(album.localFolderPath, rename.newFilename)
           // Keep serverId, mtime, etc.
           // We might want to update mtime if changed
         })
@@ -339,29 +387,30 @@ export async function executeAlbumSync(albumId: string, changes: Partial<SyncCha
         const sourcePath = join(album.sourceFolderPath, rename.newFilename)
         const localPath = join(album.localFolderPath, rename.newFilename)
         try {
-           copyFileSync(sourcePath, localPath)
-           // Delete old local file
-           // unlinkSync(rename.localFilePath) // Optional cleanup
+          copyFileSync(sourcePath, localPath)
+          // Delete old local file
+          // unlinkSync(rename.localFilePath) // Optional cleanup
         } catch (e) {
-           logger.warn(`Failed to copy renamed file ${rename.newFilename}`, e)
+          logger.warn(`Failed to copy renamed file ${rename.newFilename}`, e)
         }
       }
     }
 
-
     // Process new files
     if (changes.new && changes.new.length > 0) {
       logger.info(`Adding ${changes.new.length} new images`)
-      
+
       // Check image limit before processing
       let filesToProcess = changes.new
-      
+
       try {
         const profile = await profileApi.get()
         const remaining = Math.max(0, profile.imageLimit - profile.totalImages)
-        
+
         if (remaining === 0) {
-          logger.warn(`User at image limit (${profile.totalImages}/${profile.imageLimit}). Skipping all new files.`)
+          logger.warn(
+            `User at image limit (${profile.totalImages}/${profile.imageLimit}). Skipping all new files.`
+          )
           syncLimitWarning = `Image limit reached (${profile.totalImages.toLocaleString()}/${profile.imageLimit.toLocaleString()}). No new images were synced. Please upgrade your plan.`
           filesToProcess = []
         } else if (changes.new.length > remaining) {
@@ -372,7 +421,7 @@ export async function executeAlbumSync(albumId: string, changes: Partial<SyncCha
       } catch (err) {
         logger.error('Failed to check image limit, proceeding anyway:', getErrorMessage(err))
       }
-      
+
       const currentImages = getAlbumImages(albumId)
       const maxOrder =
         currentImages.length > 0 ? Math.max(...currentImages.map((i) => i.uploadOrder)) : -1
