@@ -272,10 +272,22 @@ async function generateShareLink(): Promise<void> {
   shareError.value = null
   copied.value = false
 
+  // Check local storage first
+  const storageKey = `shareLink_album_${albumId}`
+  const cachedLink = localStorage.getItem(storageKey)
+  
+  if (cachedLink) {
+    shareLink.value = cachedLink
+    showShareModal.value = true
+    isGeneratingLink.value = false
+    return
+  }
+
   try {
     const result = await window.api.api.generateShareLink(albumId)
     if (result.success && result.shareLink) {
       shareLink.value = result.shareLink.shareUrl
+      localStorage.setItem(storageKey, result.shareLink.shareUrl)
       showShareModal.value = true
     } else {
       shareError.value = result.error || 'Failed to generate share link'
