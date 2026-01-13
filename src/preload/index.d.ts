@@ -256,6 +256,11 @@ declare global {
           error?: string
         }>
       }
+      network: {
+        getStatus: () => Promise<{ online: boolean }>
+        checkConnectivity: () => Promise<{ online: boolean }>
+        onStatusChange: (callback: (online: boolean) => void) => () => void
+      }
       onUploadProgress: (callback: (event: any, progress: any) => void) => void
       offUploadProgress: (callback: (event: any, progress: any) => void) => void
       on: (channel: string, callback: (event: any, ...args: any[]) => void) => void

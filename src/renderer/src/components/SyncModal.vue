@@ -9,8 +9,12 @@ import {
   ChevronUp,
   X,
   FileDiff,
-  AlertCircle
+  AlertCircle,
+  WifiOff
 } from 'lucide-vue-next'
+import { useNetworkStore } from '../stores/network'
+
+const networkStore = useNetworkStore()
 
 interface SyncChanges {
   new: Array<{ filename: string; size: number }>
@@ -369,12 +373,15 @@ watch(
           </button>
           <button
             v-if="hasChanges"
-            class="flex items-center gap-2 rounded-lg bg-[var(--color-turquoise)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-turquoise-dark)] disabled:opacity-50"
-            :disabled="isSyncing"
+            class="flex items-center gap-2 rounded-lg bg-[var(--color-turquoise)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-turquoise-dark)] disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="isSyncing || !networkStore.isOnline"
+            :title="!networkStore.isOnline ? 'You are offline. Syncing requires an internet connection.' : ''"
             @click="handleSync"
           >
-            <RefreshCw v-if="isSyncing" class="h-4 w-4 animate-spin" />
-            {{ isSyncing ? 'Syncing...' : 'Sync Now' }}
+            <WifiOff v-if="!networkStore.isOnline" class="h-4 w-4" />
+            <RefreshCw v-else-if="isSyncing" class="h-4 w-4 animate-spin" />
+            <span v-if="!networkStore.isOnline">Offline</span>
+            <span v-else>{{ isSyncing ? 'Syncing...' : 'Sync Now' }}</span>
           </button>
           <button
             v-else

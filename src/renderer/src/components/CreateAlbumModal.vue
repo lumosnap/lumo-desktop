@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import Modal from './ui/Modal.vue'
-import { AlertCircle, Plus, Loader2, AlertTriangle, ArrowUpCircle } from 'lucide-vue-next'
+import { AlertCircle, Plus, Loader2, AlertTriangle, ArrowUpCircle, WifiOff } from 'lucide-vue-next'
 import { useProfileStore } from '../stores/profile'
+import { useNetworkStore } from '../stores/network'
 
 const profileStore = useProfileStore()
+const networkStore = useNetworkStore()
 
 const props = defineProps<{
   show: boolean
@@ -178,13 +180,16 @@ watch(
           Cancel
         </button>
         <button
-          :disabled="!title.trim() || isCreating"
+          :disabled="!title.trim() || isCreating || !networkStore.isOnline"
           class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-semibold shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          :title="!networkStore.isOnline ? 'You are offline. Album creation requires an internet connection.' : ''"
           @click="createAlbum"
         >
-          <Loader2 v-if="isCreating" class="w-4 h-4 animate-spin" />
+          <WifiOff v-if="!networkStore.isOnline" class="w-4 h-4" />
+          <Loader2 v-else-if="isCreating" class="w-4 h-4 animate-spin" />
           <Plus v-else class="w-4 h-4" />
-          <span>{{ isCreating ? 'Creating...' : 'Create Album' }}</span>
+          <span v-if="!networkStore.isOnline">Offline</span>
+          <span v-else>{{ isCreating ? 'Creating...' : 'Create Album' }}</span>
         </button>
       </div>
     </div>

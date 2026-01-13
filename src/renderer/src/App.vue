@@ -2,13 +2,19 @@
 import { onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
+import { useNetworkStore } from './stores/network'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const networkStore = useNetworkStore()
 
 onMounted(async () => {
   console.log('App.vue mounted successfully!')
+
+  // Initialize network monitoring
+  networkStore.setupListener()
+  await networkStore.checkStatus()
 
   // Check and sync session - important for OAuth callbacks
   // When user returns from Google OAuth, the session cookie is set

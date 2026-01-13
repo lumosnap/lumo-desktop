@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import FloatingNavbar from '../components/FloatingNavbar.vue'
-import { AlertTriangle, X } from 'lucide-vue-next'
+import { AlertTriangle, WifiOff, X } from 'lucide-vue-next'
+import { useNetworkStore } from '../stores/network'
 
 const BANNER_DISMISSED_KEY = 'lumosnap:lowStorageBannerDismissed'
 const BANNER_DISMISSED_SPACE_KEY = 'lumosnap:lowStorageBannerDismissedAtSpace'
 
 const showLowStorageBanner = ref(false)
 const isCheckingStorage = ref(true)
+const networkStore = useNetworkStore()
 
 async function checkStorageStatus(): Promise<void> {
   isCheckingStorage.value = true
@@ -89,6 +91,19 @@ onMounted(() => {
     <!-- Main Content Area -->
     <main class="min-h-screen relative z-10">
       <div class="h-screen bg-[#f5f6f7] overflow-hidden relative flex flex-col">
+        <!-- Offline Banner -->
+        <Transition name="slide-down">
+          <div
+            v-if="!networkStore.isOnline"
+            class="bg-gradient-to-r from-slate-600 to-slate-700 px-4 py-3 flex items-center gap-3 shrink-0"
+          >
+            <WifiOff class="w-5 h-5 text-white shrink-0" />
+            <p class="text-sm font-medium text-white">
+              You're offline. Some features like sync and album creation are disabled.
+            </p>
+          </div>
+        </Transition>
+
         <!-- Low Storage Banner -->
         <Transition name="slide-down">
           <div

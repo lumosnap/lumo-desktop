@@ -12,6 +12,7 @@ import log, { createLogger, getErrorMessage } from './logger'
 import { trayManager } from './tray'
 import { compressionPool } from './compression-pool'
 import { copyWatcherRegistry } from './copy-watcher'
+import { networkService } from './network'
 
 // Scoped logger for main process
 const logger = createLogger('Main')
@@ -323,6 +324,14 @@ app.whenReady().then(() => {
   if (mainWindow) {
     registerIpcHandlers(mainWindow)
     logger.info('✓ IPC handlers registered successfully')
+
+    // Initialize Network Service
+    try {
+      networkService.initialize(mainWindow)
+      logger.info('✓ Network service initialized')
+    } catch (error) {
+      logger.error('✗ Failed to initialize network service:', getErrorMessage(error))
+    }
 
     // Initialize Watcher Service
     try {

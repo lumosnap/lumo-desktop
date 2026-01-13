@@ -32,6 +32,7 @@ import { watcherService } from './watcher'
 import { startAuth } from './oauth-handler'
 import { getAuth, clearAuth } from './auth-storage'
 import { createAlbumMetadata, writeAlbumMetadata, getFolderStats } from './album-metadata'
+import { networkService } from './network'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ==================== Auth Handlers ====================
@@ -845,5 +846,16 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       console.error('[IPC] Failed to show item in folder:', message)
       return { success: false, error: message }
     }
+  })
+
+  // ==================== Network Handlers ====================
+
+  ipcMain.handle('network:getStatus', () => {
+    return { online: networkService.isOnline() }
+  })
+
+  ipcMain.handle('network:checkConnectivity', async () => {
+    const online = await networkService.checkConnectivity()
+    return { online }
   })
 }

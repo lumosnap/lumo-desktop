@@ -239,6 +239,16 @@ const api = {
       error?: string
     }> => ipcRenderer.invoke('settings:getAll')
   },
+  network: {
+    getStatus: (): Promise<{ online: boolean }> => ipcRenderer.invoke('network:getStatus'),
+    checkConnectivity: (): Promise<{ online: boolean }> =>
+      ipcRenderer.invoke('network:checkConnectivity'),
+    onStatusChange: (callback: (online: boolean) => void): (() => void) => {
+      const handler = (_event: any, data: { online: boolean }) => callback(data.online)
+      ipcRenderer.on('network:status-changed', handler)
+      return () => ipcRenderer.removeListener('network:status-changed', handler)
+    }
+  },
 
   // Progress events listener
   // Event listeners
@@ -250,7 +260,8 @@ const api = {
       'upload:error',
       'album:status-changed',
       'albums:refresh',
-      'master-folder:change'
+      'master-folder:change',
+      'network:status-changed'
     ]
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, callback)
@@ -264,7 +275,8 @@ const api = {
       'upload:error',
       'album:status-changed',
       'albums:refresh',
-      'master-folder:change'
+      'master-folder:change',
+      'network:status-changed'
     ]
     if (validChannels.includes(channel)) {
       ipcRenderer.removeListener(channel, callback)

@@ -14,6 +14,7 @@ import { registerSyncHandlers } from './sync'
 import { registerApiHandlers } from './api'
 import { registerSettingsHandlers } from './settings'
 import { registerPlansHandlers } from './plans'
+import { registerNetworkHandlers } from './network'
 import { createLogger } from '../logger'
 
 const logger = createLogger('IPC')
@@ -47,6 +48,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   // Plans handlers (subscription plans)
   registerPlansHandlers()
+
+  // Network handlers (connectivity status)
+  registerNetworkHandlers()
 
   logger.info('✓ All IPC handlers registered')
 }
