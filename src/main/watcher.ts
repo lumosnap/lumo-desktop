@@ -447,7 +447,7 @@ class WatcherService {
     // Initialize watcher
     // ignoreInitial: true prevents firing 'add' events for existing files on startup
     const watcher = chokidar.watch(folderPath, {
-      ignored: /(^|[\/\\])\.\./, // ignore dotfiles
+      ignored: [/(^|[\/\\])\.\./, /\.lumosnap$/], // ignore dotfiles and metadata
       persistent: true,
       ignoreInitial: true,
       depth: 0 // Only watch the immediate directory
@@ -482,7 +482,7 @@ class WatcherService {
 
     // Smart Sync: Detect changes first to decide if we need to show badge or auto-sync
     try {
-      const result = detectAlbumChanges(albumId)
+      const result = await detectAlbumChanges(albumId)
       
       if (!result.success || !result.changes) {
          // Fallback to safe default: just show sync badge if detection failed
@@ -539,7 +539,7 @@ class WatcherService {
       if (!album || !album.sourceFolderPath) return
 
       // Use smart detection logic to check for actual changes
-      const result = detectAlbumChanges(albumId)
+      const result = await detectAlbumChanges(albumId)
       
       if (!result.success || !result.changes) {
         return

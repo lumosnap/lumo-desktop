@@ -90,7 +90,7 @@ class CopyWatcher {
 
     // Create watcher
     this.watcher = chokidar.watch(options.folderPath, {
-      ignored: /(^|[/\\])\../, // Ignore dotfiles
+      ignored: [/(^|[/\\])\../, /\.lumosnap$/], // Ignore dotfiles and metadata
       persistent: true,
       ignoreInitial: true,
       depth: 0,

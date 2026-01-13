@@ -10,7 +10,7 @@
 
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
+import { readFileSync, createReadStream } from 'node:fs'
 
 const HASH_ALGORITHM = 'sha256'
 
@@ -22,11 +22,18 @@ export function hashBuffer(buffer: Buffer): string {
 }
 
 /**
- * Compute SHA-256 hash from a file path (async)
+ * Compute SHA-256 hash from a file path (async, stream-based)
+ * Optimized for large files and low memory usage
  */
 export async function hashFile(filePath: string): Promise<string> {
-  const buffer = await fs.readFile(filePath)
-  return hashBuffer(buffer)
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash(HASH_ALGORITHM)
+    const stream = createReadStream(filePath)
+
+    stream.on('error', (err) => reject(err))
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
+  })
 }
 
 /**

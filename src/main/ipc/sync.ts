@@ -11,7 +11,8 @@ import { getAlbum, getAlbumImages, updateAlbum, createImage, deleteImages, updat
 import { scanImagesInFolder, clearScanCache } from '../storage'
 import { uploadPipeline } from '../pipeline'
 import { createLogger, getErrorMessage } from '../logger'
-import { hashFileSync } from '../hash'
+// import { hashFileSync } from '../hash' // removed
+
 import { needsSync as metadataNeedsSync, updateMetadataAfterSync, getFolderStats } from '../album-metadata'
 
 const logger = createLogger('IPC:Sync')
@@ -46,7 +47,10 @@ export type ExecuteSyncResult = {
 /**
  * Detect changes for an album
  */
-export function detectAlbumChanges(albumId: string): SyncResult {
+/**
+ * Detect changes for an album
+ */
+export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
   logger.debug(`Detecting changes for album: ${albumId}`)
   try {
     const album = getAlbum(albumId)
@@ -139,16 +143,28 @@ export function detectAlbumChanges(albumId: string): SyncResult {
     const newFileHashes = new Map<string, string>()
     if (changes.new.length > 0) {
       logger.debug(`Computing hashes for ${changes.new.length} new files...`)
-      for (const newFile of changes.new) {
-        try {
-          const filePath = join(album.sourceFolderPath, newFile.filename)
-          const hash = hashFileSync(filePath)
-          newFileHashes.set(newFile.filename, hash)
-          // Store hash for later use in sync:execute
-          newFile.hash = hash
-        } catch {
-          // Skip files that can't be read
-        }
+      
+      // Process in batches to avoid blocking UI
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < changes.new.length; i += BATCH_SIZE) {
+        const batch = changes.new.slice(i, i + BATCH_SIZE);
+        
+        // Yield to event loop to keep UI responsive
+        await new Promise(resolve => setImmediate(resolve));
+        
+        await Promise.all(batch.map(async (newFile) => {
+          try {
+            const filePath = join(album.sourceFolderPath, newFile.filename)
+            // Use async hashFile from ../hash
+            const { hashFile } = await import('../hash')
+            const hash = await hashFile(filePath)
+            newFileHashes.set(newFile.filename, hash)
+            // Store hash for later use in sync:execute
+            newFile.hash = hash
+          } catch {
+            // Skip files that can't be read
+          }
+        }));
       }
     }
 

@@ -71,6 +71,8 @@ export function readAlbumMetadata(folderPath: string): AlbumMetadata | null {
   }
 }
 
+import { exec } from 'child_process'
+
 /**
  * Write album metadata to a folder
  */
@@ -80,6 +82,16 @@ export function writeAlbumMetadata(folderPath: string, metadata: AlbumMetadata):
   try {
     const content = JSON.stringify(metadata, null, 2)
     writeFileSync(metadataPath, content, 'utf-8')
+    
+    // On Windows, hide the file using 'attrib +h'
+    if (process.platform === 'win32') {
+      exec(`attrib +h "${metadataPath}"`, (error) => {
+        if (error) {
+          console.error(`[AlbumMetadata] Failed to hide metadata file on Windows:`, error)
+        }
+      })
+    }
+    
     console.log(`[AlbumMetadata] Wrote metadata for album ${metadata.albumId} to ${folderPath}`)
     return true
   } catch (error) {
