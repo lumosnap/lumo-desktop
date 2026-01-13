@@ -161,26 +161,14 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         return { success: false, error: 'Album not found' }
       }
 
-      // Check sync needs
-      let needsSync = album.needsSync
+      // Trigger background sync check
       if (existsSync(album.sourceFolderPath)) {
-        try {
-          const sourceImages = scanImagesInFolder(album.sourceFolderPath)
-          const dbImages = getAlbumImages(albumId)
-
-          if (sourceImages.length !== dbImages.length) {
-            needsSync = 1
-            updateAlbum(albumId, { needsSync: 1 })
-          } else if (album.needsSync === 1) {
-            updateAlbum(albumId, { needsSync: 0 })
-            needsSync = 0
-          }
-        } catch {
-          // Ignore sync check errors
-        }
+        watcherService.checkSyncStatus(albumId).catch((err) => {
+          logger.error(`Background sync check failed for ${albumId}:`, getErrorMessage(err))
+        })
       }
 
-      return { success: true, album: { ...album, needsSync } }
+      return { success: true, album: { ...album, needsSync: album.needsSync } }
     } catch (error: unknown) {
       logger.error('Failed to get album:', getErrorMessage(error))
       return { success: false, error: getErrorMessage(error) }

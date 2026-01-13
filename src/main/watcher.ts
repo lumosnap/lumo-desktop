@@ -9,6 +9,7 @@ import {
   getAlbum,
   getAlbumImages
 } from './database'
+import { detectAlbumChanges, executeAlbumSync } from './ipc/sync'
 import { BrowserWindow } from 'electron'
 import { basename, join } from 'path'
 import { readdirSync, Dirent } from 'fs'
@@ -23,7 +24,8 @@ import {
   writeAlbumMetadata,
   getFolderStats,
   getAlbumIdFromMetadata,
-  hasAlbumMetadata
+  hasAlbumMetadata,
+  readAlbumMetadata
 } from './album-metadata'
 import { copyWatcherRegistry } from './copy-watcher'
 
@@ -92,6 +94,39 @@ class WatcherService {
       if (existingAlbum) {
         console.log(`[Watcher] Album already exists for ${folderPath}`)
         return
+      }
+
+      // Check for .lumosnap metadata (Rename Detection)
+      try {
+        if (hasAlbumMetadata(folderPath)) {
+          const metadata = readAlbumMetadata(folderPath)
+          if (metadata && metadata.albumId) {
+            const existingById = getAlbum(metadata.albumId)
+            if (existingById) {
+              // It's a match! This is a rename operation.
+              logger.info(`Detected renamed album: "${existingById.title}" -> "${folderName}"`)
+              
+              updateAlbum(existingById.id, {
+                title: folderName,
+                sourceFolderPath: folderPath,
+                isOrphaned: 0
+              })
+
+              // Stop watching old path (if active) and start watching new path
+              this.unwatch(existingById.id)
+              this.watch(existingById.id, folderPath)
+
+              // Notify renderer
+              if (this.mainWindow) {
+                this.mainWindow.webContents.send('albums:refresh')
+              }
+              
+              return // Skip auto-creation
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(`[Watcher] Error checking metadata for rename:`, err)
       }
 
       // Auto-create album
@@ -442,23 +477,55 @@ class WatcherService {
     this.debouncedHandleFileChange(albumId)
   }
 
-  private processFileChange(albumId: string): void {
+  private async processFileChange(albumId: string): Promise<void> {
     logger.info(`Processing file changes for album ${albumId}`)
 
-    // Update database to mark album as needing sync
+    // Smart Sync: Detect changes first to decide if we need to show badge or auto-sync
     try {
-      updateAlbum(albumId, { needsSync: 1 })
-      logger.debug(`Marked album ${albumId} as needing sync`)
+      const result = detectAlbumChanges(albumId)
+      
+      if (!result.success || !result.changes) {
+         // Fallback to safe default: just show sync badge if detection failed
+         this.setNeedsSync(albumId, 1)
+         return
+      }
 
-      // Notify renderer to update UI
+      const { new: newFiles, modified, deleted, renamed, skipped } = result.changes
+      const hasRealChanges = newFiles.length > 0 || modified.length > 0 || deleted.length > 0
+      const hasTrivialChanges = renamed.length > 0 || skipped.length > 0
+
+      if (hasRealChanges) {
+        // Real changes (new, mod, del) -> User needs to review/upload -> Show Badge
+        logger.info(`Real changes detected for ${albumId}. Setting needsSync=1`)
+        this.setNeedsSync(albumId, 1)
+      } else if (hasTrivialChanges) {
+        // Only trivial changes (renames/duplicates) -> Auto-sync silently
+        logger.info(`Only trivial changes detected for ${albumId}. Auto-syncing silently.`)
+        await executeAlbumSync(albumId, result.changes, this.mainWindow)
+        
+        // Ensure needsSync is 0 (should be done by execute, but good to be sure)
+        // We don't need to call setNeedsSync(0) because executeSync does it.
+      } else {
+        logger.info(`No relevant changes detected for ${albumId}`)
+      }
+
+    } catch (error) {
+      logger.error(`Failed to process file changes for ${albumId}:`, error)
+      this.setNeedsSync(albumId, 1) // Safe fallback
+    }
+  }
+
+  private setNeedsSync(albumId: string, status: number): void {
+    try {
+      updateAlbum(albumId, { needsSync: status })
       if (this.mainWindow) {
         this.mainWindow.webContents.send('album:status-changed', {
           albumId,
-          needsSync: 1
+          needsSync: status
         })
       }
     } catch (error) {
-      logger.error(`Failed to update album status:`, error)
+       logger.error(`Failed to update album status:`, error)
     }
   }
 
@@ -471,28 +538,35 @@ class WatcherService {
       const album = getAlbum(albumId)
       if (!album || !album.sourceFolderPath) return
 
-      // Fast scan - skip dimensions, just get file stats
-      const sourceImages = scanImagesInFolder(album.sourceFolderPath, { 
-        useCache: true, 
-        skipDimensions: true 
-      })
+      // Use smart detection logic to check for actual changes
+      const result = detectAlbumChanges(albumId)
       
-      const dbImages = getAlbumImages(albumId)
+      if (!result.success || !result.changes) {
+        return
+      }
       
-      // Determine if sync is needed based on count
-      // For more accuracy, we could compare mtimes, but count is the fastest first pass
-      const needsSync = sourceImages.length !== dbImages.length ? 1 : 0
+      const { new: newFiles, modified, deleted, renamed, skipped } = result.changes
+      const hasRealChanges = newFiles.length > 0 || modified.length > 0 || deleted.length > 0
+      const hasTrivialChanges = renamed.length > 0 || skipped.length > 0
       
-      // Update DB if changed
-      if (album.needsSync !== needsSync) {
-        updateAlbum(albumId, { needsSync })
-        
-        // Notify renderer
-        if (this.mainWindow) {
-          this.mainWindow.webContents.send('album:status-changed', {
-            albumId,
-            needsSync
-          })
+      const needsSync = hasRealChanges ? 1 : 0
+      
+      // If we have trivial changes but no real changes, execute silent sync to update metadata
+      if (!hasRealChanges && hasTrivialChanges) {
+        logger.info(`[CheckSync] Trivial changes detected for ${albumId}, syncing silently...`)
+        await executeAlbumSync(albumId, result.changes, this.mainWindow)
+        // executeAlbumSync will update needsSync to 0
+      } else {
+        // Just update status if changed
+        if (album.needsSync !== needsSync) {
+          updateAlbum(albumId, { needsSync })
+          
+          if (this.mainWindow) {
+            this.mainWindow.webContents.send('album:status-changed', {
+              albumId,
+              needsSync
+            })
+          }
         }
       }
     } catch (error) {
