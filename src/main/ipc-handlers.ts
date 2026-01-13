@@ -755,6 +755,20 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
+  // ==================== Instant Refresh Handler ====================
+
+  ipcMain.handle('albums:forceRefresh', async () => {
+    try {
+      console.log('[IPC] Force refresh requested - bypassing debounce')
+      await watcherService.forceRefreshAlbums()
+      return { success: true }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[IPC] Failed to force refresh:', message)
+      return { success: false, error: message }
+    }
+  })
+
   // ==================== Sync Handlers ====================
   // NOTE: Sync handlers are registered in ipc/sync.ts for better modularity
   // They include hash-based rename detection and duplicate content checking

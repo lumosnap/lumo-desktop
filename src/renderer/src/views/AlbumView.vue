@@ -100,6 +100,7 @@ async function openWatchFolder(): Promise<void> {
 }
 
 let loadDebounceTimer: ReturnType<typeof setTimeout> | null = null
+const isRefreshing = ref(false)
 
 async function loadAlbums(): Promise<void> {
   // Simple debounce
@@ -118,6 +119,29 @@ async function loadAlbums(): Promise<void> {
       loading.value = false
     }
   }, 100)
+}
+
+// Force refresh - bypasses debounce and triggers instant file system analysis
+async function handleForceRefresh(): Promise<void> {
+  if (isRefreshing.value) return
+
+  isRefreshing.value = true
+  loading.value = true
+
+  try {
+    // Trigger instant refresh that bypasses debounce
+    await window.api.albums.forceRefresh()
+    // Reload albums list
+    const result = await window.api.albums.list()
+    if (result.success) {
+      albums.value = result.albums || []
+    }
+  } catch (error) {
+    console.error('Failed to force refresh albums:', error)
+  } finally {
+    isRefreshing.value = false
+    loading.value = false
+  }
 }
 
 async function loadMasterFolder(): Promise<void> {
@@ -284,11 +308,11 @@ onUnmounted(() => {
           <!-- Refresh Button -->
           <button
             class="rounded-xl p-2.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-            title="Refresh Albums"
-            :disabled="loading"
-            @click="loadAlbums"
+            title="Refresh Albums (Instant Sync Check)"
+            :disabled="loading || isRefreshing"
+            @click="handleForceRefresh"
           >
-            <RefreshCw class="h-5 w-5" :class="{ 'animate-spin': loading }" />
+            <RefreshCw class="h-5 w-5" :class="{ 'animate-spin': loading || isRefreshing }" />
           </button>
 
           <!-- Create Album Button -->

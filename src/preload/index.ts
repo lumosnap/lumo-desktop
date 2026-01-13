@@ -55,7 +55,9 @@ const api = {
       ipcRenderer.invoke('album:startUpload', albumId),
     getProgress: (albumId: string): Promise<any> =>
       ipcRenderer.invoke('album:getProgress', albumId),
-    retryFailed: (albumId: string): Promise<any> => ipcRenderer.invoke('album:retryFailed', albumId)
+    retryFailed: (albumId: string): Promise<any> => ipcRenderer.invoke('album:retryFailed', albumId),
+    forceRefresh: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('albums:forceRefresh')
   },
   sync: {
     detectChanges: (albumId: string): Promise<any> =>

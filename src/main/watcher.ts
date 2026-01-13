@@ -583,6 +583,27 @@ class WatcherService {
     logger.info('Background sync check completed')
   }
 
+  /**
+   * Force refresh all albums immediately - bypasses debouncing
+   * Use this when user manually triggers refresh for instant results
+   */
+  async forceRefreshAlbums(): Promise<void> {
+    const albums = getAllAlbums()
+
+    logger.info(`Force refreshing ${albums.length} albums (bypassing debounce)...`)
+
+    // Process all albums immediately without delays
+    const promises = albums.map((album) => this.processFileChange(album.id))
+    await Promise.all(promises)
+
+    // Notify renderer to refresh album list
+    if (this.mainWindow) {
+      this.mainWindow.webContents.send('albums:refresh')
+    }
+
+    logger.info('Force refresh completed')
+  }
+
   closeAll(): void {
     this.watchers.forEach((watcher) => watcher.close())
     this.watchers.clear()

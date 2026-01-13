@@ -63,6 +63,7 @@ declare global {
         startUpload: (albumId: string) => Promise<any>
         getProgress: (albumId: string) => Promise<any>
         retryFailed: (albumId: string) => Promise<any>
+        forceRefresh: () => Promise<{ success: boolean; error?: string }>
       }
       sync: {
         detectChanges: (albumId: string) => Promise<any>
