@@ -23,6 +23,12 @@ asarUnpack:
   - resources/**
   - '**/node_modules/sharp/**/*'
   - '**/node_modules/@img/**/*'
+# Extra resources to include in the app (for tray icons, etc.)
+extraResources:
+  - from: "build/icon.ico"
+    to: "icon.ico"
+  - from: "resources/icon.png"
+    to: "icon.png"
 win:
   executableName: Lumosnap
   icon: build/icon.ico

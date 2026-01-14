@@ -78,19 +78,26 @@ export class TrayManager {
 
   /**
    * Get the appropriate icon path
+   * Windows: Use .ico for best tray icon visibility
+   * macOS/Linux: Use .png
    */
   private getIconPath(): string {
-    // In production, icons are in resources folder
-    // In development, use the main icon
     const isDev = !app.isPackaged
 
     if (isDev) {
-      // Use main icon in development
+      // Development: Use build folder icons (same icons used by electron-builder)
+      if (process.platform === 'win32') {
+        return join(__dirname, '../../build/icon.ico')
+      }
       return join(__dirname, '../../resources/icon.png')
     }
 
-    // Production - use main icon
+    // Production: Icons are bundled in the resources folder
     const resourcesPath = process.resourcesPath
+    if (process.platform === 'win32') {
+      // Windows: Use .ico for proper tray visibility
+      return join(resourcesPath, 'icon.ico')
+    }
     return join(resourcesPath, 'icon.png')
   }
 

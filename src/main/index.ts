@@ -195,7 +195,9 @@ function quitApp(): void {
 app.whenReady().then(() => {
   logger.info('Electron app ready, initializing...')
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.lumosnap')
+  // Set app user model id for Windows - must match appId in electron-builder.yml
+  // This ensures Windows notifications show "Lumosnap" instead of "electron.app.lumosnap"
+  electronApp.setAppUserModelId('com.lumosnap.desktop')
 
   // Register deep link protocol handler
   // In development mode, we need to pass the path to the electron executable and script
