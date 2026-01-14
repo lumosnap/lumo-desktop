@@ -1,9 +1,10 @@
 import { BrowserWindow } from 'electron'
 import { join, basename, dirname } from 'path'
-import { getAlbum, getAlbumImages, updateImage } from './database'
+import { getAlbum, getAlbumImages, updateImage, updateAlbum } from './database'
 import { albumsApi, uploadToPresignedUrl } from './api-client'
 import { compressionPool } from './compression-pool'
 import { notificationService } from './notifications'
+import { updateMetadataAfterSync, getFolderStats } from './album-metadata'
 
 export interface UploadProgress {
   albumId: string
@@ -91,6 +92,17 @@ class UploadPipeline {
       const completedAlbum = getAlbum(albumId)
       if (completedAlbum) {
         notificationService.syncComplete(completedAlbum.title)
+
+        // Update album's lastSyncedAt in database to mark as synced
+        const now = new Date().toISOString()
+        updateAlbum(albumId, { lastSyncedAt: now, needsSync: 0 })
+
+        // Update .lumosnap metadata file in source folder to prevent false sync detection
+        // This ensures needsSync() returns false on next check
+        const totalImages = getAlbumImages(albumId).length
+        const folderStats = getFolderStats(completedAlbum.sourceFolderPath)
+        updateMetadataAfterSync(completedAlbum.sourceFolderPath, totalImages, folderStats.totalSize)
+        console.log(`[Pipeline] Updated album metadata for ${albumId}`)
       }
 
       if (mainWindow) {
