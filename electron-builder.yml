@@ -1,6 +1,9 @@
 appId: com.lumosnap.desktop
 productName: Lumosnap
 
+# Application icons - electron-builder will use these for all platforms
+icon: build/icon
+
 # Deep link protocol registration
 protocols:
   - name: Lumosnap
@@ -22,12 +25,14 @@ asarUnpack:
   - '**/node_modules/@img/**/*'
 win:
   executableName: Lumosnap
+  icon: build/icon.ico
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  icon: build/icon.icns
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -42,6 +47,7 @@ mac:
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
+  icon: build/icons/png
   target:
     - AppImage
     - snap

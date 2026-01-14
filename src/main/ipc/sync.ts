@@ -26,6 +26,7 @@ import {
   updateMetadataAfterSync,
   getFolderStats
 } from '../album-metadata'
+import { notificationService } from '../notifications'
 
 const logger = createLogger('IPC:Sync')
 
@@ -498,12 +499,19 @@ export async function executeAlbumSync(
     // Start upload for pending images
     const hasPendingImages =
       (changes.new && changes.new.length > 0) || (changes.modified && changes.modified.length > 0)
+    const hasActualChanges = hasPendingImages || (changes.deleted && changes.deleted.length > 0)
     if (hasPendingImages) {
       logger.info('Triggering upload pipeline for pending images')
+      // Note: Pipeline will trigger syncComplete notification when done
       uploadPipeline.startPipeline(albumId, mainWindow || null).catch((error) => {
         logger.error('Pipeline trigger failed:', getErrorMessage(error))
       })
+    } else if (hasActualChanges) {
+      // Sync completed with deletions only (no new uploads)
+      // Notify user since pipeline won't do it
+      notificationService.syncComplete(album.title)
     }
+    // Note: If only renames/skipped duplicates, don't notify (trivial silent sync)
 
     logger.info(`Sync completed for album ${albumId}`)
     return { success: true, limitWarning: syncLimitWarning }

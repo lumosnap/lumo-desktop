@@ -1,12 +1,13 @@
 {
   "name": "lumosnap",
   "version": "0.1.1-alpha",
-  "description": "An Electron application with Vue and TypeScript",
+  "description": "LumoSnap Desktop - Photo sharing app for photographers",
   "main": "./out/main/index.js",
   "author": "hello@jithinsha.in, darkwebplayer101@gmail.com",
   "homepage": "https://lumosnap.com",
   "scripts": {
     "format": "prettier --write .",
+    "generate-icons": "pnpx @sunjw8888/electron-icon-builder --input=./src/assets/logo.png --output=./build && cp build/icons/win/icon.ico build/ && cp build/icons/mac/icon.icns build/ && cp build/icons/png/512x512.png build/icon.png && cp build/icons/png/512x512.png resources/icon.png",
     "lint": "eslint --cache .",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
@@ -50,6 +51,7 @@
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@playwright/test": "^1.57.0",
+    "@sunjw8888/electron-icon-builder": "^3.0.0",
     "@types/node": "^22.18.6",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vitest/coverage-v8": "^4.0.16",
