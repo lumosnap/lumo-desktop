@@ -18,7 +18,8 @@ import {
   MessageSquare,
   CheckCircle2,
   ChevronDown,
-  Loader2
+  Loader2,
+  ImageOff
 } from 'lucide-vue-next'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import 'photoswipe/style.css'
@@ -26,6 +27,12 @@ import 'photoswipe/style.css'
 const route = useRoute()
 const router = useRouter()
 const albumId = route.params.id as string
+
+const getDisplayStatus = (status: string): 'Processing' | 'Failed' | 'Success' => {
+  if (['pending', 'compressing', 'uploading'].includes(status)) return 'Processing'
+  if (['failed', 'failed_compression', 'failed_upload'].includes(status)) return 'Failed'
+  return 'Success'
+}
 
 interface Comment {
   clientName: string
@@ -65,6 +72,8 @@ const gridLoading = ref(false)
 // Client Name Filter State
 const clientNames = ref<string[]>([])
 const selectedClientName = ref<string>('')
+const isFavoritesLoaded = ref(false)
+const isLoadingFavorites = ref(false)
 
 // Share Link State
 const showShareModal = ref(false)
@@ -188,8 +197,11 @@ async function loadAlbumImages(): Promise<void> {
       error.value = imagesResult.error || 'Failed to load images'
     }
 
-    // Load client names for filter dropdown (fetch without filter first)
-    await loadFavorites()
+    // Load client names for filter dropdown (fetch without filter first) - NON-BLOCKING
+    // Use setTimeout to ensure UI renders first (skeleton disappears) before triggering this
+    setTimeout(() => {
+      loadFavorites()
+    }, 100)
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to load album'
     error.value = message
@@ -204,6 +216,9 @@ async function loadAlbumImages(): Promise<void> {
 
 // Load favorites from API and update images with favoritedBy info
 async function loadFavorites(clientNameFilter?: string): Promise<void> {
+  if (isLoadingFavorites.value) return // Prevent duplicate calls
+  isLoadingFavorites.value = true
+  
   try {
     const result = await window.api.api.getFavorites(albumId, clientNameFilter)
     if (result.success) {
@@ -230,14 +245,24 @@ async function loadFavorites(clientNameFilter?: string): Promise<void> {
       images.value = images.value.map((img) => {
         const imgBaseName = getBaseName(img.originalFilename)
         const favoritedBy = favoritedByMap.get(imgBaseName)
+
+        // Update favorite related fields
+        const isFavorite = favoritedBy && favoritedBy.length > 0
+
         return {
           ...img,
-          favoritedBy: favoritedBy || img.favoritedBy
+          isFavorite: isFavorite || false, // Ensure boolean
+          favoritedBy: favoritedBy || [],
+          favoriteCount: favoritedBy ? favoritedBy.length : 0
         }
       })
+
+      isFavoritesLoaded.value = true
     }
   } catch (err) {
     console.error('Failed to load favorites:', err)
+  } finally {
+    isLoadingFavorites.value = false
   }
 }
 
@@ -264,18 +289,46 @@ async function onClientFilterChange(): Promise<void> {
 }
 
 async function toggleShowFavorites(): Promise<void> {
-  showFavoritesOnly.value = !showFavoritesOnly.value
-  gridLoading.value = true
-
-  // Destroy and reinitialize lightbox
-  if (lightbox) {
-    lightbox.destroy()
-    lightbox = null
+  // If we want to show favorites but they haven't loaded yet, wait for them
+  if (!showFavoritesOnly.value && !isFavoritesLoaded.value) {
+    gridLoading.value = true
+    // If not currently loading, trigger load
+    if (!isLoadingFavorites.value) {
+      await loadFavorites()
+    } else {
+      // Wait for existing load to finish
+      await new Promise<void>((resolve) => {
+        const unwatch = watch(isLoadingFavorites, (newVal) => {
+          if (!newVal) {
+            unwatch()
+            resolve()
+          }
+        })
+      })
+    }
+    gridLoading.value = false
   }
 
-  await nextTick()
-  initLightbox()
-  gridLoading.value = false
+  showFavoritesOnly.value = !showFavoritesOnly.value
+  
+  // If we just enabled favorites view, re-init lightbox
+  if (showFavoritesOnly.value) {
+    if (lightbox) {
+      lightbox.destroy()
+      lightbox = null
+    }
+    await nextTick()
+    initLightbox()
+  } else {
+    // Switching back to all photos
+    page.value = 1
+    if (lightbox) {
+      lightbox.destroy()
+      lightbox = null
+    }
+    await nextTick()
+    initLightbox()
+  }
 }
 
 async function generateShareLink(): Promise<void> {
@@ -548,15 +601,21 @@ onUnmounted(() => {
               <div class="relative">
                 <select
                   v-model="selectedClientName"
-                  class="w-full appearance-none bg-white border border-slate-200 rounded-xl px-4 py-2.5 pr-10 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 cursor-pointer transition-all"
+                  :disabled="isLoadingFavorites"
+                  class="w-full appearance-none bg-white border border-slate-200 rounded-xl px-4 py-2.5 pr-10 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   @change="onClientFilterChange"
                 >
-                  <option value="">All Clients ({{ clientNames.length }})</option>
+                  <option v-if="isLoadingFavorites" value="">Loading clients...</option>
+                  <option v-else value="">All Clients ({{ clientNames.length }})</option>
                   <option v-for="name in clientNames" :key="name" :value="name">
                     {{ name }}
                   </option>
                 </select>
+                <div v-if="isLoadingFavorites" class="absolute right-3 top-1/2 -translate-y-1/2">
+                   <Loader2 class="h-4 w-4 text-indigo-500 animate-spin" />
+                </div>
                 <ChevronDown
+                  v-else
                   class="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none"
                 />
               </div>
@@ -643,7 +702,18 @@ onUnmounted(() => {
               target="_blank"
               class="group relative aspect-[4/5] rounded-xl overflow-hidden bg-slate-200 cursor-pointer shadow-sm hover:shadow-md transition-all duration-300 block"
             >
+              <!-- Failed State Placeholder -->
+              <div
+                v-if="getDisplayStatus(image.uploadStatus) === 'Failed'"
+                class="w-full h-full flex flex-col items-center justify-center bg-slate-100 text-slate-400 p-4"
+              >
+                <ImageOff class="h-10 w-10 mb-2 opacity-50" />
+                <span class="text-xs font-medium text-center">Image Failed</span>
+              </div>
+
+              <!-- Actual Image -->
               <img
+                v-else
                 :src="`file://${getThumbnailPath(image.localFilePath)}`"
                 :alt="image.originalFilename"
                 loading="lazy"
@@ -715,13 +785,11 @@ onUnmounted(() => {
                 v-if="image.uploadStatus !== 'complete'"
                 class="absolute bottom-3 right-3 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider shadow-sm backdrop-blur-md z-10"
                 :class="{
-                  'bg-blue-500/80 text-white': image.uploadStatus === 'uploading',
-                  'bg-amber-500/80 text-white': image.uploadStatus === 'compressing',
-                  'bg-slate-500/80 text-white': image.uploadStatus === 'pending',
-                  'bg-red-500/80 text-white': image.uploadStatus === 'failed'
+                  'bg-blue-500/80 text-white': getDisplayStatus(image.uploadStatus) === 'Processing',
+                  'bg-red-500/80 text-white': getDisplayStatus(image.uploadStatus) === 'Failed'
                 }"
               >
-                {{ image.uploadStatus }}
+                {{ getDisplayStatus(image.uploadStatus) }}
               </div>
             </a>
           </div>

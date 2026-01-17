@@ -4,7 +4,10 @@ import { getAlbum, getAlbumImages, updateImage, updateAlbum } from './database'
 import { albumsApi, uploadToPresignedUrl } from './api-client'
 import { compressionPool } from './compression-pool'
 import { notificationService } from './notifications'
+import { createLogger } from './logger'
 import { updateMetadataAfterSync, getFolderStats } from './album-metadata'
+
+const log = createLogger('Pipeline')
 
 export interface UploadProgress {
   albumId: string
@@ -14,6 +17,8 @@ export interface UploadProgress {
   uploading: number
   complete: number
   failed: number
+  failed_compression: number
+  failed_upload: number
 }
 
 class UploadPipeline {
@@ -30,27 +35,31 @@ class UploadPipeline {
     }
 
     if (this.isRunning) {
-      console.log(`[Pipeline] Pipeline already running, queuing album ${albumId}`)
+      log.info(`[Pipeline] Pipeline already running, queuing album ${albumId}`)
       this.queuedAlbums.add(albumId)
       return
     }
 
     this.isRunning = true
-    console.log(`[Pipeline] Pipeline started for album ${albumId}`)
+    log.info(`[Pipeline] Pipeline started for album ${albumId}`)
 
     try {
       // Get all pending images
       const images = getAlbumImages(albumId)
       const pendingImages = images.filter(
-        (img) => img.uploadStatus === 'pending' || img.uploadStatus === 'failed'
+        (img) =>
+          img.uploadStatus === 'pending' ||
+          img.uploadStatus === 'failed' ||
+          img.uploadStatus === 'failed_compression' ||
+          img.uploadStatus === 'failed_upload'
       )
 
-      console.log(
+      log.info(
         `[Pipeline] Found ${images.length} total images, ${pendingImages.length} pending/failed`
       )
 
       if (pendingImages.length === 0) {
-        console.log(`[Pipeline] No pending images for album ${albumId}, exiting`)
+        log.info(`[Pipeline] No pending images for album ${albumId}, exiting`)
         this.isRunning = false
         if (mainWindow) {
           mainWindow.webContents.send('upload:complete', { albumId })
@@ -60,17 +69,13 @@ class UploadPipeline {
 
       // Process in batches
       const totalBatches = Math.ceil(pendingImages.length / this.uploadBatchSize)
-      console.log(
-        `[Pipeline] Processing in ${totalBatches} batches of size ${this.uploadBatchSize}`
-      )
+      log.info(`[Pipeline] Processing in ${totalBatches} batches of size ${this.uploadBatchSize}`)
 
       for (let i = 0; i < pendingImages.length; i += this.uploadBatchSize) {
         const batchIndex = Math.floor(i / this.uploadBatchSize) + 1
         const batchImages = pendingImages.slice(i, i + this.uploadBatchSize)
 
-        console.log(
-          `[Pipeline] Starting Batch ${batchIndex}/${totalBatches} (${batchImages.length} images)`
-        )
+        log.info(`[Pipeline] Starting Batch ${batchIndex}/${totalBatches} (${batchImages.length} images)`)
 
         // Notify start of batch
         if (mainWindow) {
@@ -83,10 +88,10 @@ class UploadPipeline {
 
         await this.processBatch(albumId, batchImages, mainWindow)
 
-        console.log(`[Pipeline] Completed Batch ${batchIndex}/${totalBatches}`)
+        log.info(`[Pipeline] Completed Batch ${batchIndex}/${totalBatches}`)
       }
 
-      console.log(`[Pipeline] Pipeline completed successfully for album ${albumId}`)
+      log.info(`[Pipeline] Pipeline completed successfully for album ${albumId}`)
 
       // Show notification for sync complete
       const completedAlbum = getAlbum(albumId)
@@ -102,32 +107,32 @@ class UploadPipeline {
         const totalImages = getAlbumImages(albumId).length
         const folderStats = getFolderStats(completedAlbum.sourceFolderPath)
         updateMetadataAfterSync(completedAlbum.sourceFolderPath, totalImages, folderStats.totalSize)
-        console.log(`[Pipeline] Updated album metadata for ${albumId}`)
+        log.info(`[Pipeline] Updated album metadata for ${albumId}`)
       }
 
       if (mainWindow) {
         mainWindow.webContents.send('upload:complete', { albumId })
       }
     } catch (error) {
-      console.error(`[Pipeline] Pipeline failed for album ${albumId}:`, error)
+      log.error(`[Pipeline] Pipeline failed for album ${albumId}:`, error)
       if (mainWindow) {
         mainWindow.webContents.send('upload:error', { error: (error as Error).message })
       }
       throw error
     } finally {
       this.isRunning = false
-      console.log(`[Pipeline] Pipeline isRunning flag reset`)
+      log.info(`[Pipeline] Pipeline isRunning flag reset`)
 
       // Process next queued album
       if (this.queuedAlbums.size > 0) {
         const nextAlbumId = this.queuedAlbums.values().next().value
         if (nextAlbumId) {
           this.queuedAlbums.delete(nextAlbumId)
-          console.log(`[Pipeline] Processing next queued album: ${nextAlbumId}`)
+          log.info(`[Pipeline] Processing next queued album: ${nextAlbumId}`)
           // Use setImmediate to avoid stack overflow with many queued albums
           setImmediate(() => {
             this.startPipeline(nextAlbumId, this.mainWindowRef).catch((error) => {
-              console.error(`[Pipeline] Queued pipeline failed for ${nextAlbumId}:`, error)
+              log.error(`[Pipeline] Queued pipeline failed for ${nextAlbumId}:`, error)
             })
           })
         }
@@ -141,7 +146,7 @@ class UploadPipeline {
     mainWindow: BrowserWindow | null
   ): Promise<void> {
     // 1. Compression Step
-    console.log(`[Pipeline] Batch: Compressing ${batchImages.length} images...`)
+    log.info(`[Pipeline] Batch: Compressing ${batchImages.length} images...`)
     const compressedImages: any[] = []
 
     // Process compression in parallel chunks to respect concurrency limit
@@ -171,12 +176,12 @@ class UploadPipeline {
     }
 
     if (compressedImages.length === 0) {
-      console.log('[Pipeline] Batch: No images successfully compressed, skipping upload')
+      log.info('[Pipeline] Batch: No images successfully compressed, skipping upload')
       return
     }
 
     // 2. Upload Step
-    console.log(`[Pipeline] Batch: Uploading ${compressedImages.length} images...`)
+    log.info(`[Pipeline] Batch: Uploading ${compressedImages.length} images...`)
 
     try {
       // Request signed URLs for the batch
@@ -233,11 +238,13 @@ class UploadPipeline {
                   uploadOrder: img.uploadOrder
                 })
               } else {
-                updateImage(img.id, { uploadStatus: 'failed' })
+                const errorMsg = 'Upload failed: Server returned success=false'
+                log.error(`[Image ${img.id}] ${errorMsg}`)
+                updateImage(img.id, { uploadStatus: 'failed_upload' })
               }
             } catch (err) {
-              console.error(`[Pipeline] Upload failed for ${img.id}:`, err)
-              updateImage(img.id, { uploadStatus: 'failed' })
+              log.error(`[Image ${img.id}] Upload failed:`, err)
+              updateImage(img.id, { uploadStatus: 'failed_upload' })
             }
           })()
 
@@ -260,7 +267,7 @@ class UploadPipeline {
 
         // Confirm new uploads
         if (newImages.length > 0) {
-          console.log(`[Pipeline] Batch: Confirming ${newImages.length} new uploads...`)
+          log.info(`[Pipeline] Batch: Confirming ${newImages.length} new uploads...`)
 
           const confirmPayload = newImages.map((u) => ({
             filename: u.filename,
@@ -282,14 +289,14 @@ class UploadPipeline {
                 uploadStatus: 'complete',
                 serverId: conf.id
               })
-              console.log(
+              log.info(
                 `[Pipeline] Image ${uploaded.localId} marked complete with serverId ${conf.id}`
               )
               if (mainWindow) {
                 mainWindow.webContents.send('upload:progress', this.getProgress(albumId))
               }
             } else {
-              console.warn(
+              log.warn(
                 `[Pipeline] Could not find local image for confirmed file: ${conf.originalFilename}`
               )
             }
@@ -298,7 +305,7 @@ class UploadPipeline {
 
         // Update modified images via PATCH
         if (modifiedImages.length > 0) {
-          console.log(
+          log.info(
             `[Pipeline] Batch: Updating ${modifiedImages.length} modified images via PATCH...`
           )
 
@@ -316,7 +323,7 @@ class UploadPipeline {
           // Mark modified images as complete
           for (const uploaded of modifiedImages) {
             updateImage(uploaded.localId, { uploadStatus: 'complete' })
-            console.log(
+            log.info(
               `[Pipeline] Modified image ${uploaded.localId} (serverId ${uploaded.serverId}) updated successfully`
             )
             if (mainWindow) {
@@ -326,8 +333,11 @@ class UploadPipeline {
         }
       }
     } catch (error) {
-      console.error('[Pipeline] Batch upload failed:', error)
-      compressedImages.forEach((img) => updateImage(img.id, { uploadStatus: 'failed' }))
+      log.error('Batch upload failed:', error)
+      compressedImages.forEach((img) => {
+        log.error(`[Image ${img.id}] Batch failure marks as failed`)
+        updateImage(img.id, { uploadStatus: 'failed_upload' })
+      })
     }
   }
 
@@ -366,12 +376,13 @@ class UploadPipeline {
 
         return true
       } else {
-        updateImage(image.id, { uploadStatus: 'failed' })
+        log.error(`[Image ${image.id}] Compression failed: Success=false`)
+        updateImage(image.id, { uploadStatus: 'failed_compression' })
         return false
       }
     } catch (error) {
-      console.error(`[Pipeline] Compression failed for ${image.id}:`, error)
-      updateImage(image.id, { uploadStatus: 'failed' })
+      log.error(`[Image ${image.id}] Compression failed:`, error)
+      updateImage(image.id, { uploadStatus: 'failed_compression' })
       return false
     }
   }
@@ -386,7 +397,9 @@ class UploadPipeline {
       compressing: 0,
       uploading: 0,
       complete: 0,
-      failed: 0
+      failed: 0,
+      failed_compression: 0,
+      failed_upload: 0
     }
 
     images.forEach((img) => {
@@ -398,9 +411,14 @@ class UploadPipeline {
 
   async retryFailed(albumId: string, mainWindow: BrowserWindow | null): Promise<void> {
     const images = getAlbumImages(albumId)
-    const failedImages = images.filter((img) => img.uploadStatus === 'failed')
+    const failedImages = images.filter(
+      (img) =>
+        img.uploadStatus === 'failed' ||
+        img.uploadStatus === 'failed_compression' ||
+        img.uploadStatus === 'failed_upload'
+    )
 
-    console.log(`Retrying ${failedImages.length} failed images`)
+    log.info(`Retrying ${failedImages.length} failed images`)
 
     // Reset failed images to pending
     failedImages.forEach((img) => {

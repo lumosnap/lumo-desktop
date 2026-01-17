@@ -30,7 +30,7 @@ export interface Image {
   height: number
   mtime: string
   sourceFileHash: string | null
-  uploadStatus: 'pending' | 'compressing' | 'uploading' | 'complete' | 'failed'
+  uploadStatus: 'pending' | 'compressing' | 'uploading' | 'complete' | 'failed' | 'failed_compression' | 'failed_upload'
   uploadOrder: number
   createdAt: string
 }
@@ -292,7 +292,7 @@ export function updateAlbum(id: string, updates: Partial<Album>): void {
   const fields = Object.keys(updates)
     .map((key) => `${key} = ?`)
     .join(', ')
-  const values = Object.values(updates)
+    const values = Object.values(updates)
 
   const stmt = db.prepare(`UPDATE albums SET ${fields} WHERE id = ?`)
   stmt.run(...values, id)
@@ -407,6 +407,8 @@ export function getImageStats(albumId: string): {
   uploading: number
   complete: number
   failed: number
+  failed_compression: number
+  failed_upload: number
 } {
   if (!db) throw new Error('Database not initialized')
 
@@ -427,7 +429,9 @@ export function getImageStats(albumId: string): {
     compressing: 0,
     uploading: 0,
     complete: 0,
-    failed: 0
+    failed: 0,
+    failed_compression: 0,
+    failed_upload: 0
   }
 
   results.forEach((row) => {

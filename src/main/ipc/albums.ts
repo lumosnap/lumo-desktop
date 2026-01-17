@@ -210,37 +210,15 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
     try {
       const images = getAlbumImages(albumId)
 
-      // Get favorites from API
-      let favorites: Array<{
-        originalFilename: string
-        favoriteCount: number
-        notesCount: number
-        comments: Array<{ clientName: string; notes: string | null; createdAt: string }>
-      }> = []
-
-      try {
-        const favoritesResult = await albumsApi.getFavorites(albumId)
-        favorites = favoritesResult.data
-      } catch {
-        // Album may not exist on server yet
-      }
-
-      // Helper for base filename
-      const getBaseName = (filename: string): string => {
-        const lastDot = filename.lastIndexOf('.')
-        return lastDot > 0 ? filename.substring(0, lastDot) : filename
-      }
-
-      // Combine images with favorite status
+      // Favorites are now loaded separately by the frontend to improve performance
+      // Return images without favorite info (frontend will enrich later)
       const imagesWithFavorites = images.map((img) => {
-        const imgBaseName = getBaseName(img.originalFilename)
-        const favorite = favorites.find((fav) => getBaseName(fav.originalFilename) === imgBaseName)
         return {
           ...img,
-          isFavorite: !!favorite,
-          favoriteCount: favorite?.favoriteCount || 0,
-          notesCount: favorite?.notesCount || 0,
-          comments: favorite?.comments || []
+          isFavorite: false,
+          favoriteCount: 0,
+          notesCount: 0,
+          comments: []
         }
       })
 
