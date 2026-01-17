@@ -152,17 +152,7 @@ watch(
   { flush: 'post' }
 )
 
-// Reset page when filter changes
-watch(
-  () => [showFavoritesOnly.value, selectedClientName.value],
-  () => {
-    page.value = 1
-    // Wait for DOM update then re-init lightbox
-    nextTick(() => {
-      initLightbox()
-    })
-  }
-)
+
 
 // Get thumbnail path for an image (stored in .thumbnails subfolder)
 // Falls back to original if thumbnail doesn't exist
@@ -277,6 +267,8 @@ async function onClientFilterChange(): Promise<void> {
   gridLoading.value = true
   await loadFavorites(selectedClientName.value || undefined)
 
+  gridLoading.value = false // Ensure loading is off so DOM renders gallery
+  
   // Destroy and reinitialize lightbox
   if (lightbox) {
     lightbox.destroy()
@@ -285,7 +277,6 @@ async function onClientFilterChange(): Promise<void> {
 
   await nextTick()
   initLightbox()
-  gridLoading.value = false
 }
 
 async function toggleShowFavorites(): Promise<void> {
@@ -310,25 +301,15 @@ async function toggleShowFavorites(): Promise<void> {
   }
 
   showFavoritesOnly.value = !showFavoritesOnly.value
+  page.value = 1 // Always reset to page 1 when toggling view mode
   
-  // If we just enabled favorites view, re-init lightbox
-  if (showFavoritesOnly.value) {
-    if (lightbox) {
-      lightbox.destroy()
-      lightbox = null
-    }
-    await nextTick()
-    initLightbox()
-  } else {
-    // Switching back to all photos
-    page.value = 1
-    if (lightbox) {
-      lightbox.destroy()
-      lightbox = null
-    }
-    await nextTick()
-    initLightbox()
+  // Re-init lightbox for new content
+  if (lightbox) {
+    lightbox.destroy()
+    lightbox = null
   }
+  await nextTick()
+  initLightbox()
 }
 
 async function generateShareLink(): Promise<void> {
