@@ -411,6 +411,7 @@ export const albumsApi = {
       filename: string
       sourceImageHash: string | null
       key: string
+      thumbnailKey: string | null
       fileSize: number
       width: number
       height: number

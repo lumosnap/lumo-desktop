@@ -193,6 +193,7 @@ class WatcherService {
       endTime: null,
       localFolderPath,
       sourceFolderPath,
+      albumType: 'watch_folder', // Auto-created from master folder
       totalImages: 0,
       lastSyncedAt: null,
       needsSync: 0,

@@ -73,7 +73,7 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
     }
 
     // Use provided hash or compute it
-    const hash = task.precomputedHash || hashBuffer(sourceBuffer)
+    const hash = task.precomputedHash || (await hashBuffer(sourceBuffer))
 
     // Set Sharp concurrency
     sharp.concurrency(opts.sharpConcurrency)
@@ -147,11 +147,29 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
     // Get final dimensions
     const outputMetadata = await sharp(finalBuffer).metadata()
 
+    // Generate thumbnail
+    const thumbnailDir = path.join(task.outputDir, '.thumbnail')
+    await fs.mkdir(thumbnailDir, { recursive: true })
+    
+    const thumbnailPath = path.join(thumbnailDir, outputFileName)
+    
+    // Create 400px thumbnail
+    await image
+      .clone()
+      .resize({
+        width: 400,
+        height: 400, // max dimensions
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .webp({ quality: 80, effort: 0 }) // fast compression for thumbnails
+      .toFile(thumbnailPath)
+
     return {
       taskId: task.taskId,
       success: true,
       compressedPath: outputPath,
-      thumbnailPath: '', // Thumbnails disabled for now
+      thumbnailPath: thumbnailPath,
       width: outputMetadata.width || 0,
       height: outputMetadata.height || 0,
       fileSize: finalBuffer.length,

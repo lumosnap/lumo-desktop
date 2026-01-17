@@ -46,6 +46,7 @@ declare global {
           title: string
           eventDate: string | null
           sourceFolderPath: string
+          albumType?: 'watch_folder' | 'standalone'
         }) => Promise<any>
         list: () => Promise<any>
         get: (albumId: string) => Promise<any>

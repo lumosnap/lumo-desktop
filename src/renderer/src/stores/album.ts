@@ -31,6 +31,7 @@ export interface Album {
   updatedAt: string
   needsSync?: number // 0 or 1 (SQLite boolean) - indicates if album needs sync with source folder
   isOrphaned?: number // 0 or 1 (SQLite boolean) - indicates if source folder was deleted
+  albumType?: 'watch_folder' | 'standalone' // watch_folder = in master folder, standalone = custom path
   // For backward compatibility with frontend
   photoCount?: number
   coverPhoto?: string

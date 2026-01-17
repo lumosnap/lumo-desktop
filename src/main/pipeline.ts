@@ -203,6 +203,7 @@ class UploadPipeline {
         width: number
         height: number
         uploadOrder: number
+        thumbnailKey: string | null
       }> = []
       const uploadQueue = compressedImages.map((img, index) => ({
         img,
@@ -225,20 +226,33 @@ class UploadPipeline {
               // Upload main image
               const result = await uploadToPresignedUrl(signedUrl.uploadUrl, img.localFilePath)
 
-              if (result.success) {
+              // Upload thumbnail if available
+              let thumbnailResult = { success: true }
+              if (result.success && img.thumbnailPath && signedUrl.thumbnailUploadUrl) {
+                log.info(`[Image ${img.id}] Uploading thumbnail...`)
+                thumbnailResult = await uploadToPresignedUrl(
+                  signedUrl.thumbnailUploadUrl,
+                  img.thumbnailPath
+                )
+              }
+
+              if (result.success && thumbnailResult.success) {
                 uploadedImages.push({
                   localId: img.id,
                   serverId: img.serverId, // Track if this was a modified file
                   filename: signedUrl.filename,
                   sourceImageHash: img.sourceFileHash, // Use hash from DB (computed during compression)
                   key: signedUrl.key,
+                  thumbnailKey: signedUrl.thumbnailKey || null,
                   fileSize: img.fileSize,
                   width: img.width,
                   height: img.height,
                   uploadOrder: img.uploadOrder
                 })
               } else {
-                const errorMsg = 'Upload failed: Server returned success=false'
+                const errorMsg = !result.success
+                  ? 'Upload failed: Server returned success=false'
+                  : 'Thumbnail upload failed'
                 log.error(`[Image ${img.id}] ${errorMsg}`)
                 updateImage(img.id, { uploadStatus: 'failed_upload' })
               }
@@ -273,6 +287,7 @@ class UploadPipeline {
             filename: u.filename,
             sourceImageHash: u.sourceImageHash,
             key: u.key,
+            thumbnailKey: u.thumbnailKey,
             fileSize: u.fileSize,
             width: u.width,
             height: u.height,

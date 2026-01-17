@@ -8,41 +8,48 @@
  * Uses SHA-256 for consistent, cross-platform hashing.
  */
 
-import crypto from 'node:crypto'
-import fs from 'node:fs/promises'
-import { readFileSync, createReadStream } from 'node:fs'
+/**
+ * Hash Utility Module
+ *
+ * Provides reusable file hashing functionality for:
+ * - Sync detection (rename/duplicate detection)
+ * - Compression (source file identification)
+ *
+ * Uses BLAKE3 (via hash-wasm) for fast, secure hashing.
+ */
 
-const HASH_ALGORITHM = 'sha256'
+import fs from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { createBLAKE3 } from 'hash-wasm'
 
 /**
- * Compute SHA-256 hash from a Buffer
+ * Compute BLAKE3 hash from a Buffer
  */
-export function hashBuffer(buffer: Buffer): string {
-  return crypto.createHash(HASH_ALGORITHM).update(buffer).digest('hex')
+export async function hashBuffer(buffer: Buffer): Promise<string> {
+  const hasher = await createBLAKE3()
+  hasher.init()
+  hasher.update(buffer)
+  return hasher.digest('hex')
 }
 
 /**
- * Compute SHA-256 hash from a file path (async, stream-based)
+ * Compute BLAKE3 hash from a file path (async, stream-based)
  * Optimized for large files and low memory usage
  */
 export async function hashFile(filePath: string): Promise<string> {
+  const hasher = await createBLAKE3()
+  hasher.init()
+
   return new Promise((resolve, reject) => {
-    const hash = crypto.createHash(HASH_ALGORITHM)
     const stream = createReadStream(filePath)
 
     stream.on('error', (err) => reject(err))
-    stream.on('data', (chunk) => hash.update(chunk))
-    stream.on('end', () => resolve(hash.digest('hex')))
+    stream.on('data', (chunk) => {
+      // hash-wasm expects Uint8Array or similar
+      hasher.update(chunk as Buffer)
+    })
+    stream.on('end', () => resolve(hasher.digest('hex')))
   })
-}
-
-/**
- * Compute SHA-256 hash from a file path (sync)
- * Use sparingly - prefer async version for better performance
- */
-export function hashFileSync(filePath: string): string {
-  const buffer = readFileSync(filePath)
-  return hashBuffer(buffer)
 }
 
 /**
@@ -53,15 +60,7 @@ export async function readFileWithHash(
   filePath: string
 ): Promise<{ buffer: Buffer; hash: string }> {
   const buffer = await fs.readFile(filePath)
-  const hash = hashBuffer(buffer)
+  const hash = await hashBuffer(buffer)
   return { buffer, hash }
 }
 
-/**
- * Sync version of readFileWithHash
- */
-export function readFileWithHashSync(filePath: string): { buffer: Buffer; hash: string } {
-  const buffer = readFileSync(filePath)
-  const hash = hashBuffer(buffer)
-  return { buffer, hash }
-}

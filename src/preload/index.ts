@@ -40,6 +40,7 @@ const api = {
       title: string
       eventDate: string | null
       sourceFolderPath: string
+      albumType?: 'watch_folder' | 'standalone'
     }): Promise<any> => ipcRenderer.invoke('album:create', data),
     list: (): Promise<any> => ipcRenderer.invoke('album:list'),
     get: (albumId: string): Promise<any> => ipcRenderer.invoke('album:get', albumId),

@@ -12,6 +12,7 @@ export interface Album {
   endTime: string | null // ISO 8601 datetime string
   localFolderPath: string
   sourceFolderPath: string
+  albumType: 'watch_folder' | 'standalone' // watch_folder = in master folder, standalone = custom path
   totalImages: number
   lastSyncedAt: string | null
   needsSync: number // 0 or 1 (SQLite boolean)
@@ -87,6 +88,18 @@ export function initDatabase(): void {
     console.error('[Database] isOrphaned migration failed:', error)
   }
 
+  // Migration: Add albumType column if it doesn't exist
+  try {
+    const albumInfo = db.pragma('table_info(albums)') as Array<{ name: string }>
+    const hasAlbumType = albumInfo.some((col) => col.name === 'albumType')
+    if (!hasAlbumType) {
+      console.log('[Database] Adding albumType column to albums table')
+      db.exec("ALTER TABLE albums ADD COLUMN albumType TEXT DEFAULT 'watch_folder'")
+    }
+  } catch (error) {
+    console.error('[Database] albumType migration failed:', error)
+  }
+
   // Create indexes
   createIndexes()
 }
@@ -104,6 +117,7 @@ function createTables(): void {
       endTime TEXT,
       localFolderPath TEXT NOT NULL,
       sourceFolderPath TEXT NOT NULL,
+      albumType TEXT DEFAULT 'watch_folder',
       totalImages INTEGER DEFAULT 0,
       lastSyncedAt TEXT,
       needsSync INTEGER DEFAULT 0,
@@ -230,8 +244,8 @@ export function createAlbum(album: Omit<Album, 'createdAt'>): Album {
   const fullAlbum = { ...album, createdAt }
 
   const stmt = db.prepare(`
-    INSERT INTO albums (id, title, eventDate, startTime, endTime, localFolderPath, sourceFolderPath, totalImages, lastSyncedAt, needsSync, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO albums (id, title, eventDate, startTime, endTime, localFolderPath, sourceFolderPath, albumType, totalImages, lastSyncedAt, needsSync, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   stmt.run(
@@ -242,6 +256,7 @@ export function createAlbum(album: Omit<Album, 'createdAt'>): Album {
     fullAlbum.endTime,
     fullAlbum.localFolderPath,
     fullAlbum.sourceFolderPath,
+    fullAlbum.albumType,
     fullAlbum.totalImages,
     fullAlbum.lastSyncedAt,
     fullAlbum.needsSync,

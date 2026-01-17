@@ -35,6 +35,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         startTime: string | null
         endTime: string | null
         sourceFolderPath: string
+        albumType?: 'watch_folder' | 'standalone'
       }
     ) => {
       try {
@@ -42,6 +43,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         if (!storageLocation) {
           throw new Error('Storage location not configured')
         }
+
+        const albumType = data.albumType || 'watch_folder'
 
         // Create album on server
         const apiAlbum = await albumsApi.create({
@@ -61,6 +64,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           endTime: data.endTime,
           localFolderPath,
           sourceFolderPath: data.sourceFolderPath,
+          albumType,
           totalImages: 0,
           lastSyncedAt: null,
           needsSync: 0,
@@ -332,6 +336,18 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       return { success: true }
     } catch (error: unknown) {
       logger.error('Failed to retry failed uploads:', getErrorMessage(error))
+      return { success: false, error: getErrorMessage(error) }
+    }
+  })
+
+  // Force refresh all albums - bypasses debounce for instant results
+  ipcMain.handle('albums:forceRefresh', async () => {
+    try {
+      logger.info('Force refresh requested - bypassing debounce')
+      await watcherService.forceRefreshAlbums()
+      return { success: true }
+    } catch (error: unknown) {
+      logger.error('Failed to force refresh:', getErrorMessage(error))
       return { success: false, error: getErrorMessage(error) }
     }
   })

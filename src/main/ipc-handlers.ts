@@ -333,12 +333,36 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         startTime: string | null
         endTime: string | null
         sourceFolderPath: string
+        albumType?: 'watch_folder' | 'standalone'
       }
     ) => {
       try {
         const storageLocation = getStorageLocation()
         if (!storageLocation) {
           throw new Error('Storage location not configured')
+        }
+
+        const albumType = data.albumType || 'watch_folder'
+        let sourceFolderPath = data.sourceFolderPath
+
+        // For watch_folder albums, derive sourceFolderPath from master folder + title
+        if (albumType === 'watch_folder') {
+          const masterFolder = getMasterFolder()
+          if (!masterFolder) {
+            throw new Error('Master folder not configured')
+          }
+          sourceFolderPath = join(masterFolder, data.title)
+
+          // Create the source folder if it doesn't exist
+          if (!existsSync(sourceFolderPath)) {
+            const { mkdirSync } = await import('fs')
+            mkdirSync(sourceFolderPath, { recursive: true })
+          }
+        } else {
+          // For standalone albums, validate the source folder exists
+          if (!sourceFolderPath || !existsSync(sourceFolderPath)) {
+            throw new Error('Source folder does not exist')
+          }
         }
 
         // Create album on server (real API)
@@ -360,7 +384,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
           startTime: data.startTime,
           endTime: data.endTime,
           localFolderPath,
-          sourceFolderPath: data.sourceFolderPath,
+          sourceFolderPath,
+          albumType,
           totalImages: 0,
           lastSyncedAt: null,
           needsSync: 0,
@@ -368,7 +393,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         })
 
         // Scan source folder for images
-        const imageFiles = scanImagesInFolder(data.sourceFolderPath)
+        const imageFiles = scanImagesInFolder(sourceFolderPath)
 
         // Create image records
         imageFiles.forEach((file, index) => {
@@ -393,9 +418,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         updateAlbum(album.id, { totalImages: imageFiles.length })
 
         // Create .lumosnap metadata file in source folder
-        const folderStats = getFolderStats(data.sourceFolderPath)
+        const folderStats = getFolderStats(sourceFolderPath)
         const metadata = createAlbumMetadata(album.id, imageFiles.length, folderStats.totalSize)
-        writeAlbumMetadata(data.sourceFolderPath, metadata)
+        writeAlbumMetadata(sourceFolderPath, metadata)
 
         // Start compression and upload pipeline
         uploadPipeline.startPipeline(album.id, mainWindow).catch((error) => {
@@ -403,7 +428,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
         })
 
         // Start watching the folder
-        watcherService.watch(album.id, data.sourceFolderPath)
+        watcherService.watch(album.id, sourceFolderPath)
 
         // Notify user of successful album creation
         notificationService.albumCreated(data.title)
