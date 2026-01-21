@@ -1,7 +1,7 @@
 appId: com.lumosnap.desktop
 productName: Lumosnap
 
-# Application icons - electron-builder will use these for all platforms
+# Application icons
 icon: build/icon
 
 # Deep link protocol registration
@@ -10,8 +10,13 @@ protocols:
     schemes:
       - lumosnap
 
+# Configure electron-updater compatibility
+electronUpdaterCompatibility: '>=2.16'
+
 directories:
   buildResources: build
+  output: dist
+
 files:
   - '!**/.vscode/*'
   - '!src/*'
@@ -19,54 +24,81 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+
 asarUnpack:
   - resources/**
   - '**/node_modules/sharp/**/*'
   - '**/node_modules/@img/**/*'
-# Extra resources to include in the app (for tray icons, etc.)
+
 extraResources:
   - from: "build/icon.ico"
     to: "icon.ico"
   - from: "resources/icon.png"
     to: "icon.png"
+
 win:
   executableName: Lumosnap
   icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
 mac:
   icon: build/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
-    # Deep link URL scheme for macOS
     - CFBundleURLTypes:
         - CFBundleURLSchemes:
             - lumosnap
   notarize: false
+
 dmg:
   artifactName: ${name}-${version}.${ext}
+
 linux:
   icon: build/icons/png
   target:
     - AppImage
-    - snap
     - deb
-  maintainer: electronjs.org
+    - snap
+  maintainer: hello@jithinsha.in
   category: Utility
-  # Deep link MIME type for Linux desktop entries
   mimeTypes:
     - x-scheme-handler/lumosnap
+
 appImage:
   artifactName: ${name}-${version}.${ext}
+
 npmRebuild: true
+
 publish:
   provider: github
   owner: lumosnap
-  repo: https://github.com/lumosnap/lumo-desktop
+  repo: lumo-desktop
+  releaseType: release  # or 'draft' if you want to review before publishing

@@ -13,12 +13,14 @@ import { trayManager } from './tray'
 import { compressionPool } from './compression-pool'
 import { copyWatcherRegistry } from './copy-watcher'
 import { networkService } from './network'
+import { AppUpdater } from './AppUpdater'
 
 // Scoped logger for main process
 const logger = createLogger('Main')
 
 // ==================== App State ====================
 let mainWindow: BrowserWindow | null = null
+let appUpdater: AppUpdater | null = null
 let isQuitting = false // Track if app is actually quitting vs minimize-to-tray
 
 // Check if launched with --hidden flag (for Linux hidden start)
@@ -120,6 +122,13 @@ function createWindow(): void {
       webSecurity: false
     }
   })
+  // Initialize updater after window is created
+  if (!appUpdater) {
+    appUpdater = new AppUpdater(mainWindow)
+  } else {
+    appUpdater.setMainWindow(mainWindow!)
+  }
+
   logger.info('Browser window created')
 
   mainWindow.on('ready-to-show', () => {
@@ -275,6 +284,12 @@ app.whenReady().then(() => {
       return null
     } else {
       return filePaths[0]
+    }
+  })
+
+  ipcMain.handle('check-for-updates', () => {
+    if (appUpdater) {
+      appUpdater.checkForUpdatesManually()
     }
   })
 

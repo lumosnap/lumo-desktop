@@ -18,6 +18,7 @@ const api = {
     getFreeSpace: (path: string): Promise<{ bytes: number; formatted: string; error?: string }> =>
       ipcRenderer.invoke('config:getFreeSpace', path),
     getConfig: (): Promise<any> => ipcRenderer.invoke('config:getConfig'),
+    getAppVersion: (): Promise<string> => ipcRenderer.invoke('config:getAppVersion'),
     getCurrentStorageInfo: (): Promise<{
       success: boolean
       path: string | null
@@ -262,7 +263,9 @@ const api = {
       'album:status-changed',
       'albums:refresh',
       'master-folder:change',
-      'network:status-changed'
+      'master-folder:change',
+      'network:status-changed',
+      'update-status'
     ]
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, callback)
@@ -277,7 +280,9 @@ const api = {
       'album:status-changed',
       'albums:refresh',
       'master-folder:change',
-      'network:status-changed'
+      'master-folder:change',
+      'network:status-changed',
+      'update-status'
     ]
     if (validChannels.includes(channel)) {
       ipcRenderer.removeListener(channel, callback)

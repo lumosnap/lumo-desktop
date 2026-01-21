@@ -2,7 +2,7 @@
  * Configuration and Storage IPC handlers
  */
 
-import { ipcMain, shell } from 'electron'
+import { ipcMain, shell, app } from 'electron'
 import { existsSync, readdirSync } from 'fs'
 import { join } from 'path'
 import {
@@ -57,6 +57,10 @@ export function registerConfigHandlers(): void {
 
   ipcMain.handle('config:getConfig', () => {
     return getConfig()
+  })
+
+  ipcMain.handle('config:getAppVersion', () => {
+    return app.getVersion()
   })
 
   ipcMain.handle('config:getCurrentStorageInfo', async () => {

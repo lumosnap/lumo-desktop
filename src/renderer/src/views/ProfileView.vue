@@ -27,13 +27,19 @@ import {
   Link as LinkIcon,
   Copy,
   Check,
-  ExternalLink
+  ExternalLink,
+  Download,
+  RefreshCw
 } from 'lucide-vue-next'
 import Modal from '../components/ui/Modal.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const profileStore = useProfileStore()
+import { useUpdater } from '../composables/useUpdater'
+
+const { updateStatus, updateAvailable, checkForUpdates } = useUpdater()
+import appLogo from '../assets/logo.png'
 
 const activeTab = ref('profile')
 
@@ -41,8 +47,22 @@ const tabs = [
   { id: 'profile', label: 'My Profile', icon: User },
   { id: 'storage', label: 'Watch Folder', icon: Eye },
   { id: 'billing', label: 'Billing & Plan', icon: CreditCard },
-  { id: 'advanced', label: 'Advanced', icon: Settings2 }
+  { id: 'advanced', label: 'Advanced', icon: Settings2 },
+  { id: 'updates', label: 'Updates', icon: RefreshCw }
 ]
+
+const appVersion = ref('Loading...')
+
+async function loadAppVersion(): Promise<void> {
+  if (window.api && window.api.config && window.api.config.getAppVersion) {
+    try {
+      appVersion.value = await window.api.config.getAppVersion()
+    } catch (e) {
+      console.error('Failed to get app version', e)
+      appVersion.value = 'Unknown'
+    }
+  }
+}
 
 // Profile data from API (local editable fields only)
 const profileData = ref<{
@@ -380,6 +400,7 @@ onMounted(() => {
   loadProfileData()
   loadMasterFolder()
   loadPlans()
+  loadAppVersion()
 })
 </script>
 
@@ -1074,15 +1095,69 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Storage Error -->
             <div
               v-if="storageError"
               class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm"
             >
               {{ storageError }}
             </div>
+
+            </div>
+            <!-- Updates Section -->
+          <div v-if="activeTab === 'updates'" class="space-y-8 animate-fade-in">
+            <!-- Section Header -->
+            <div>
+              <h2 class="text-2xl font-bold text-slate-900 mb-1">App Updates</h2>
+              <p class="text-slate-500 text-sm">
+                Check for new features and improvements.
+              </p>
+            </div>
+
+            <!-- App Updates Card -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6 space-y-6">
+              
+              <!-- Version Info -->
+               <div class="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                <div class="h-12 w-12 bg-white rounded-lg border border-slate-200 flex items-center justify-center shadow-sm">
+                   <img :src="appLogo" alt="Logo" class="h-8 w-8 object-contain opactiy-90" />
+                </div>
+                <div>
+                   <p class="text-sm font-medium text-slate-500">Current Version</p>
+                   <p class="text-xl font-bold text-slate-900">v{{ appVersion }}</p>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between pt-4 border-t border-slate-100">
+                <div>
+                  <h3 class="font-semibold text-slate-900">Check for Updates</h3>
+                  <p class="text-xs text-slate-400">
+                    See if a newer version of LumoSnap is available.
+                  </p>
+                </div>
+                <button
+                  class="flex items-center gap-2 rounded-xl bg-indigo-600 text-white px-5 py-2.5 text-sm font-semibold hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 hover:shadow-lg hover:shadow-indigo-300"
+                  @click="checkForUpdates"
+                >
+                  <RefreshCw
+                    class="h-4 w-4"
+                    :class="{ 'animate-spin': updateStatus && !updateAvailable }"
+                  />
+                  <span>Check Now</span>
+                </button>
+              </div>
+
+              <div v-if="updateStatus" class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 animate-fade-in">
+                <div class="flex items-center gap-3">
+                  <Download v-if="updateAvailable" class="h-5 w-5 text-indigo-600" />
+                  <div class="flex-1">
+                    <p class="text-sm font-medium text-indigo-900">{{ updateStatus }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+          </div>
+
       </main>
       <Teleport to="body">
         <Transition name="fade">

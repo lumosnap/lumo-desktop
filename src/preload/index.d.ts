@@ -25,6 +25,7 @@ declare global {
           path: string
         ) => Promise<{ bytes: number; formatted: string; error?: string }>
         getConfig: () => Promise<any>
+        getAppVersion: () => Promise<string>
         getCurrentStorageInfo: () => Promise<{
           success: boolean
           path: string | null
