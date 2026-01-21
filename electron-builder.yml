@@ -79,7 +79,7 @@ mac:
   notarize: false
 
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
 
 linux:
   icon: build/icons/png
