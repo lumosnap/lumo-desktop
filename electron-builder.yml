@@ -86,7 +86,6 @@ linux:
   target:
     - AppImage
     - deb
-    - snap
   maintainer: hello@jithinsha.in
   category: Utility
   mimeTypes:
