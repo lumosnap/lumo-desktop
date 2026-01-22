@@ -156,6 +156,7 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
     // Create 400px thumbnail
     await image
       .clone()
+      .rotate() // Auto-rotate based on EXIF
       .resize({
         width: 400,
         height: 400, // max dimensions
