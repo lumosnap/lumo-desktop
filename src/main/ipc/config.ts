@@ -3,7 +3,7 @@
  */
 
 import { ipcMain, shell, app } from 'electron'
-import { existsSync, readdirSync } from 'fs'
+import { existsSync, readdirSync, rmSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import {
   isConfigured,
@@ -11,10 +11,15 @@ import {
   setStorageLocation,
   getConfig,
   getMasterFolder,
-  setMasterFolder
+  setMasterFolder,
+  getConfigPath,
+  resetConfig
 } from '../config'
+import { deleteDatabase, getAllAlbums } from '../database'
+import { clearAuth } from '../auth-storage'
 import { getFreeSpace, ensureBaseDirectory, scanImagesInFolder, formatBytes } from '../storage'
 import { watcherService } from '../watcher'
+import { albumsApi } from '../api-client'
 import { createLogger, getErrorMessage } from '../logger'
 
 const logger = createLogger('IPC:Config')
@@ -156,6 +161,87 @@ export function registerConfigHandlers(): void {
       return { success: true }
     } catch (error: unknown) {
       logger.error('Failed to open folder:', getErrorMessage(error))
+      return { success: false, error: getErrorMessage(error) }
+    }
+  })
+
+  // Reset all data handler
+  ipcMain.handle('config:resetAllData', async () => {
+    try {
+      logger.info('Starting reset all data...')
+
+      // 1. Stop the watcher service
+      watcherService.closeAll()
+      logger.info('Watchers closed')
+
+      // 2. Get all albums and delete from cloud first
+      const albums = getAllAlbums()
+      logger.info(`Found ${albums.length} albums to delete from cloud`)
+
+      const failedCloudDeletes: string[] = []
+      for (const album of albums) {
+        try {
+          logger.info(`Deleting album ${album.id} (${album.title}) from cloud...`)
+          await albumsApi.delete(album.id)
+          logger.info(`Album ${album.id} deleted from cloud successfully`)
+        } catch (e) {
+          const errorMsg = getErrorMessage(e)
+          logger.error(`Failed to delete album ${album.id} from cloud:`, errorMsg)
+          failedCloudDeletes.push(`${album.title}: ${errorMsg}`)
+        }
+      }
+
+      // If any cloud deletion failed, abort to prevent inconsistency
+      if (failedCloudDeletes.length > 0) {
+        const errorMessage = `Failed to delete ${failedCloudDeletes.length} album(s) from cloud. Local data was preserved to prevent inconsistency.`
+        logger.error(errorMessage)
+        return {
+          success: false,
+          error: errorMessage,
+          details: failedCloudDeletes
+        }
+      }
+
+      logger.info('All albums deleted from cloud')
+
+      // 3. Clear authentication data
+      clearAuth()
+      logger.info('Auth cleared')
+
+      // 4. Delete the database
+      deleteDatabase()
+      logger.info('Database deleted')
+
+      // 5. Delete compressed images in storage location
+      const storageLocation = getStorageLocation()
+      if (storageLocation && existsSync(storageLocation)) {
+        try {
+          rmSync(storageLocation, { recursive: true, force: true })
+          logger.info('Storage folder deleted:', storageLocation)
+        } catch (e) {
+          logger.warn('Failed to delete storage folder:', getErrorMessage(e))
+        }
+      }
+
+      // 6. Delete config file
+      const configPath = getConfigPath()
+      if (existsSync(configPath)) {
+        try {
+          unlinkSync(configPath)
+          logger.info('Config file deleted:', configPath)
+        } catch (e) {
+          logger.warn('Failed to delete config file:', getErrorMessage(e))
+        }
+      }
+
+      // 7. Reset in-memory config
+      resetConfig()
+      logger.info('Config reset')
+
+      logger.info('Reset all data completed successfully')
+      return { success: true }
+    } catch (error: unknown) {
+      logger.error('Failed to reset all data:', getErrorMessage(error))
       return { success: false, error: getErrorMessage(error) }
     }
   })

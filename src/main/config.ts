@@ -116,3 +116,7 @@ export function setMasterFolder(path: string): void {
 export function isMasterFolderConfigured(): boolean {
   return config.masterFolderPath !== null && existsSync(config.masterFolderPath)
 }
+
+export function getConfigPath(): string {
+  return configPath
+}

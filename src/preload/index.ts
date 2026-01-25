@@ -34,7 +34,9 @@ const api = {
       success: boolean
       folders: Array<{ name: string; path: string; imageCount: number }>
       error?: string
-    }> => ipcRenderer.invoke('config:scanMasterFolder')
+    }> => ipcRenderer.invoke('config:scanMasterFolder'),
+    resetAllData: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('config:resetAllData')
   },
   albums: {
     create: (data: {

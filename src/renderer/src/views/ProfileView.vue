@@ -29,7 +29,8 @@ import {
   Check,
   ExternalLink,
   Download,
-  RefreshCw
+  RefreshCw,
+  Trash2
 } from 'lucide-vue-next'
 import Modal from '../components/ui/Modal.vue'
 
@@ -179,6 +180,11 @@ const masterFolder = ref<string | null>(null)
 const isLoadingMasterFolder = ref(false)
 const isSettingMasterFolder = ref(false)
 const masterFolderError = ref<string | null>(null)
+
+// Reset all data state
+const showResetConfirmation = ref(false)
+const isResetting = ref(false)
+const resetError = ref<string | null>(null)
 
 // Format plan expiry date
 function formatExpiryDate(date: string | null): string {
@@ -388,6 +394,35 @@ async function openMasterFolder(): Promise<void> {
   if (masterFolder.value) {
     await window.api.shell.openFolder(masterFolder.value)
   }
+}
+
+async function confirmResetAllData(): Promise<void> {
+  isResetting.value = true
+  resetError.value = null
+
+  try {
+    const result = await window.api.config.resetAllData()
+    if (result.success) {
+      // Clear local storage
+      localStorage.clear()
+      showResetConfirmation.value = false
+      // Redirect to login (app will reinitialize on next launch)
+      await authStore.logout()
+      router.push('/login')
+    } else {
+      // Keep modal open to show the error
+      resetError.value = result.error || 'Failed to reset data'
+    }
+  } catch (err: unknown) {
+    resetError.value = err instanceof Error ? err.message : 'Failed to reset data'
+  } finally {
+    isResetting.value = false
+  }
+}
+
+function cancelReset(): void {
+  showResetConfirmation.value = false
+  resetError.value = null
 }
 
 async function handleLogout(): Promise<void> {
@@ -795,6 +830,73 @@ onMounted(() => {
             </Transition>
           </Teleport>
 
+          <!-- Reset Confirmation Modal -->
+          <Teleport to="body">
+            <Transition name="fade">
+              <div
+                v-if="showResetConfirmation"
+                class="fixed inset-0 z-50 flex items-center justify-center p-4"
+              >
+                <!-- Backdrop -->
+                <div
+                  class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                  @click="cancelReset"
+                ></div>
+
+                <!-- Modal -->
+                <div class="relative bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 z-10">
+                  <button
+                    class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 transition-colors"
+                    @click="cancelReset"
+                  >
+                    <X class="w-5 h-5 text-slate-400" />
+                  </button>
+
+                  <div class="flex items-start gap-4 mb-6">
+                    <div
+                      class="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center shrink-0"
+                    >
+                      <Trash2 class="w-6 h-6 text-red-600" />
+                    </div>
+                    <div>
+                      <h3 class="text-lg font-bold text-slate-900 mb-2">
+                        Reset All Data?
+                      </h3>
+                      <p class="text-sm text-slate-500">
+                        This will permanently delete all albums from cloud and local storage,
+                        compressed images, settings, and your login session.
+                        <strong class="text-slate-700">This cannot be undone.</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <!-- Error Display -->
+                  <div
+                    v-if="resetError"
+                    class="bg-red-50 border border-red-200 rounded-xl p-3 mb-4 text-sm text-red-600"
+                  >
+                    {{ resetError }}
+                  </div>
+
+                  <div class="flex gap-3">
+                    <Button variant="secondary" class="flex-1" @click="cancelReset">
+                      Cancel
+                    </Button>
+                    <button
+                      class="flex-1 flex items-center justify-center gap-2 rounded-xl bg-red-500 hover:bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50"
+                      :disabled="isResetting"
+                      @click="confirmResetAllData"
+                    >
+                      <Loader2 v-if="isResetting" class="w-4 h-4 animate-spin" />
+                      <span v-if="isResetting">Resetting...</span>
+                      <span v-else>Reset All Data</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+          </Teleport>
+
           <!-- Billing Section -->
           <div v-if="activeTab === 'billing'" class="space-y-8 animate-fade-in">
             <!-- Section Header -->
@@ -1100,6 +1202,57 @@ onMounted(() => {
               class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 text-sm"
             >
               {{ storageError }}
+            </div>
+
+            <!-- Reset All Data Card -->
+            <div class="bg-white rounded-2xl border border-red-200 p-6 space-y-4">
+              <div class="flex items-center gap-3 mb-2">
+                <div class="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
+                  <Trash2 class="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <h3 class="font-semibold text-slate-900">Reset All Data</h3>
+                  <p class="text-xs text-slate-500">
+                    Delete all local data and start fresh
+                  </p>
+                </div>
+              </div>
+
+              <div class="bg-red-50 border border-red-100 rounded-xl p-4">
+                <p class="text-sm text-red-800 mb-2 font-medium">
+                  This will permanently delete:
+                </p>
+                <ul class="text-xs text-red-700 space-y-1">
+                  <li class="flex items-center gap-2">
+                    <span class="w-1 h-1 bg-red-400 rounded-full"></span>
+                    All albums from cloud and local storage
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span class="w-1 h-1 bg-red-400 rounded-full"></span>
+                    All uploaded and compressed images
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span class="w-1 h-1 bg-red-400 rounded-full"></span>
+                    App configuration and settings
+                  </li>
+                  <li class="flex items-center gap-2">
+                    <span class="w-1 h-1 bg-red-400 rounded-full"></span>
+                    Your login session
+                  </li>
+                </ul>
+                <p class="text-xs text-red-600 mt-3 flex items-start gap-2">
+                  <AlertTriangle class="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>This action cannot be undone.</span>
+                </p>
+              </div>
+
+              <button
+                class="w-full flex items-center justify-center gap-2 rounded-xl bg-red-500 hover:bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors"
+                @click="showResetConfirmation = true"
+              >
+                <Trash2 class="w-4 h-4" />
+                Reset All Data
+              </button>
             </div>
 
             </div>

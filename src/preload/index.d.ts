@@ -41,6 +41,7 @@ declare global {
           folders: Array<{ name: string; path: string; imageCount: number }>
           error?: string
         }>
+        resetAllData: () => Promise<{ success: boolean; error?: string }>
       }
       albums: {
         create: (data: {

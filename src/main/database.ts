@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
+import { existsSync, unlinkSync } from 'fs'
 
 let db: Database.Database | null = null
 
@@ -461,5 +462,18 @@ export function closeDatabase(): void {
   if (db) {
     db.close()
     db = null
+  }
+}
+
+export function getDatabasePath(): string {
+  return join(app.getPath('userData'), 'lumosnap.db')
+}
+
+export function deleteDatabase(): void {
+  closeDatabase()
+  const dbPath = getDatabasePath()
+  if (existsSync(dbPath)) {
+    unlinkSync(dbPath)
+    console.log('[Database] Database file deleted:', dbPath)
   }
 }
