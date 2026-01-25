@@ -75,12 +75,11 @@ function getAlbumColor(index: number) {
 }
 
 function openAlbum(album: Album): void {
-  if (album.totalImages === 0 && album.sourceFolderPath) {
-    // Open in file manager if empty
-    window.api.shell.openFolder(album.sourceFolderPath)
-  } else {
-    router.push(`/albums/${album.id}`)
+  // Don't allow opening albums while they are processing
+  if (currentUploadingAlbumId.value === album.id) {
+    return
   }
+  router.push(`/albums/${album.id}`)
 }
 
 function openCreateModal(): void {
@@ -426,8 +425,13 @@ onUnmounted(() => {
           <div
             v-for="(album, index) in albums"
             :key="album.id"
-            class="group relative bg-white rounded-2xl border border-slate-200 transition-all duration-300 hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1 cursor-pointer hover:z-30 focus-within:z-30"
-            :class="[uiStore.selectedAlbumId === album.id ? 'ring-2 ring-indigo-500' : '']"
+            class="group relative bg-white rounded-2xl border border-slate-200 transition-all duration-300 hover:z-30 focus-within:z-30"
+            :class="[
+              uiStore.selectedAlbumId === album.id ? 'ring-2 ring-indigo-500' : '',
+              currentUploadingAlbumId === album.id
+                ? 'cursor-not-allowed opacity-75'
+                : 'hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1 cursor-pointer'
+            ]"
             @click="openAlbum(album)"
           >
             <!-- Thumbnail / Color Block -->
@@ -549,11 +553,19 @@ onUnmounted(() => {
 
               <!-- Empty Album Hint -->
               <div
-                v-if="album.totalImages === 0"
+                v-if="album.totalImages === 0 && currentUploadingAlbumId !== album.id"
                 class="mt-3 flex items-center gap-2 text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2"
               >
                 <AlertCircle class="h-3.5 w-3.5 flex-shrink-0" />
-                <span>Click to open folder and add photos</span>
+                <span>Add photos via "Open Folder" in the menu</span>
+              </div>
+              <!-- Processing Notice -->
+              <div
+                v-if="currentUploadingAlbumId === album.id"
+                class="mt-3 flex items-center gap-2 text-xs text-indigo-600 bg-indigo-50 rounded-lg px-3 py-2"
+              >
+                <Loader2 class="h-3.5 w-3.5 flex-shrink-0 animate-spin" />
+                <span>Processing... Album will be available soon</span>
               </div>
             </div>
           </div>
