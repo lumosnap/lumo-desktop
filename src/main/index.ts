@@ -345,6 +345,18 @@ app.whenReady().then(() => {
     // Initialize Network Service
     try {
       networkService.initialize(mainWindow)
+      
+      // Wire up network status changes to pause/resume pipeline
+      networkService.onStatusChange((online) => {
+        if (online) {
+          logger.info('Network online - resuming pipeline')
+          uploadPipeline.resumePipeline()
+        } else {
+          logger.info('Network offline - pausing pipeline')
+          uploadPipeline.pausePipeline()
+        }
+      })
+      
       logger.info('✓ Network service initialized')
     } catch (error) {
       logger.error('✗ Failed to initialize network service:', getErrorMessage(error))

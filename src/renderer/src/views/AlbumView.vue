@@ -125,7 +125,7 @@ async function handleForceRefresh(): Promise<void> {
   if (isRefreshing.value) return
 
   isRefreshing.value = true
-  loading.value = true
+  // Don't set loading = true here - keep the grid visible during background refresh
 
   try {
     // Trigger instant refresh that bypasses debounce
@@ -139,7 +139,6 @@ async function handleForceRefresh(): Promise<void> {
     console.error('Failed to force refresh albums:', error)
   } finally {
     isRefreshing.value = false
-    loading.value = false
   }
 }
 

@@ -232,39 +232,48 @@ class WatcherService {
 
     console.log(`[Watcher] Album created: ${album.id} with ${imageFiles.length} images`)
 
-    // Start compression and upload pipeline
-    if (imageFiles.length > 0 && this.mainWindow) {
-      uploadPipeline.startPipeline(album.id, this.mainWindow).catch((error) => {
-        console.error('[Watcher] Pipeline failed:', error)
-      })
-    }
-
     // Start watching the folder for changes
     this.watch(album.id, sourceFolderPath)
 
     // Start temporary copy watcher to detect files still being copied
-    this.startCopyWatcher(album.id, sourceFolderPath, localFolderPath)
+    // Pipeline will start AFTER copy watcher completes (when no new files for 10s)
+    this.startCopyWatcher(album.id, sourceFolderPath, localFolderPath, imageFiles.length > 0)
   }
 
   /**
    * Start a temporary copy watcher for newly created albums
    * Detects files that are still being copied to the source folder
+   * @param hasInitialFiles - If true, start pipeline after copy completes
    */
   private startCopyWatcher(
     albumId: string,
     sourceFolderPath: string,
-    localFolderPath: string
+    localFolderPath: string,
+    hasInitialFiles: boolean = false
   ): void {
+    const mainWindow = this.mainWindow
+    
     copyWatcherRegistry.create({
       albumId,
       folderPath: sourceFolderPath,
       timeoutMs: 120000, // 2 minutes max
-      debounceMs: 5000, // 5 seconds of silence = copy complete
+      debounceMs: 10000, // 10 seconds of silence = copy complete (increased from 5s)
       onNewFiles: (filePaths) => {
         this.handleNewFilesFromCopyWatcher(albumId, filePaths, localFolderPath)
       },
       onComplete: () => {
         logger.info(`Copy watcher completed for album ${albumId}`)
+        
+        // Start pipeline now that copy is complete
+        if (hasInitialFiles && mainWindow) {
+          logger.info(`Starting pipeline for album ${albumId} after copy detection complete`)
+          uploadPipeline.startPipeline(albumId, mainWindow).catch((error) => {
+            logger.error(`Pipeline failed for album ${albumId}:`, error)
+          })
+          
+          // Notify renderer to refresh
+          mainWindow.webContents.send('albums:refresh')
+        }
       }
     })
   }
@@ -483,23 +492,25 @@ class WatcherService {
         return
       }
 
-      const { new: newFiles, modified, deleted, renamed, skipped } = result.changes
+      const { new: newFiles, modified, deleted, renamed } = result.changes
       const hasRealChanges = newFiles.length > 0 || modified.length > 0 || deleted.length > 0
-      const hasTrivialChanges = renamed.length > 0 || skipped.length > 0
+      // Only renames are trivial changes that need silent sync
+      // 'skipped' means duplicates already in DB - not a change at all
+      const hasTrivialChanges = renamed.length > 0
 
       if (hasRealChanges) {
         // Real changes (new, mod, del) -> User needs to review/upload -> Show Badge
         logger.info(`Real changes detected for ${albumId}. Setting needsSync=1`)
         this.setNeedsSync(albumId, 1)
       } else if (hasTrivialChanges) {
-        // Only trivial changes (renames/duplicates) -> Auto-sync silently
-        logger.info(`Only trivial changes detected for ${albumId}. Auto-syncing silently.`)
+        // Only renames -> Auto-sync silently to update filenames
+        logger.info(`Only renames detected for ${albumId}. Auto-syncing silently.`)
         await executeAlbumSync(albumId, result.changes, this.mainWindow)
 
         // Ensure needsSync is 0 (should be done by execute, but good to be sure)
         // We don't need to call setNeedsSync(0) because executeSync does it.
       } else {
-        logger.info(`No relevant changes detected for ${albumId}`)
+        logger.debug(`No relevant changes detected for ${albumId}`)
       }
     } catch (error) {
       logger.error(`Failed to process file changes for ${albumId}:`, error)
@@ -537,15 +548,16 @@ class WatcherService {
         return
       }
 
-      const { new: newFiles, modified, deleted, renamed, skipped } = result.changes
+      const { new: newFiles, modified, deleted, renamed } = result.changes
       const hasRealChanges = newFiles.length > 0 || modified.length > 0 || deleted.length > 0
-      const hasTrivialChanges = renamed.length > 0 || skipped.length > 0
+      // Only renames need silent sync, not skipped duplicates
+      const hasTrivialChanges = renamed.length > 0
 
       const needsSync = hasRealChanges ? 1 : 0
 
-      // If we have trivial changes but no real changes, execute silent sync to update metadata
+      // If we have trivial changes (renames) but no real changes, execute silent sync
       if (!hasRealChanges && hasTrivialChanges) {
-        logger.info(`[CheckSync] Trivial changes detected for ${albumId}, syncing silently...`)
+        logger.info(`[CheckSync] Renames detected for ${albumId}, syncing silently...`)
         await executeAlbumSync(albumId, result.changes, this.mainWindow)
         // executeAlbumSync will update needsSync to 0
       } else {

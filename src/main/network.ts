@@ -13,10 +13,25 @@ const logger = createLogger('Network')
 // Check interval in milliseconds (5 seconds)
 const CHECK_INTERVAL_MS = 5000
 
+type StatusChangeCallback = (online: boolean) => void
+
 class NetworkService {
   private online: boolean = true
   private mainWindow: BrowserWindow | null = null
   private checkInterval: NodeJS.Timeout | null = null
+  private statusCallbacks: StatusChangeCallback[] = []
+
+  /**
+   * Subscribe to network status changes
+   * Returns unsubscribe function
+   */
+  onStatusChange(callback: StatusChangeCallback): () => void {
+    this.statusCallbacks.push(callback)
+    return () => {
+      const idx = this.statusCallbacks.indexOf(callback)
+      if (idx > -1) this.statusCallbacks.splice(idx, 1)
+    }
+  }
 
   /**
    * Initialize the network service with a reference to the main window
@@ -87,6 +102,20 @@ class NetworkService {
       this.online = status
       logger.info(`Network status changed: ${status ? 'online' : 'offline'}`)
       this.notifyRenderer()
+      this.notifyCallbacks()
+    }
+  }
+
+  /**
+   * Notify all registered callbacks
+   */
+  private notifyCallbacks(): void {
+    for (const callback of this.statusCallbacks) {
+      try {
+        callback(this.online)
+      } catch (err) {
+        logger.error('Status callback error:', err)
+      }
     }
   }
 
