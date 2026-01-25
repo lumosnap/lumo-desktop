@@ -197,7 +197,7 @@ class UploadPipeline {
    * Compression producer - compresses images and pushes to queue
    */
   private async runCompressionProducer(
-    albumId: string,
+    _albumId: string,
     pendingImages: Image[],
     mainWindow: BrowserWindow | null
   ): Promise<void> {
