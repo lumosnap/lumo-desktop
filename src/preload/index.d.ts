@@ -62,6 +62,10 @@ declare global {
           albumId: string,
           imageIds: number[]
         ) => Promise<{ success: boolean; deletedCount?: number; error?: string }>
+        copyImages: (
+          albumId: string,
+          imageIds: number[]
+        ) => Promise<{ success: boolean; count?: number; error?: string }>
         scanSourceFolder: (path: string) => Promise<any>
         startUpload: (albumId: string) => Promise<any>
         getProgress: (albumId: string) => Promise<any>

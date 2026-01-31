@@ -95,6 +95,73 @@ const PAGE_SIZE = 50
 const loadMoreTrigger = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
 
+// Selection State
+const selectedImageIds = ref<Set<number>>(new Set())
+const isSelectionMode = computed(() => selectedImageIds.value.size > 0)
+
+function toggleSelection(imageId: number) {
+  if (selectedImageIds.value.has(imageId)) {
+    selectedImageIds.value.delete(imageId)
+  } else {
+    selectedImageIds.value.add(imageId)
+  }
+  // Force update reactor
+  selectedImageIds.value = new Set(selectedImageIds.value)
+}
+
+function selectAll() {
+  // Select all currently filtered images
+  const allIds = filteredImages.value.map(img => img.id)
+  allIds.forEach(id => selectedImageIds.value.add(id))
+  // Force update
+  selectedImageIds.value = new Set(selectedImageIds.value)
+}
+
+function clearSelection() {
+  selectedImageIds.value.clear()
+  selectedImageIds.value = new Set()
+}
+
+// Handle image click - if in selection mode, toggle selection, otherwise open lightbox
+function handleImageClick(event: MouseEvent, image: Image) {
+  if (isSelectionMode.value) {
+    event.preventDefault()
+    toggleSelection(image.id)
+  }
+  // Default behavior (lightbox) happens if not blocked
+}
+
+async function copySelectedImages() {
+  if (selectedImageIds.value.size === 0) return
+  
+  try {
+    const ids = Array.from(selectedImageIds.value)
+    // We should probably show a loading state here
+    
+    // Call API
+    const result = await window.api.albums.copyImages(albumId, ids)
+    
+    if (result.success) {
+      // Show success notification or toast (using native alert for now or status update)
+      console.log(`Successfully copied ${result.count} images.`)
+      
+      // Optional: Clear selection after copy? or keep it? 
+      // User might want to do other things. Let's keep it but maybe show feedback.
+      // Ideally we should use a toast notification system here.
+      alert(`Successfully copied ${result.count} images to destination.`)
+      clearSelection()
+    } else {
+      if (result.error !== 'Operation canceled') {
+         console.error('Copy failed:', result.error)
+         alert(`Failed to copy images: ${result.error}`)
+      }
+    }
+  } catch (err) {
+    console.error('Failed to copy images:', err)
+    alert('An unexpected error occurred while copying images.')
+  }
+}
+
 // Computed
 const filteredImages = computed(() => {
   if (!showFavoritesOnly.value) return images.value
@@ -626,161 +693,223 @@ onUnmounted(() => {
         </aside>
 
         <!-- Right Grid Area -->
-        <main class="flex-1 overflow-y-auto bg-slate-50 p-4 md:p-8">
-          <!-- Grid Loading State -->
+        <main class="flex-1 overflow-y-auto bg-slate-50 relative">
+          <!-- Selection Header (Sticky) -->
           <div
-            v-if="gridLoading"
-            class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
+            v-if="isSelectionMode"
+            class="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 md:px-8 py-3 flex items-center justify-between shadow-sm animate-fade-in"
           >
-            <div
-              v-for="i in 10"
-              :key="i"
-              class="aspect-[4/5] rounded-xl bg-slate-200 animate-pulse"
-            ></div>
-          </div>
-
-          <!-- Empty State -->
-          <div
-            v-else-if="filteredImages.length === 0"
-            class="h-full flex flex-col items-center justify-center text-center p-8 opacity-60"
-          >
-            <div
-              class="w-20 h-20 bg-slate-200 rounded-full flex items-center justify-center mb-6 text-4xl"
-            >
-              {{ showFavoritesOnly ? '💔' : '📷' }}
-            </div>
-            <h2 class="text-xl font-bold text-slate-900 mb-2">
-              {{ showFavoritesOnly ? 'No Favorites Yet' : 'No Photos Found' }}
-            </h2>
-            <p class="text-slate-500 max-w-xs">
-              {{
-                showFavoritesOnly
-                  ? 'Clients have not favorited any photos in this album yet.'
-                  : 'This album seems to be empty.'
-              }}
-            </p>
-            <button
-              v-if="showFavoritesOnly"
-              class="mt-6 px-6 py-2 bg-white border border-slate-200 rounded-full text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
-              @click="toggleShowFavorites"
-            >
-              View All Photos
-            </button>
-          </div>
-
-          <!-- Image Grid (Photoswipe) -->
-          <div
-            v-else
-            id="gallery"
-            class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
-          >
-            <a
-              v-for="image in displayedImages"
-              :key="image.id"
-              :href="`file://${image.localFilePath}`"
-              :data-pswp-width="image.width || 1920"
-              :data-pswp-height="image.height || 1280"
-              target="_blank"
-              class="group relative aspect-[4/5] rounded-xl overflow-hidden bg-slate-200 cursor-pointer shadow-sm hover:shadow-md transition-all duration-300 block"
-            >
-              <!-- Failed State Placeholder -->
-              <div
-                v-if="getDisplayStatus(image.uploadStatus) === 'Failed'"
-                class="w-full h-full flex flex-col items-center justify-center bg-slate-100 text-slate-400 p-4"
+            <div class="flex items-center gap-4">
+              <button
+                class="p-2 -ml-2 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"
+                title="Cancel Selection"
+                @click="clearSelection"
               >
-                <ImageOff class="h-10 w-10 mb-2 opacity-50" />
-                <span class="text-xs font-medium text-center">Image Failed</span>
+                <div class="h-5 w-5 flex items-center justify-center font-bold">✕</div>
+              </button>
+              <div class="text-sm font-bold text-slate-700">
+                <span class="text-indigo-600">{{ selectedImageIds.size }}</span> selected
               </div>
+              <div class="h-4 w-px bg-slate-200"></div>
+              <button
+                class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors"
+                @click="selectAll"
+              >
+                Select All
+              </button>
+            </div>
 
-              <!-- Actual Image -->
-              <img
-                v-else
-                :src="`file://${getThumbnailPath(image.localFilePath)}`"
-                :alt="image.originalFilename"
-                loading="lazy"
-                class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                @error="
-                  (e) => ((e.target as HTMLImageElement).src = `file://${image.localFilePath}`)
-                "
-              />
+            <div class="flex items-center gap-2">
+              <button
+                class="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold shadow-sm hover:bg-indigo-700 transition-colors"
+                @click="copySelectedImages"
+              >
+                <Copy class="h-4 w-4" />
+                <span>Copy to...</span>
+              </button>
+            </div>
+          </div>
 
-              <!-- Gradient Overlay -->
+          <div class="p-4 md:p-8">
+            <!-- Grid Loading State -->
+            <div
+              v-if="gridLoading"
+              class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
+            >
               <div
-                class="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                v-for="i in 10"
+                :key="i"
+                class="aspect-[4/5] rounded-xl bg-slate-200 animate-pulse"
               ></div>
+            </div>
 
-              <!-- Favorite Badge (Top Right) -->
-              <div v-if="image.isFavorite" class="absolute top-3 right-3 group/fav z-10">
-                <div
-                  class="h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-rose-500 text-white shadow-lg"
+            <!-- Empty State -->
+            <div
+              v-else-if="filteredImages.length === 0"
+              class="h-full flex flex-col items-center justify-center text-center p-8 opacity-60"
+            >
+              <div
+                class="w-20 h-20 bg-slate-200 rounded-full flex items-center justify-center mb-6 text-4xl"
+              >
+                {{ showFavoritesOnly ? '💔' : '📷' }}
+              </div>
+              <h2 class="text-xl font-bold text-slate-900 mb-2">
+                {{ showFavoritesOnly ? 'No Favorites Yet' : 'No Photos Found' }}
+              </h2>
+              <p class="text-slate-500 max-w-xs">
+                {{
+                  showFavoritesOnly
+                    ? 'Clients have not favorited any photos in this album yet.'
+                    : 'This album seems to be empty.'
+                }}
+              </p>
+              <button
+                v-if="showFavoritesOnly"
+                class="mt-6 px-6 py-2 bg-white border border-slate-200 rounded-full text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
+                @click="toggleShowFavorites"
+              >
+                View All Photos
+              </button>
+            </div>
+
+            <!-- Image Grid (Photoswipe) -->
+            <div
+              v-else
+              id="gallery"
+              class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-20"
+            >
+              <div
+                v-for="image in displayedImages"
+                :key="image.id"
+                class="group relative aspect-[4/5] rounded-xl overflow-hidden bg-slate-200 shadow-sm hover:shadow-md transition-all duration-300 select-none"
+                :class="{ 'ring-2 ring-indigo-500 ring-offset-2': selectedImageIds.has(image.id) }"
+              >
+                <a
+                    :href="`file://${image.localFilePath}`"
+                    :data-pswp-width="image.width || 1920"
+                    :data-pswp-height="image.height || 1280"
+                    target="_blank"
+                    class="block w-full h-full cursor-pointer"
+                    @click.capture="handleImageClick($event, image)"
                 >
-                  <Heart class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
-                  <span v-if="(image.favoriteCount || 0) > 0" class="text-xs font-bold">{{
-                    image.favoriteCount
-                  }}</span>
-                </div>
-                <!-- Who favorited tooltip -->
-                <div
-                  v-if="image.favoritedBy && image.favoritedBy.length > 0"
-                  class="absolute top-full right-0 mt-1.5 opacity-0 group-hover/fav:opacity-100 transition-opacity pointer-events-none"
-                >
+                  <!-- Failed State Placeholder -->
                   <div
-                    class="bg-slate-800/95 backdrop-blur-sm text-white text-xs rounded-lg px-3 py-2 shadow-xl whitespace-nowrap"
+                    v-if="getDisplayStatus(image.uploadStatus) === 'Failed'"
+                    class="w-full h-full flex flex-col items-center justify-center bg-slate-100 text-slate-400 p-4"
                   >
-                    <div class="font-medium text-slate-300 mb-1">Favorited by:</div>
-                    <div v-for="name in image.favoritedBy" :key="name" class="text-white">
-                      {{ name }}
+                    <ImageOff class="h-10 w-10 mb-2 opacity-50" />
+                    <span class="text-xs font-medium text-center">Image Failed</span>
+                  </div>
+
+                  <!-- Actual Image -->
+                  <img
+                    v-else
+                    :src="`file://${getThumbnailPath(image.localFilePath)}`"
+                    :alt="image.originalFilename"
+                    loading="lazy"
+                    class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                    @error="
+                      (e) => ((e.target as HTMLImageElement).src = `file://${image.localFilePath}`)
+                    "
+                  />
+
+                  <!-- Gradient Overlay -->
+                  <div
+                    class="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                    :class="{ 'opacity-100': selectedImageIds.has(image.id) }"
+                  ></div>
+                </a>
+
+                <!-- Selection Checkbox (Top Left) -->
+                <div 
+                    class="absolute top-3 left-3 z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                    :class="{ 'opacity-100': selectedImageIds.has(image.id) || isSelectionMode }"
+                    @click.stop
+                >
+                    <div 
+                        class="h-6 w-6 rounded-full border-2 flex items-center justify-center cursor-pointer transition-colors"
+                        :class="selectedImageIds.has(image.id) ? 'bg-indigo-500 border-indigo-500' : 'bg-black/30 border-white hover:bg-black/50'"
+                        @click="toggleSelection(image.id)"
+                    >
+                        <Check v-if="selectedImageIds.has(image.id)" class="h-3.5 w-3.5 text-white stroke-[3]" />
+                    </div>
+                </div>
+
+                <!-- Favorite Badge (Top Right) -->
+                <div v-if="image.isFavorite" class="absolute top-3 right-3 group/fav z-10 pointer-events-none">
+                  <div
+                    class="h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-rose-500 text-white shadow-lg"
+                  >
+                    <Heart class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
+                    <span v-if="(image.favoriteCount || 0) > 0" class="text-xs font-bold">{{
+                      image.favoriteCount
+                    }}</span>
+                  </div>
+                  <!-- Who favorited tooltip -->
+                  <div
+                    v-if="image.favoritedBy && image.favoritedBy.length > 0"
+                    class="absolute top-full right-0 mt-1.5 opacity-0 group-hover/fav:opacity-100 transition-opacity pointer-events-none"
+                  >
+                    <div
+                      class="bg-slate-800/95 backdrop-blur-sm text-white text-xs rounded-lg px-3 py-2 shadow-xl whitespace-nowrap"
+                    >
+                      <div class="font-medium text-slate-300 mb-1">Favorited by:</div>
+                      <div v-for="name in image.favoritedBy" :key="name" class="text-white">
+                        {{ name }}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <!-- Notes Badge (Top Left) -->
-              <button
-                v-if="(image.notesCount || 0) > 0"
-                class="absolute top-3 left-3 h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-indigo-500 text-white shadow-md z-10 hover:bg-indigo-600 transition-colors"
-                @click.stop.prevent="openNotesSidebar(image)"
-              >
-                <MessageSquare class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
-                <span class="text-xs font-bold">{{ image.notesCount }}</span>
-              </button>
-
-              <!-- Image Info (Bottom) - Show on hover -->
-              <div
-                class="absolute bottom-3 left-3 right-3 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-              >
-                <p class="text-white text-xs font-medium truncate flex-1 mr-2">
-                  {{ image.originalFilename }}
-                </p>
+                <!-- Notes Badge (Top Left - Shifted when selection active) -->
                 <button
-                  class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-sm transition-all hover:bg-white/40"
-                  title="Show Original in Folder"
-                  @click.stop.prevent="showOriginalInFolder(image.id)"
+                  v-if="(image.notesCount || 0) > 0"
+                  class="absolute top-3 h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-indigo-500 text-white shadow-md z-10 hover:bg-indigo-600 transition-colors"
+                  :class="isSelectionMode || selectedImageIds.has(image.id) ? 'left-11' : 'left-3'"
+                  @click.stop.prevent="openNotesSidebar(image)"
                 >
-                  <FolderOpen class="h-3.5 w-3.5" />
+                  <MessageSquare class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
+                  <span class="text-xs font-bold">{{ image.notesCount }}</span>
                 </button>
-              </div>
 
-              <!-- Upload Status Badge -->
-              <div
-                v-if="image.uploadStatus !== 'complete'"
-                class="absolute bottom-3 right-3 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider shadow-sm backdrop-blur-md z-10"
-                :class="{
-                  'bg-blue-500/80 text-white': getDisplayStatus(image.uploadStatus) === 'Processing',
-                  'bg-red-500/80 text-white': getDisplayStatus(image.uploadStatus) === 'Failed'
-                }"
-              >
-                {{ getDisplayStatus(image.uploadStatus) }}
-              </div>
-            </a>
-          </div>
+                <!-- Image Info (Bottom) - Show on hover -->
+                <div
+                  class="absolute bottom-3 left-3 right-3 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                  v-if="!isSelectionMode"
+                >
+                  <p class="text-white text-xs font-medium truncate flex-1 mr-2">
+                    {{ image.originalFilename }}
+                  </p>
+                  <button
+                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-sm transition-all hover:bg-white/40"
+                    title="Show Original in Folder"
+                    @click.stop.prevent="showOriginalInFolder(image.id)"
+                  >
+                    <FolderOpen class="h-3.5 w-3.5" />
+                  </button>
+                </div>
 
-          <!-- Infinite Scroll Trigger -->
-          <div ref="loadMoreTrigger" class="h-10 w-full flex items-center justify-center p-4">
-            <Loader2
-              v-if="displayedImages.length < filteredImages.length"
-              class="h-6 w-6 text-slate-400 animate-spin"
-            />
+                <!-- Upload Status Badge -->
+                <div
+                  v-if="image.uploadStatus !== 'complete'"
+                  class="absolute bottom-3 right-3 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider shadow-sm backdrop-blur-md z-10"
+                  :class="{
+                    'bg-blue-500/80 text-white': getDisplayStatus(image.uploadStatus) === 'Processing',
+                    'bg-red-500/80 text-white': getDisplayStatus(image.uploadStatus) === 'Failed'
+                  }"
+                >
+                  {{ getDisplayStatus(image.uploadStatus) }}
+                </div>
+              </div>
+            </div>
+            
+            <!-- Infinite Scroll Trigger -->
+            <div ref="loadMoreTrigger" class="h-10 w-full flex items-center justify-center p-4">
+              <Loader2
+                v-if="displayedImages.length < filteredImages.length"
+                class="h-6 w-6 text-slate-400 animate-spin"
+              />
+            </div>
           </div>
         </main>
       </div>

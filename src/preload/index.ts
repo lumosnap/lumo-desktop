@@ -53,6 +53,8 @@ const api = {
       ipcRenderer.invoke('album:deleteImage', albumId, imageId),
     deleteImages: (albumId: string, imageIds: number[]): Promise<any> =>
       ipcRenderer.invoke('album:deleteImages', albumId, imageIds),
+    copyImages: (albumId: string, imageIds: number[]): Promise<any> =>
+      ipcRenderer.invoke('album:copyImages', albumId, imageIds),
     scanSourceFolder: (path: string): Promise<any> =>
       ipcRenderer.invoke('album:scanSourceFolder', path),
     startUpload: (albumId: string): Promise<any> =>

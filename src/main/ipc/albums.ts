@@ -2,7 +2,7 @@
  * Album IPC handlers
  */
 
-import { BrowserWindow, ipcMain, shell } from 'electron'
+import { BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { existsSync, rmSync } from 'fs'
 import { join } from 'path'
 import { getStorageLocation } from '../config'
@@ -294,6 +294,61 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       return { success: true, deletedCount: imageIds.length }
     } catch (error: unknown) {
       logger.error('Failed to delete images:', getErrorMessage(error))
+      return { success: false, error: getErrorMessage(error) }
+    }
+  })
+
+  ipcMain.handle('album:copyImages', async (_event, albumId: string, imageIds: number[]) => {
+    try {
+      const album = getAlbum(albumId)
+      if (!album) {
+        return { success: false, error: 'Album not found' }
+      }
+
+      const images = getAlbumImages(albumId)
+      const imagesToCopy = images.filter((img) => imageIds.includes(img.id))
+
+      if (imagesToCopy.length === 0) {
+        return { success: false, error: 'No images selected' }
+      }
+
+      const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        title: 'Select Destination Folder',
+        properties: ['openDirectory', 'createDirectory']
+      })
+
+      if (canceled || filePaths.length === 0) {
+        return { success: false, error: 'Operation canceled' }
+      }
+
+      const destinationDir = filePaths[0]
+      let successCount = 0
+      let errorCount = 0
+
+      // Dynamically import fs/promises to avoid top-level await issues if any
+      const { copyFile } = await import('fs/promises')
+
+      for (const img of imagesToCopy) {
+        try {
+          const sourcePath = join(album.sourceFolderPath, img.originalFilename)
+          const destPath = join(destinationDir, img.originalFilename)
+
+          if (existsSync(sourcePath)) {
+            await copyFile(sourcePath, destPath)
+            successCount++
+          } else {
+            logger.warn(`Source file not found: ${sourcePath}`)
+            errorCount++
+          }
+        } catch (err) {
+          logger.error(`Failed to copy image ${img.originalFilename}:`, getErrorMessage(err))
+          errorCount++
+        }
+      }
+
+      return { success: true, count: successCount, errorCount }
+    } catch (error: unknown) {
+      logger.error('Failed to copy images:', getErrorMessage(error))
       return { success: false, error: getErrorMessage(error) }
     }
   })

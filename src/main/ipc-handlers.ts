@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell } from 'electron'
+import { ipcMain, BrowserWindow, shell, dialog } from 'electron'
 import {
   isConfigured,
   getStorageLocation,
@@ -739,6 +739,65 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       const message = error instanceof Error ? error.message : 'Unknown error'
       console.error('[IPC] Failed to delete images:', message)
       return { success: false, error: message }
+    }
+  })
+
+  ipcMain.handle('album:copyImages', async (_event, albumId: string, imageIds: number[]) => {
+    try {
+      // Get album to find source folder
+      const album = getAlbum(albumId)
+      if (!album) {
+        return { success: false, error: 'Album not found' }
+      }
+
+      // Get images to be copied
+      const images = getAlbumImages(albumId)
+      const imagesToCopy = images.filter((img) => imageIds.includes(img.id))
+
+      if (imagesToCopy.length === 0) {
+        return { success: false, error: 'No images selected' }
+      }
+
+      // Open dialog for user to select destination
+      const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        title: 'Select Destination Folder',
+        properties: ['openDirectory', 'createDirectory']
+      })
+
+      if (canceled || filePaths.length === 0) {
+        return { success: false, error: 'Operation canceled' }
+      }
+
+      const destinationDir = filePaths[0]
+      let successCount = 0
+      let errorCount = 0
+
+      // Perform copy
+      const { copyFile } = await import('fs/promises')
+      
+      for (const img of imagesToCopy) {
+        try {
+          // Construct source path: album source folder + original filename
+          const sourcePath = join(album.sourceFolderPath, img.originalFilename)
+          const destPath = join(destinationDir, img.originalFilename)
+
+          if (existsSync(sourcePath)) {
+            await copyFile(sourcePath, destPath)
+            successCount++
+          } else {
+            console.warn(`[IPC] Source file not found: ${sourcePath}`)
+            errorCount++
+          }
+        } catch (err) {
+          console.error(`[IPC] Failed to copy image ${img.originalFilename}:`, err)
+          errorCount++
+        }
+      }
+
+      return { success: true, count: successCount, errorCount }
+    } catch (error: any) {
+      console.error('Failed to copy images:', error)
+      return { success: false, error: error.message }
     }
   })
 
