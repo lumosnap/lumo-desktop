@@ -6,21 +6,23 @@ import {
   Aperture,
   Cloud,
   Image,
-  FolderOpen,
-  Folder,
-  Search,
   Zap,
   ArrowRight,
   Loader2,
   ExternalLink
+  /* FolderOpen,
+  Folder,
+  Search */
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
 const currentStep = ref(0)
+/*
 const selectedFolder = ref<string | null>(null)
 const isSelectingFolder = ref(false)
+*/
 
 const steps = [
   {
@@ -37,13 +39,15 @@ const steps = [
     btn: 'Connect to LumoSnap',
     progress: 45
   },
+  /* 
   {
     step: 'Optimization',
     title: 'Watch Folder',
-    desc: "Where should LumoSnap watch for new images? We'll automatically import and optimize photos added here.",
+    desc: "Optionally, choose a folder for LumoSnap to watch. We'll automatically import and optimize photos added here. You can also set this up later.",
     btn: 'Confirm Folder',
     progress: 80
   },
+  */
   {
     step: 'Complete',
     title: "You're All Set!",
@@ -56,7 +60,7 @@ const steps = [
 const currentStepData = computed(() => steps[currentStep.value])
 const isNextDisabled = computed(() => {
   if (currentStep.value === 1 && authStore.loading) return true
-  if (currentStep.value === 2 && !selectedFolder.value) return true
+  // Step 2 (Watch Folder) is now optional, so no check needed
   return false
 })
 
@@ -69,13 +73,14 @@ async function handleNext(): Promise<void> {
     } catch (e) {
       console.error('Auth failed:', e)
     }
-  } else if (currentStep.value === 2) {
-    // Folder step - save master folder
+  } /* else if (currentStep.value === 2) {
+    // Folder step - save master folder (optional)
     if (selectedFolder.value) {
       await window.api.config.setMasterFolder(selectedFolder.value)
-      currentStep.value++
     }
-  } else if (currentStep.value === 3) {
+    // Always proceed
+    currentStep.value++
+  } */ else if (currentStep.value === 2) {
     // Complete - launch app
     router.push('/albums')
   } else {
@@ -83,6 +88,7 @@ async function handleNext(): Promise<void> {
   }
 }
 
+/*
 async function selectFolder(): Promise<void> {
   isSelectingFolder.value = true
   try {
@@ -94,6 +100,7 @@ async function selectFolder(): Promise<void> {
     isSelectingFolder.value = false
   }
 }
+*/
 
 function handleCancel(): void {
   authStore.loading = false
@@ -131,6 +138,7 @@ function handleCancel(): void {
         </div>
 
         <!-- Step 2: Folder -->
+        <!-- 
         <div class="stage-visual" :class="{ active: currentStep === 2 }">
           <div class="folder-viz">
             <FolderOpen :size="48" class="text-zinc-400" />
@@ -139,9 +147,10 @@ function handleCancel(): void {
             </div>
           </div>
         </div>
+        -->
 
         <!-- Step 3: Complete -->
-        <div class="stage-visual" :class="{ active: currentStep === 3 }">
+        <div class="stage-visual" :class="{ active: currentStep === 2 }">
           <div class="delight-container">
             <div class="confetti c1"></div>
             <div class="confetti c2"></div>
@@ -188,6 +197,7 @@ function handleCancel(): void {
             </div>
 
             <!-- Step 2: Folder Picker -->
+            <!-- 
             <div v-if="currentStep === 2" class="folder-select-ui" @click="selectFolder">
               <div class="folder-icon-box">
                 <Folder :size="16" />
@@ -199,6 +209,7 @@ function handleCancel(): void {
               </div>
               <div class="folder-action">Change</div>
             </div>
+            -->
           </div>
 
           <!-- Progress Bar -->
@@ -219,7 +230,7 @@ function handleCancel(): void {
               </template>
               <span>{{ currentStepData.btn }}</span>
               <ArrowRight
-                v-if="currentStep !== 3 && !(currentStep === 1 && !authStore.loading)"
+                v-if="currentStep !== 2 && !(currentStep === 1 && !authStore.loading)"
                 :size="16"
               />
             </button>

@@ -55,12 +55,12 @@ const albumType = computed<'watch_folder' | 'standalone'>(() => {
   if (!sourceFolderPath.value) {
     return 'watch_folder' // Default: create in master folder
   }
-  
+
   // Check if selected folder is inside master folder
   if (masterFolder.value && sourceFolderPath.value.startsWith(masterFolder.value)) {
     return 'watch_folder'
   }
-  
+
   return 'standalone'
 })
 
@@ -87,7 +87,16 @@ const limitWarning = computed(() => {
 
 // Check if form is valid
 const isFormValid = computed(() => {
-  return title.value.trim().length > 0
+  const hasTitle = title.value.trim().length > 0
+
+  // If master folder is configured, source folder is optional (defaults to creating in master)
+  // If master folder is NOT configured, source folder is REQUIRED
+  if (masterFolder.value) {
+    return hasTitle
+  }
+
+  // No master folder = must pick source folder
+  return hasTitle && sourceFolderPath.value.trim().length > 0
 })
 
 async function selectFolder(): Promise<void> {
@@ -248,8 +257,13 @@ function handleClose(): void {
 
         <p class="mt-2 text-xs text-slate-500">
           <template v-if="!sourceFolderPath">
-            Leave empty to create a new folder in your watch folder, or select an existing folder
-            with photos.
+            <span v-if="masterFolder">
+              Leave empty to create a new folder in your watch folder, or select an existing folder
+              with photos.
+            </span>
+            <span v-else class="text-amber-600 font-medium">
+              You must select a source folder because no Watch Folder is configured.
+            </span>
           </template>
           <template v-else-if="albumType === 'standalone'">
             <span class="text-indigo-600 font-medium">Standalone album:</span> This folder will be
@@ -280,8 +294,13 @@ function handleClose(): void {
             later will be detected automatically.
           </template>
           <template v-else>
-            A folder will be created in your watch folder. Add photos to it and they'll be
-            automatically detected and processed.
+            <span v-if="masterFolder">
+              A folder will be created in your watch folder. Add photos to it and they'll be
+              automatically detected and processed.
+            </span>
+            <span v-else>
+              Please select a folder on your computer that contains the photos you want to import.
+            </span>
           </template>
         </p>
       </div>
