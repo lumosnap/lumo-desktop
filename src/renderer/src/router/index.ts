@@ -65,14 +65,9 @@ router.beforeEach(async (to, _from, next) => {
     await authStore.checkSession()
   }
 
-  // Check if master folder is configured (setup complete)
-  let isSetupComplete = false
-  try {
-    const masterFolder = await window.api.config.getMasterFolder()
-    isSetupComplete = !!masterFolder
-  } catch {
-    isSetupComplete = false
-  }
+  // Setup wizard no longer requires selecting a master folder.
+  // Treat onboarding as complete once authentication succeeds.
+  const isSetupComplete = authStore.isAuthenticated
 
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
   const requiresSetup = to.matched.some((record) => record.meta.requiresSetup)
@@ -83,12 +78,8 @@ router.beforeEach(async (to, _from, next) => {
   if (requiresAuth && requiresSetup && !isSetupComplete && !authStore.isAuthenticated) {
     next('/setup')
   }
-  // Authenticated but setup not complete: redirect to setup
-  else if (requiresSetup && authStore.isAuthenticated && !isSetupComplete) {
-    next('/setup')
-  }
   // Setup page but already completed: redirect to albums
-  else if (setupOnly && isSetupComplete && authStore.isAuthenticated) {
+  else if (setupOnly && isSetupComplete) {
     next('/albums')
   }
   // Protected route without auth: redirect to login

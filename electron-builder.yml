@@ -27,8 +27,15 @@ files:
 
 asarUnpack:
   - resources/**
-  - '**/node_modules/sharp/**/*'
-  - '**/node_modules/@img/**/*'
+  # Keep JS package metadata inside app.asar, unpack only native binaries.
+  - '**/node_modules/sharp/**/*.node'
+  - '**/node_modules/sharp/**/*.dylib'
+  - '**/node_modules/sharp/**/*.so'
+  - '**/node_modules/sharp/**/*.dll'
+  - '**/node_modules/@img/**/*.node'
+  - '**/node_modules/@img/**/*.dylib'
+  - '**/node_modules/@img/**/*.so'
+  - '**/node_modules/@img/**/*.dll'
 
 extraResources:
   - from: "build/icon.ico"
