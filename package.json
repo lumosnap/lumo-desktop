@@ -70,6 +70,17 @@
     "vue-tsc": "^3.0.7"
   },
   "pnpm": {
+    "supportedArchitectures": {
+      "os": [
+        "current",
+        "darwin"
+      ],
+      "cpu": [
+        "current",
+        "x64",
+        "arm64"
+      ]
+    },
     "onlyBuiltDependencies": [
       "electron",
       "esbuild"
