@@ -7,6 +7,24 @@ const api = {
       ipcRenderer.invoke('auth:getStoredAuth'),
     startAuth: (): Promise<{ success: boolean; user?: any; error?: string }> =>
       ipcRenderer.invoke('auth:startAuth'),
+    requestDeviceCode: (): Promise<{
+      success: boolean
+      device_code?: string
+      user_code?: string
+      verification_uri?: string
+      verification_uri_complete?: string
+      expires_in?: number
+      interval?: number
+      error?: string
+    }> => ipcRenderer.invoke('auth:requestDeviceCode'),
+    pollDeviceToken: (deviceCode: string): Promise<{
+      success: boolean
+      pending?: boolean
+      error?: string
+      error_description?: string
+      interval?: number
+      user?: any
+    }> => ipcRenderer.invoke('auth:pollDeviceToken', deviceCode),
     logout: (): Promise<{ success: boolean }> => ipcRenderer.invoke('auth:logout')
   },
   config: {

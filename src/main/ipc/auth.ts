@@ -3,7 +3,7 @@
  */
 
 import { ipcMain } from 'electron'
-import { startAuth } from '../oauth-handler'
+import { startAuth, requestDeviceCode, pollDeviceToken } from '../oauth-handler'
 import { getAuth, clearAuth } from '../auth-storage'
 import { createLogger } from '../logger'
 
@@ -23,6 +23,15 @@ export function registerAuthHandlers(): void {
     logger.info('Starting auth flow')
     const result = await startAuth()
     return result
+  })
+
+  ipcMain.handle('auth:requestDeviceCode', async () => {
+    logger.info('Requesting device authorization code')
+    return requestDeviceCode()
+  })
+
+  ipcMain.handle('auth:pollDeviceToken', async (_event, deviceCode: string) => {
+    return pollDeviceToken(deviceCode)
   })
 
   ipcMain.handle('auth:logout', () => {

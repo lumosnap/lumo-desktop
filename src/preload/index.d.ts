@@ -15,6 +15,24 @@ declare global {
           user?: { id: string; email: string; name: string; image?: string }
           error?: string
         }>
+        requestDeviceCode: () => Promise<{
+          success: boolean
+          device_code?: string
+          user_code?: string
+          verification_uri?: string
+          verification_uri_complete?: string
+          expires_in?: number
+          interval?: number
+          error?: string
+        }>
+        pollDeviceToken: (deviceCode: string) => Promise<{
+          success: boolean
+          pending?: boolean
+          error?: string
+          error_description?: string
+          interval?: number
+          user?: { id: string; email: string; name: string; image?: string }
+        }>
         logout: () => Promise<{ success: boolean }>
       }
       config: {

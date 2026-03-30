@@ -19,6 +19,44 @@ export interface AuthResult {
   error?: string
 }
 
+export interface DeviceCodeResult {
+  success: boolean
+  device_code?: string
+  user_code?: string
+  verification_uri?: string
+  verification_uri_complete?: string
+  expires_in?: number
+  interval?: number
+  error?: string
+}
+
+export interface DeviceTokenResult {
+  success: boolean
+  pending?: boolean
+  error?: string
+  error_description?: string
+  interval?: number
+  user?: StoredUser
+}
+
+interface DeviceCodeApiResponse {
+  device_code: string
+  user_code: string
+  verification_uri: string
+  verification_uri_complete: string
+  expires_in: number
+  interval: number
+}
+
+interface DeviceTokenApiResponse {
+  access_token?: string
+  token_type?: string
+  expires_in?: number
+  scope?: string
+  error?: string
+  error_description?: string
+}
+
 /**
  * Find an available port for the callback server
  */
@@ -38,6 +76,154 @@ async function findAvailablePort(startPort: number = 9876): Promise<number> {
       resolve(findAvailablePort(startPort + 1))
     })
   })
+}
+
+function getBackendBase(): string {
+  return process.env.BACKEND_BASE || 'https://backend.lumosnap.com'
+}
+
+function getDeviceClientId(): string {
+  return process.env.DEVICE_CLIENT_ID || 'lumosnap-desktop'
+}
+
+async function postJson<T>(url: string, body: object): Promise<{ ok: boolean; status: number; data: T }> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  })
+
+  const data = (await response.json()) as T
+  return { ok: response.ok, status: response.status, data }
+}
+
+function toBase64(input: string): string {
+  return input.replace(/-/g, '+').replace(/_/g, '/')
+}
+
+function parseJwtClaims(token: string): Record<string, unknown> | null {
+  const parts = token.split('.')
+  if (parts.length < 2) {
+    return null
+  }
+
+  try {
+    const decoded = Buffer.from(toBase64(parts[1]), 'base64').toString('utf-8')
+    return JSON.parse(decoded) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function toSafeString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null
+}
+
+function buildUserFromToken(accessToken: string): StoredUser {
+  const claims = parseJwtClaims(accessToken) || {}
+  const id = toSafeString(claims.sub) || toSafeString(claims.user_id) || `device-${Date.now()}`
+  const email =
+    toSafeString(claims.email) ||
+    toSafeString(claims.preferred_username) ||
+    `${id}@lumosnap.local`
+  const name = toSafeString(claims.name) || email.split('@')[0]
+  const image = toSafeString(claims.picture) || undefined
+
+  return { id, email, name, image }
+}
+
+/**
+ * Request a device code for manual device authorization flow.
+ */
+export async function requestDeviceCode(): Promise<DeviceCodeResult> {
+  try {
+    const response = await postJson<DeviceCodeApiResponse>(
+      `${getBackendBase()}/api/auth/device/code`,
+      {
+        client_id: getDeviceClientId(),
+        scope: 'openid profile email'
+      }
+    )
+    if (!response.ok) {
+      return {
+        success: false,
+        error: 'Failed to request device code'
+      }
+    }
+    const payload = response.data
+
+    return {
+      success: true,
+      device_code: payload.device_code,
+      user_code: payload.user_code,
+      verification_uri: payload.verification_uri,
+      verification_uri_complete: payload.verification_uri_complete,
+      expires_in: payload.expires_in,
+      interval: payload.interval
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to request device code'
+    }
+  }
+}
+
+/**
+ * Poll device token endpoint once.
+ * Caller controls retry cadence using `interval`.
+ */
+export async function pollDeviceToken(deviceCode: string): Promise<DeviceTokenResult> {
+  try {
+    const response = await postJson<DeviceTokenApiResponse>(
+      `${getBackendBase()}/api/auth/device/token`,
+      {
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+        device_code: deviceCode,
+        client_id: getDeviceClientId()
+      }
+    )
+    const payload = response.data
+
+    if (response.ok && payload.access_token) {
+      const user = buildUserFromToken(payload.access_token)
+      saveAuth(payload.access_token, user)
+      notificationService.authConnected(user.name || user.email)
+      return { success: true, user }
+    }
+
+    const code = payload.error
+    if (code === 'authorization_pending') {
+      return {
+        success: false,
+        pending: true,
+        error: code,
+        error_description: payload.error_description
+      }
+    }
+    if (code === 'slow_down') {
+      return {
+        success: false,
+        pending: true,
+        error: code,
+        error_description: payload.error_description,
+        interval: 10
+      }
+    }
+
+    return {
+      success: false,
+      error: code || payload.error_description || 'Device authorization failed',
+      error_description: payload.error_description
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown device auth polling error'
+    }
+  }
 }
 
 /**

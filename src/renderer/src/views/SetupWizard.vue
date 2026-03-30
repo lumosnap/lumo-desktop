@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import {
@@ -58,20 +58,108 @@ const steps = [
 ]
 
 const currentStepData = computed(() => steps[currentStep.value])
+
+type DeviceAuthData = {
+  deviceCode: string
+  userCode: string
+  verificationUri: string
+  verificationUriComplete: string
+  expiresIn: number
+  interval: number
+}
+
+const deviceAuth = ref<DeviceAuthData | null>(null)
+const deviceAuthError = ref<string | null>(null)
+const stopDevicePolling = ref(false)
+
 const isNextDisabled = computed(() => {
   if (currentStep.value === 1 && authStore.loading) return true
   // Step 2 (Watch Folder) is now optional, so no check needed
   return false
 })
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function formatExpiry(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60))
+  return `${minutes} min`
+}
+
+async function pollDeviceAuth(data: DeviceAuthData): Promise<'device'> {
+  let pollInterval = Math.max(2, data.interval || 5)
+  const expiryAt = Date.now() + data.expiresIn * 1000
+
+  while (!stopDevicePolling.value && Date.now() < expiryAt) {
+    const result = await window.api.auth.pollDeviceToken(data.deviceCode)
+
+    if (result.success) {
+      await authStore.checkSession()
+      return 'device'
+    }
+
+    if (result.pending) {
+      if (result.interval) {
+        pollInterval = Math.max(2, result.interval)
+      } else if (result.error === 'slow_down') {
+        pollInterval += 2
+      }
+      await sleep(pollInterval * 1000)
+      continue
+    }
+
+    throw new Error(result.error_description || result.error || 'Device authorization failed')
+  }
+
+  throw new Error('Device authorization timed out')
+}
+
 async function handleNext(): Promise<void> {
   if (currentStep.value === 1) {
     // Connect step - start auth
     try {
-      await authStore.startAuth()
+      stopDevicePolling.value = false
+      deviceAuth.value = null
+      deviceAuthError.value = null
+      authStore.error = null
+
+      const browserAuthPromise = authStore.startAuth().then(() => 'browser' as const)
+      const authAttempts: Array<Promise<'browser' | 'device'>> = [browserAuthPromise]
+
+      const deviceCode = await window.api.auth.requestDeviceCode()
+      if (
+        deviceCode.success &&
+        deviceCode.device_code &&
+        deviceCode.user_code &&
+        deviceCode.verification_uri &&
+        deviceCode.expires_in
+      ) {
+        deviceAuth.value = {
+          deviceCode: deviceCode.device_code,
+          userCode: deviceCode.user_code,
+          verificationUri: deviceCode.verification_uri,
+          verificationUriComplete: deviceCode.verification_uri_complete || deviceCode.verification_uri,
+          expiresIn: deviceCode.expires_in,
+          interval: deviceCode.interval || 5
+        }
+        authAttempts.push(pollDeviceAuth(deviceAuth.value))
+      } else if (!deviceCode.success) {
+        deviceAuthError.value = deviceCode.error || 'Device code unavailable'
+      }
+
+      await Promise.any(authAttempts)
+      stopDevicePolling.value = true
+      authStore.loading = false
+      authStore.error = null
       currentStep.value++
     } catch (e) {
       console.error('Auth failed:', e)
+      const errors = e instanceof AggregateError ? e.errors : [e]
+      const firstMessage = errors.find((error) => error instanceof Error)?.message
+      if (!authStore.error) {
+        authStore.error = firstMessage || 'Authentication failed. Please try again.'
+      }
     }
   } /* else if (currentStep.value === 2) {
     // Folder step - save master folder (optional)
@@ -103,9 +191,14 @@ async function selectFolder(): Promise<void> {
 */
 
 function handleCancel(): void {
+  stopDevicePolling.value = true
   authStore.loading = false
   authStore.error = 'Authentication cancelled. You can try again.'
 }
+
+onBeforeUnmount(() => {
+  stopDevicePolling.value = true
+})
 </script>
 
 <template>
@@ -189,6 +282,27 @@ function handleCancel(): void {
               </div>
               <button class="btn-cancel" @click="handleCancel">Cancel</button>
               <p class="hint-text">Complete the sign-in in your browser, then return here.</p>
+
+              <div v-if="deviceAuth" class="device-auth-box">
+                <p class="device-auth-title">Fallback: authenticate with device code</p>
+                <p class="device-auth-subtitle">
+                  If browser callback fails, open the URL below and enter this code.
+                </p>
+                <div class="device-auth-code">{{ deviceAuth.userCode }}</div>
+                <a
+                  class="device-auth-link"
+                  :href="deviceAuth.verificationUriComplete || deviceAuth.verificationUri"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ deviceAuth.verificationUriComplete || deviceAuth.verificationUri }}
+                </a>
+                <p class="device-auth-expiry">
+                  Code expires in {{ formatExpiry(deviceAuth.expiresIn) }}.
+                </p>
+              </div>
+
+              <div v-if="deviceAuthError" class="device-auth-error">{{ deviceAuthError }}</div>
             </div>
 
             <!-- Step 1: Error State -->
@@ -673,6 +787,70 @@ p {
   color: var(--zinc-400);
   text-align: center;
   margin: 0;
+}
+
+.device-auth-box {
+  margin-top: 4px;
+  padding: 14px;
+  border: 1px solid var(--zinc-200);
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.device-auth-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--zinc-900);
+}
+
+.device-auth-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--zinc-500);
+  line-height: 1.4;
+}
+
+.device-auth-code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--zinc-900);
+  background: var(--zinc-100);
+  border: 1px solid var(--zinc-200);
+  border-radius: 8px;
+  text-align: center;
+  padding: 10px 12px;
+}
+
+.device-auth-link {
+  font-size: 12px;
+  color: var(--violet-600);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.device-auth-link:hover {
+  text-decoration: underline;
+}
+
+.device-auth-expiry {
+  margin: 0;
+  font-size: 11px;
+  color: var(--zinc-400);
+}
+
+.device-auth-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  font-size: 12px;
 }
 
 .error-box {
