@@ -1,24 +1,144 @@
 <script setup lang="ts">
+import { ref, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { Cloud, Image, ExternalLink, Loader2 } from 'lucide-vue-next'
+import { Cloud, Image, ExternalLink, Loader2, Copy, Check } from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
-const handleConnect = async (): Promise<void> => {
+type DeviceAuthData = {
+  deviceCode: string
+  userCode: string
+  verificationUri: string
+  verificationUriComplete: string
+  expiresIn: number
+  interval: number
+}
+
+const deviceAuth = ref<DeviceAuthData | null>(null)
+const deviceAuthError = ref<string | null>(null)
+const stopDevicePolling = ref(false)
+const codeCopied = ref(false)
+let copyResetTimer: ReturnType<typeof setTimeout> | null = null
+
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
+
+const formatExpiry = (seconds: number): string => `${Math.max(1, Math.round(seconds / 60))} min`
+
+const copyDeviceCode = async (): Promise<void> => {
+  if (!deviceAuth.value?.userCode) return
+
+  const text = deviceAuth.value.userCode
   try {
-    await authStore.startAuth()
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const input = document.createElement('textarea')
+      input.value = text
+      input.style.position = 'fixed'
+      input.style.opacity = '0'
+      document.body.appendChild(input)
+      input.focus()
+      input.select()
+      document.execCommand('copy')
+      document.body.removeChild(input)
+    }
+    codeCopied.value = true
+    if (copyResetTimer) clearTimeout(copyResetTimer)
+    copyResetTimer = setTimeout(() => {
+      codeCopied.value = false
+    }, 1800)
+  } catch {
+    authStore.error = 'Could not copy code. Please copy it manually.'
+  }
+}
+
+const pollDeviceAuth = async (data: DeviceAuthData): Promise<void> => {
+  let pollInterval = Math.max(2, data.interval || 5)
+  const expiryAt = Date.now() + data.expiresIn * 1000
+
+  while (!stopDevicePolling.value && Date.now() < expiryAt) {
+    const result = await window.api.auth.pollDeviceToken(data.deviceCode)
+
+    if (result.success) {
+      await authStore.checkSession()
+      return
+    }
+
+    if (result.pending) {
+      if (result.interval) {
+        pollInterval = Math.max(2, result.interval)
+      } else if (result.error === 'slow_down') {
+        pollInterval += 2
+      }
+      await sleep(pollInterval * 1000)
+      continue
+    }
+
+    throw new Error(result.error_description || result.error || 'Device authorization failed')
+  }
+
+  throw new Error('Device authorization timed out')
+}
+
+const handleConnect = async (): Promise<void> => {
+  authStore.loading = true
+  try {
+    stopDevicePolling.value = false
+    authStore.error = null
+    deviceAuthError.value = null
+    deviceAuth.value = null
+
+    const codeResult = await window.api.auth.requestDeviceCode()
+    if (
+      codeResult.success &&
+      codeResult.device_code &&
+      codeResult.user_code &&
+      codeResult.verification_uri &&
+      codeResult.expires_in
+    ) {
+      deviceAuth.value = {
+        deviceCode: codeResult.device_code,
+        userCode: codeResult.user_code,
+        verificationUri: codeResult.verification_uri,
+        verificationUriComplete: codeResult.verification_uri_complete || codeResult.verification_uri,
+        expiresIn: codeResult.expires_in,
+        interval: codeResult.interval || 5
+      }
+    } else {
+      throw new Error(codeResult.error || 'Device code unavailable')
+    }
+
+    if (!deviceAuth.value) {
+      throw new Error('Device code unavailable')
+    }
+    await pollDeviceAuth(deviceAuth.value)
     router.push('/albums')
   } catch (e: unknown) {
     console.error('Auth failed:', e)
+    const message = e instanceof Error ? e.message : 'Authentication failed. Please try again.'
+    authStore.error = message
+    deviceAuthError.value = message
+  } finally {
+    authStore.loading = false
   }
 }
 
 const handleCancel = (): void => {
+  stopDevicePolling.value = true
   authStore.loading = false
   authStore.error = 'Authentication cancelled. You can try again.'
 }
+
+onBeforeUnmount(() => {
+  stopDevicePolling.value = true
+  if (copyResetTimer) {
+    clearTimeout(copyResetTimer)
+    copyResetTimer = null
+  }
+})
 </script>
 
 <template>
@@ -43,25 +163,71 @@ const handleCancel = (): void => {
 
       <!-- Right: Content Pane -->
       <div class="content-pane">
-        <div class="text-container">
-          <span class="step-indicator">Welcome Back</span>
-          <h1>Connect to Cloud</h1>
-          <p>
-            Sign in to your LumoSnap account to access your albums and continue where you left off.
-          </p>
-        </div>
+        <div class="content-scroll">
+          <div class="text-container">
+            <span class="step-indicator">Welcome Back</span>
+            <h1>Connect to Cloud</h1>
+            <p>
+              Sign in to your LumoSnap account to access your albums and continue where you left
+              off.
+            </p>
+          </div>
 
-        <div>
           <!-- Dynamic Content Area -->
           <div class="dynamic-area">
             <!-- Loading State -->
             <div v-if="authStore.loading" class="auth-waiting">
               <div class="waiting-box">
                 <Loader2 class="animate-spin" :size="20" />
-                <span>Waiting for browser authentication...</span>
+                <span>Waiting for device authorization...</span>
               </div>
               <button class="btn-cancel" @click="handleCancel">Cancel</button>
-              <p class="hint-text">Complete the sign-in in your browser, then return here.</p>
+              <p class="hint-text">We are listening for approval. If needed, use the manual code below.</p>
+
+              <div v-if="deviceAuth" class="auth-divider"><span>OR</span></div>
+
+              <div v-if="deviceAuth" class="device-auth-box">
+                <div class="device-auth-topline">
+                  <span class="device-auth-kicker">Alternate Sign-In</span>
+                  <span class="device-auth-expiry">Expires in {{ formatExpiry(deviceAuth.expiresIn) }}</span>
+                </div>
+                <div class="device-auth-head">
+                  <div>
+                    <p class="device-auth-title">Use this device code</p>
+                    <p class="device-auth-caption">Open the verification page, paste the code, and come back here.</p>
+                  </div>
+                  <button class="copy-code-btn" type="button" @click="copyDeviceCode">
+                    <Check v-if="codeCopied" :size="14" />
+                    <Copy v-else :size="14" />
+                    <span>{{ codeCopied ? 'Copied' : 'Copy code' }}</span>
+                  </button>
+                </div>
+                <div class="device-auth-actions">
+                  <div class="device-auth-code-wrap">
+                    <div class="device-auth-code">{{ deviceAuth.userCode }}</div>
+                  </div>
+                  <a
+                    class="device-open-btn"
+                    :href="deviceAuth.verificationUriComplete"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open Verification Page
+                  </a>
+                </div>
+                <div class="device-link-wrap">
+                  <span class="device-link-label">Verification URL</span>
+                  <a
+                    class="device-auth-link"
+                    :href="deviceAuth.verificationUriComplete"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {{ deviceAuth.verificationUriComplete }}
+                  </a>
+                </div>
+              </div>
+              <div v-if="deviceAuthError" class="device-auth-error">{{ deviceAuthError }}</div>
             </div>
 
             <!-- Error State -->
@@ -108,12 +274,13 @@ const handleCancel = (): void => {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   color: var(--zinc-900);
   background: #f0f2f5;
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   user-select: none;
+  padding: 24px;
 }
 
 /* Ambient Background */
@@ -154,7 +321,9 @@ const handleCancel = (): void => {
   position: relative;
   z-index: 10;
   width: 800px;
-  height: 520px;
+  max-width: min(800px, 100%);
+  min-height: 520px;
+  max-height: calc(100vh - 48px);
   background: var(--white);
   border-radius: 12px;
   box-shadow:
@@ -188,11 +357,21 @@ const handleCancel = (): void => {
 /* Content Pane */
 .content-pane {
   flex: 1;
-  padding: 48px;
+  min-width: 0;
+  padding: 40px 32px 28px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   background: white;
+  overflow: hidden;
+}
+
+.content-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Cloud Visual */
@@ -262,50 +441,53 @@ const handleCancel = (): void => {
 }
 
 h1 {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   color: var(--zinc-900);
-  margin-bottom: 12px;
-  letter-spacing: -0.5px;
+  margin-bottom: 14px;
+  letter-spacing: -0.8px;
 }
 
 p {
   font-size: 15px;
   color: var(--zinc-500);
   line-height: 1.5;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 /* Dynamic Area */
 .dynamic-area {
-  min-height: 50px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 /* Auth States */
 .auth-waiting {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .waiting-box {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px;
+  padding: 18px 20px;
   background: var(--zinc-100);
-  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.03);
+  border-radius: 16px;
   color: var(--zinc-500);
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 15px;
 }
 
 .btn-cancel {
-  padding: 12px;
+  align-self: center;
+  padding: 8px 14px;
   background: transparent;
   border: none;
   color: var(--zinc-400);
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   border-radius: 8px;
   transition: all 0.2s;
@@ -321,6 +503,199 @@ p {
   color: var(--zinc-400);
   text-align: center;
   margin: 0;
+  max-width: 320px;
+  align-self: center;
+  line-height: 1.45;
+}
+
+.auth-divider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 6px 0 2px;
+}
+
+.auth-divider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--zinc-200), transparent);
+}
+
+.auth-divider span {
+  position: relative;
+  z-index: 1;
+  padding: 0 12px;
+  background: white;
+  color: var(--zinc-400);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+}
+
+.device-auth-box {
+  padding: 16px;
+  border: 1px solid rgba(124, 58, 237, 0.12);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(245, 243, 255, 0.68) 0%, rgba(255, 255, 255, 0.98) 100%),
+    white;
+  box-shadow:
+    0 18px 40px -32px rgba(124, 58, 237, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.device-auth-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.device-auth-kicker {
+  color: var(--violet-600);
+  font-weight: 700;
+}
+
+.device-auth-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.device-auth-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--zinc-900);
+}
+
+.device-auth-caption {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--zinc-500);
+}
+
+.copy-code-btn {
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  background: white;
+  color: var(--zinc-700);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.copy-code-btn:hover {
+  border-color: var(--violet-400);
+  color: var(--violet-600);
+  box-shadow: 0 10px 20px -18px rgba(124, 58, 237, 0.45);
+}
+
+.device-auth-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.device-auth-code-wrap {
+  flex: 1;
+  border-radius: 16px;
+  border: 1px solid rgba(124, 58, 237, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(244, 244, 245, 0.9) 100%);
+  padding: 16px;
+}
+
+.device-auth-code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--zinc-900);
+  text-align: center;
+  line-height: 1;
+}
+
+.device-open-btn {
+  min-width: 148px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--violet-600), var(--violet-500));
+  color: white;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+  box-shadow: 0 18px 28px -22px rgba(124, 58, 237, 0.65);
+}
+
+.device-open-btn:hover {
+  filter: brightness(1.03);
+}
+
+.device-link-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.device-link-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--zinc-400);
+}
+
+.device-auth-link {
+  font-size: 12px;
+  color: var(--violet-600);
+  text-decoration: none;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.device-auth-link:hover {
+  text-decoration: underline;
+}
+
+.device-auth-expiry {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--zinc-400);
+  white-space: nowrap;
+}
+
+.device-auth-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  font-size: 12px;
 }
 
 .error-box {
@@ -354,7 +729,7 @@ p {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 32px;
+  margin-top: 24px;
 }
 
 .btn {
@@ -446,6 +821,47 @@ p {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 860px) {
+  .login-container {
+    padding: 16px;
+    overflow: auto;
+  }
+
+  .window-frame {
+    min-height: 0;
+    max-height: none;
+    flex-direction: column;
+  }
+
+  .visual-pane {
+    width: 100%;
+    min-height: 180px;
+    border-right: none;
+    border-bottom: 1px solid var(--zinc-200);
+  }
+
+  .content-pane {
+    padding: 28px 22px 22px;
+  }
+
+  .device-auth-head,
+  .device-auth-topline,
+  .device-auth-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .copy-code-btn,
+  .device-open-btn {
+    width: 100%;
+  }
+
+  .device-auth-code {
+    font-size: 24px;
+    letter-spacing: 3px;
   }
 }
 </style>

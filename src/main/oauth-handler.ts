@@ -78,15 +78,31 @@ async function findAvailablePort(startPort: number = 9876): Promise<number> {
   })
 }
 
-function getBackendBase(): string {
-  return process.env.BACKEND_BASE || 'https://backend.lumosnap.com'
+function getDeviceAuthBase(): string {
+  const raw =
+    process.env.DEVICE_AUTH_BASE ||
+    process.env.BACKEND_BASE ||
+    process.env.API_URL ||
+    'https://backend.lumosnap.com'
+
+  const noTrailingSlash = raw.replace(/\/+$/, '')
+  if (noTrailingSlash.endsWith('/api/v1')) {
+    return noTrailingSlash.slice(0, -'/api/v1'.length)
+  }
+  if (noTrailingSlash.endsWith('/api')) {
+    return noTrailingSlash.slice(0, -'/api'.length)
+  }
+  return noTrailingSlash
 }
 
 function getDeviceClientId(): string {
   return process.env.DEVICE_CLIENT_ID || 'lumosnap-desktop'
 }
 
-async function postJson<T>(url: string, body: object): Promise<{ ok: boolean; status: number; data: T }> {
+async function postJson<T>(
+  url: string,
+  body: object
+): Promise<{ ok: boolean; status: number; data: T | null; rawText: string }> {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -95,8 +111,18 @@ async function postJson<T>(url: string, body: object): Promise<{ ok: boolean; st
     body: JSON.stringify(body)
   })
 
-  const data = (await response.json()) as T
-  return { ok: response.ok, status: response.status, data }
+  const rawText = await response.text()
+
+  if (!rawText) {
+    return { ok: response.ok, status: response.status, data: null, rawText }
+  }
+
+  try {
+    const data = JSON.parse(rawText) as T
+    return { ok: response.ok, status: response.status, data, rawText }
+  } catch {
+    return { ok: response.ok, status: response.status, data: null, rawText }
+  }
 }
 
 function toBase64(input: string): string {
@@ -140,16 +166,18 @@ function buildUserFromToken(accessToken: string): StoredUser {
 export async function requestDeviceCode(): Promise<DeviceCodeResult> {
   try {
     const response = await postJson<DeviceCodeApiResponse>(
-      `${getBackendBase()}/api/auth/device/code`,
+      `${getDeviceAuthBase()}/api/auth/device/code`,
       {
         client_id: getDeviceClientId(),
         scope: 'openid profile email'
       }
     )
-    if (!response.ok) {
+    if (!response.ok || !response.data) {
       return {
         success: false,
-        error: 'Failed to request device code'
+        error: response.rawText
+          ? `Failed to request device code (HTTP ${response.status})`
+          : `Failed to request device code: empty response (HTTP ${response.status})`
       }
     }
     const payload = response.data
@@ -178,7 +206,7 @@ export async function requestDeviceCode(): Promise<DeviceCodeResult> {
 export async function pollDeviceToken(deviceCode: string): Promise<DeviceTokenResult> {
   try {
     const response = await postJson<DeviceTokenApiResponse>(
-      `${getBackendBase()}/api/auth/device/token`,
+      `${getDeviceAuthBase()}/api/auth/device/token`,
       {
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
         device_code: deviceCode,
@@ -187,11 +215,20 @@ export async function pollDeviceToken(deviceCode: string): Promise<DeviceTokenRe
     )
     const payload = response.data
 
-    if (response.ok && payload.access_token) {
+    if (response.ok && payload?.access_token) {
       const user = buildUserFromToken(payload.access_token)
       saveAuth(payload.access_token, user)
       notificationService.authConnected(user.name || user.email)
       return { success: true, user }
+    }
+
+    if (!payload) {
+      return {
+        success: false,
+        error: response.rawText
+          ? `Device token response was not JSON (HTTP ${response.status})`
+          : `Device token response was empty (HTTP ${response.status})`
+      }
     }
 
     const code = payload.error

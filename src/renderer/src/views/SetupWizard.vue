@@ -9,7 +9,9 @@ import {
   Zap,
   ArrowRight,
   Loader2,
-  ExternalLink
+  ExternalLink,
+  Copy,
+  Check
   /* FolderOpen,
   Folder,
   Search */
@@ -71,6 +73,8 @@ type DeviceAuthData = {
 const deviceAuth = ref<DeviceAuthData | null>(null)
 const deviceAuthError = ref<string | null>(null)
 const stopDevicePolling = ref(false)
+const codeCopied = ref(false)
+let copyResetTimer: ReturnType<typeof setTimeout> | null = null
 
 const isNextDisabled = computed(() => {
   if (currentStep.value === 1 && authStore.loading) return true
@@ -85,6 +89,34 @@ function sleep(ms: number): Promise<void> {
 function formatExpiry(seconds: number): string {
   const minutes = Math.max(1, Math.round(seconds / 60))
   return `${minutes} min`
+}
+
+async function copyDeviceCode(): Promise<void> {
+  if (!deviceAuth.value?.userCode) return
+
+  const text = deviceAuth.value.userCode
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const input = document.createElement('textarea')
+      input.value = text
+      input.style.position = 'fixed'
+      input.style.opacity = '0'
+      document.body.appendChild(input)
+      input.focus()
+      input.select()
+      document.execCommand('copy')
+      document.body.removeChild(input)
+    }
+    codeCopied.value = true
+    if (copyResetTimer) clearTimeout(copyResetTimer)
+    copyResetTimer = setTimeout(() => {
+      codeCopied.value = false
+    }, 1800)
+  } catch {
+    authStore.error = 'Could not copy code. Please copy it manually.'
+  }
 }
 
 async function pollDeviceAuth(data: DeviceAuthData): Promise<'device'> {
@@ -118,14 +150,12 @@ async function pollDeviceAuth(data: DeviceAuthData): Promise<'device'> {
 async function handleNext(): Promise<void> {
   if (currentStep.value === 1) {
     // Connect step - start auth
+    authStore.loading = true
     try {
       stopDevicePolling.value = false
       deviceAuth.value = null
       deviceAuthError.value = null
       authStore.error = null
-
-      const browserAuthPromise = authStore.startAuth().then(() => 'browser' as const)
-      const authAttempts: Array<Promise<'browser' | 'device'>> = [browserAuthPromise]
 
       const deviceCode = await window.api.auth.requestDeviceCode()
       if (
@@ -143,14 +173,16 @@ async function handleNext(): Promise<void> {
           expiresIn: deviceCode.expires_in,
           interval: deviceCode.interval || 5
         }
-        authAttempts.push(pollDeviceAuth(deviceAuth.value))
-      } else if (!deviceCode.success) {
+      } else {
         deviceAuthError.value = deviceCode.error || 'Device code unavailable'
+        throw new Error(deviceAuthError.value)
       }
 
-      await Promise.any(authAttempts)
+      if (!deviceAuth.value) {
+        throw new Error('Device code unavailable')
+      }
+      await pollDeviceAuth(deviceAuth.value)
       stopDevicePolling.value = true
-      authStore.loading = false
       authStore.error = null
       currentStep.value++
     } catch (e) {
@@ -160,6 +192,8 @@ async function handleNext(): Promise<void> {
       if (!authStore.error) {
         authStore.error = firstMessage || 'Authentication failed. Please try again.'
       }
+    } finally {
+      authStore.loading = false
     }
   } /* else if (currentStep.value === 2) {
     // Folder step - save master folder (optional)
@@ -198,6 +232,10 @@ function handleCancel(): void {
 
 onBeforeUnmount(() => {
   stopDevicePolling.value = true
+  if (copyResetTimer) {
+    clearTimeout(copyResetTimer)
+    copyResetTimer = null
+  }
 })
 </script>
 
@@ -278,25 +316,36 @@ onBeforeUnmount(() => {
             <div v-if="currentStep === 1 && authStore.loading" class="auth-waiting">
               <div class="waiting-box">
                 <Loader2 class="animate-spin" :size="20" />
-                <span>Waiting for browser authentication...</span>
+                <span>Waiting for device authorization...</span>
               </div>
               <button class="btn-cancel" @click="handleCancel">Cancel</button>
-              <p class="hint-text">Complete the sign-in in your browser, then return here.</p>
+              <p class="hint-text">Open the URL below, enter the code, then return here.</p>
+
+              <div v-if="deviceAuth" class="auth-divider"><span>OR</span></div>
 
               <div v-if="deviceAuth" class="device-auth-box">
-                <p class="device-auth-title">Fallback: authenticate with device code</p>
-                <p class="device-auth-subtitle">
-                  If browser callback fails, open the URL below and enter this code.
-                </p>
-                <div class="device-auth-code">{{ deviceAuth.userCode }}</div>
-                <a
-                  class="device-auth-link"
-                  :href="deviceAuth.verificationUriComplete || deviceAuth.verificationUri"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {{ deviceAuth.verificationUriComplete || deviceAuth.verificationUri }}
-                </a>
+                <div class="device-auth-head">
+                  <p class="device-auth-title">Authorize with device code</p>
+                  <button class="copy-code-btn" @click="copyDeviceCode">
+                    <Check v-if="codeCopied" :size="14" />
+                    <Copy v-else :size="14" />
+                    <span>{{ codeCopied ? 'Copied' : 'Copy code' }}</span>
+                  </button>
+                </div>
+                <div class="device-auth-code-wrap">
+                  <div class="device-auth-code">{{ deviceAuth.userCode }}</div>
+                </div>
+                <div class="device-link-wrap">
+                  <span class="device-link-label">Verification URL</span>
+                  <a
+                    class="device-auth-link"
+                    :href="deviceAuth.verificationUriComplete || deviceAuth.verificationUri"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {{ deviceAuth.verificationUriComplete || deviceAuth.verificationUri }}
+                  </a>
+                </div>
                 <p class="device-auth-expiry">
                   Code expires in {{ formatExpiry(deviceAuth.expiresIn) }}.
                 </p>
@@ -789,42 +838,108 @@ p {
   margin: 0;
 }
 
+.auth-divider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 4px 0;
+}
+
+.auth-divider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--zinc-200), transparent);
+}
+
+.auth-divider span {
+  position: relative;
+  z-index: 1;
+  padding: 0 12px;
+  background: white;
+  color: var(--zinc-400);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+}
+
 .device-auth-box {
-  margin-top: 4px;
   padding: 14px;
   border: 1px solid var(--zinc-200);
-  border-radius: 10px;
-  background: #fff;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+  box-shadow: 0 8px 20px -16px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+
+.device-auth-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .device-auth-title {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--zinc-900);
 }
 
-.device-auth-subtitle {
-  margin: 0;
+.copy-code-btn {
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--zinc-200);
+  background: white;
+  color: var(--zinc-700);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
   font-size: 12px;
-  color: var(--zinc-500);
-  line-height: 1.4;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.copy-code-btn:hover {
+  border-color: var(--violet-400);
+  color: var(--violet-600);
+}
+
+.device-auth-code-wrap {
+  border-radius: 10px;
+  border: 1px solid var(--zinc-200);
+  background: var(--zinc-100);
+  padding: 12px;
 }
 
 .device-auth-code {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 1.5px;
+  letter-spacing: 2px;
   color: var(--zinc-900);
-  background: var(--zinc-100);
-  border: 1px solid var(--zinc-200);
-  border-radius: 8px;
   text-align: center;
-  padding: 10px 12px;
+}
+
+.device-link-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.device-link-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--zinc-400);
 }
 
 .device-auth-link {
@@ -840,7 +955,7 @@ p {
 
 .device-auth-expiry {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--zinc-400);
 }
 
