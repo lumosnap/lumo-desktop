@@ -1,6 +1,6 @@
 {
   "name": "lumosnap",
-  "version": "0.2.2-alpha",
+  "version": "0.2.3-alpha",
   "description": "LumoSnap Desktop - Photo sharing app for photographers",
   "main": "./out/main/index.js",
   "author": "hello@jithinsha.in, darkwebplayer101@gmail.com",
