@@ -91,6 +91,9 @@ const handleConnect = async (): Promise<void> => {
     deviceAuthError.value = null
     deviceAuth.value = null
 
+    const browserAuthPromise = authStore.startAuth().then(() => 'browser' as const)
+    const authAttempts: Array<Promise<'browser' | 'device'>> = [browserAuthPromise]
+
     const codeResult = await window.api.auth.requestDeviceCode()
     if (
       codeResult.success &&
@@ -107,20 +110,24 @@ const handleConnect = async (): Promise<void> => {
         expiresIn: codeResult.expires_in,
         interval: codeResult.interval || 5
       }
+      authAttempts.push(pollDeviceAuth(deviceAuth.value).then(() => 'device' as const))
     } else {
-      throw new Error(codeResult.error || 'Device code unavailable')
+      deviceAuthError.value = codeResult.error || 'Device code unavailable'
     }
 
-    if (!deviceAuth.value) {
-      throw new Error('Device code unavailable')
-    }
-    await pollDeviceAuth(deviceAuth.value)
+    await Promise.any(authAttempts)
+    stopDevicePolling.value = true
     router.push('/albums')
   } catch (e: unknown) {
     console.error('Auth failed:', e)
-    const message = e instanceof Error ? e.message : 'Authentication failed. Please try again.'
+    const errors = e instanceof AggregateError ? e.errors : [e]
+    const message =
+      errors.find((error) => error instanceof Error)?.message ||
+      'Authentication failed. Please try again.'
     authStore.error = message
-    deviceAuthError.value = message
+    if (!deviceAuthError.value) {
+      deviceAuthError.value = message
+    }
   } finally {
     authStore.loading = false
   }
@@ -179,10 +186,13 @@ onBeforeUnmount(() => {
             <div v-if="authStore.loading" class="auth-waiting">
               <div class="waiting-box">
                 <Loader2 class="animate-spin" :size="20" />
-                <span>Waiting for device authorization...</span>
+                <span>Waiting for browser authentication...</span>
               </div>
               <button class="btn-cancel" @click="handleCancel">Cancel</button>
-              <p class="hint-text">We are listening for approval. If needed, use the manual code below.</p>
+              <p class="hint-text">
+                Complete sign-in in your browser. If the callback does not return, use the manual
+                code below.
+              </p>
 
               <div v-if="deviceAuth" class="auth-divider"><span>OR</span></div>
 

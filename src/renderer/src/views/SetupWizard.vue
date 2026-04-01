@@ -157,6 +157,9 @@ async function handleNext(): Promise<void> {
       deviceAuthError.value = null
       authStore.error = null
 
+      const browserAuthPromise = authStore.startAuth().then(() => 'browser' as const)
+      const authAttempts: Array<Promise<'browser' | 'device'>> = [browserAuthPromise]
+
       const deviceCode = await window.api.auth.requestDeviceCode()
       if (
         deviceCode.success &&
@@ -173,15 +176,12 @@ async function handleNext(): Promise<void> {
           expiresIn: deviceCode.expires_in,
           interval: deviceCode.interval || 5
         }
+        authAttempts.push(pollDeviceAuth(deviceAuth.value).then(() => 'device' as const))
       } else {
         deviceAuthError.value = deviceCode.error || 'Device code unavailable'
-        throw new Error(deviceAuthError.value)
       }
 
-      if (!deviceAuth.value) {
-        throw new Error('Device code unavailable')
-      }
-      await pollDeviceAuth(deviceAuth.value)
+      await Promise.any(authAttempts)
       stopDevicePolling.value = true
       authStore.error = null
       currentStep.value++
@@ -316,10 +316,13 @@ onBeforeUnmount(() => {
             <div v-if="currentStep === 1 && authStore.loading" class="auth-waiting">
               <div class="waiting-box">
                 <Loader2 class="animate-spin" :size="20" />
-                <span>Waiting for device authorization...</span>
+                <span>Waiting for browser authentication...</span>
               </div>
               <button class="btn-cancel" @click="handleCancel">Cancel</button>
-              <p class="hint-text">Open the URL below, enter the code, then return here.</p>
+              <p class="hint-text">
+                Complete sign-in in your browser. If the callback does not return, use the manual
+                code below.
+              </p>
 
               <div v-if="deviceAuth" class="auth-divider"><span>OR</span></div>
 
