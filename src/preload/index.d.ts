@@ -1,4 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { ApiProfile, ApiBillingAddress, ApiPlan } from '../main/api-client'
 
 declare global {
   interface Window {
@@ -97,14 +98,7 @@ declare global {
       plans: {
         list: () => Promise<{
           success: boolean
-          data?: Array<{
-            id: number
-            name: string
-            displayName: string
-            imageLimit: number
-            priceMonthly: string
-            description: string
-          }>
+          data?: Array<ApiPlan>
           error?: string
         }>
         requestUpgrade: (planId: number) => Promise<{
@@ -115,40 +109,12 @@ declare global {
       profile: {
         get: () => Promise<{
           success: boolean
-          data?: {
-            id: number
-            userId: string | null
-            businessName: string | null
-            phone: string | null
-            storageUsed: number | null
-            totalImages: number
-            globalMaxImages: number
-            imageLimit: number
-            planName: string
-            planExpiry: string | null
-            profileCompleted: boolean
-            createdAt: string
-            updatedAt: string
-          }
+          data?: ApiProfile
           error?: string
         }>
         update: (data: { businessName?: string; phone?: string }) => Promise<{
           success: boolean
-          data?: {
-            id: number
-            userId: string | null
-            businessName: string | null
-            phone: string | null
-            storageUsed: number | null
-            totalImages: number
-            globalMaxImages: number
-            imageLimit: number
-            planName: string
-            planExpiry: string | null
-            profileCompleted: boolean
-            createdAt: string
-            updatedAt: string
-          }
+          data?: ApiProfile
           error?: string
         }>
         getBookingUrl: () => Promise<{
@@ -174,17 +140,7 @@ declare global {
         }>
         getBillingAddresses: () => Promise<{
           success: boolean
-          data?: Array<{
-            id: number
-            userId: number | null
-            street: string
-            city: string
-            state: string
-            zip: string
-            country: string
-            isDefault: boolean | null
-            createdAt: string
-          }>
+          data?: Array<ApiBillingAddress>
           error?: string
         }>
         createBillingAddress: (data: {
@@ -196,17 +152,7 @@ declare global {
           isDefault?: boolean
         }) => Promise<{
           success: boolean
-          data?: {
-            id: number
-            userId: number | null
-            street: string
-            city: string
-            state: string
-            zip: string
-            country: string
-            isDefault: boolean | null
-            createdAt: string
-          }
+          data?: ApiBillingAddress
           error?: string
         }>
         updateBillingAddress: (
@@ -221,17 +167,7 @@ declare global {
           }
         ) => Promise<{
           success: boolean
-          data?: {
-            id: number
-            userId: number | null
-            street: string
-            city: string
-            state: string
-            zip: string
-            country: string
-            isDefault: boolean | null
-            createdAt: string
-          }
+          data?: ApiBillingAddress
           error?: string
         }>
       }
