@@ -12,19 +12,12 @@ import {
   ExternalLink,
   Copy,
   Check
-  /* FolderOpen,
-  Folder,
-  Search */
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
 const currentStep = ref(0)
-/*
-const selectedFolder = ref<string | null>(null)
-const isSelectingFolder = ref(false)
-*/
 
 const steps = [
   {
@@ -41,15 +34,6 @@ const steps = [
     btn: 'Connect to LumoSnap',
     progress: 45
   },
-  /* 
-  {
-    step: 'Optimization',
-    title: 'Watch Folder',
-    desc: "Optionally, choose a folder for LumoSnap to watch. We'll automatically import and optimize photos added here. You can also set this up later.",
-    btn: 'Confirm Folder',
-    progress: 80
-  },
-  */
   {
     step: 'Complete',
     title: "You're All Set!",
@@ -195,34 +179,13 @@ async function handleNext(): Promise<void> {
     } finally {
       authStore.loading = false
     }
-  } /* else if (currentStep.value === 2) {
-    // Folder step - save master folder (optional)
-    if (selectedFolder.value) {
-      await window.api.config.setMasterFolder(selectedFolder.value)
-    }
-    // Always proceed
-    currentStep.value++
-  } */ else if (currentStep.value === 2) {
+  } else if (currentStep.value === 2) {
     // Complete - launch app
     router.push('/albums')
   } else {
     currentStep.value++
   }
 }
-
-/*
-async function selectFolder(): Promise<void> {
-  isSelectingFolder.value = true
-  try {
-    const path = await window.api.dialog.openDirectory()
-    if (path) {
-      selectedFolder.value = path
-    }
-  } finally {
-    isSelectingFolder.value = false
-  }
-}
-*/
 
 function handleCancel(): void {
   stopDevicePolling.value = true
@@ -268,19 +231,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Step 2: Folder -->
-        <!-- 
-        <div class="stage-visual" :class="{ active: currentStep === 2 }">
-          <div class="folder-viz">
-            <FolderOpen :size="48" class="text-zinc-400" />
-            <div class="search-beam">
-              <Search :size="24" />
-            </div>
-          </div>
-        </div>
-        -->
-
-        <!-- Step 3: Complete -->
+        <!-- Step 2: Complete -->
         <div class="stage-visual" :class="{ active: currentStep === 2 }">
           <div class="delight-container">
             <div class="confetti c1"></div>
@@ -362,20 +313,6 @@ onBeforeUnmount(() => {
               {{ authStore.error }}
             </div>
 
-            <!-- Step 2: Folder Picker -->
-            <!-- 
-            <div v-if="currentStep === 2" class="folder-select-ui" @click="selectFolder">
-              <div class="folder-icon-box">
-                <Folder :size="16" />
-              </div>
-              <div class="folder-text">
-                {{
-                  isSelectingFolder ? 'Scanning...' : selectedFolder || 'Select a Watch Folder...'
-                }}
-              </div>
-              <div class="folder-action">Change</div>
-            </div>
-            -->
           </div>
 
           <!-- Progress Bar -->
@@ -611,40 +548,6 @@ onBeforeUnmount(() => {
   transform: translateX(-50%);
   --tx: 0px;
   --ty: -40px;
-}
-
-/* Folder Visual */
-.folder-viz {
-  width: 140px;
-  height: 100px;
-  background: white;
-  border: 1px solid var(--zinc-200);
-  border-radius: 12px;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.1);
-}
-
-.text-zinc-400 {
-  color: var(--zinc-400);
-}
-
-.search-beam {
-  position: absolute;
-  top: -20%;
-  right: -20%;
-  width: 60px;
-  height: 60px;
-  background: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--violet-600);
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
-  animation: float 4s ease-in-out infinite;
 }
 
 /* Success Visual */
@@ -979,51 +882,6 @@ p {
   color: #ef4444;
   font-size: 14px;
   text-align: center;
-}
-
-/* Folder Select */
-.folder-select-ui {
-  background: var(--zinc-100);
-  border: 1px solid var(--zinc-200);
-  border-radius: 8px;
-  padding: 12px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.folder-select-ui:hover {
-  border-color: var(--violet-500);
-  background: white;
-}
-
-.folder-icon-box {
-  width: 32px;
-  height: 32px;
-  background: var(--violet-100);
-  color: var(--violet-600);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.folder-text {
-  flex: 1;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--zinc-800);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.folder-action {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--violet-600);
 }
 
 /* Progress */

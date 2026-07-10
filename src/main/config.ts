@@ -4,7 +4,6 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 
 export interface AppConfig {
   storageLocation: string | null
-  masterFolderPath: string | null // Root folder where user puts source photo subfolders
   isFirstLaunch: boolean
   userId: string | null
   minimizeToTray: boolean // Whether to minimize to tray instead of closing
@@ -12,7 +11,6 @@ export interface AppConfig {
 
 const defaultConfig: AppConfig = {
   storageLocation: null,
-  masterFolderPath: null,
   isFirstLaunch: true,
   userId: null,
   minimizeToTray: true // Default to true for background operation
@@ -103,18 +101,6 @@ export function setStorageLocation(path: string): void {
 export function resetConfig(): void {
   config = { ...defaultConfig }
   saveConfig()
-}
-
-export function getMasterFolder(): string | null {
-  return config.masterFolderPath
-}
-
-export function setMasterFolder(path: string): void {
-  setConfig({ masterFolderPath: path })
-}
-
-export function isMasterFolderConfigured(): boolean {
-  return config.masterFolderPath !== null && existsSync(config.masterFolderPath)
 }
 
 export function getConfigPath(): string {

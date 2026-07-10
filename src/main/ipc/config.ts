@@ -3,21 +3,18 @@
  */
 
 import { ipcMain, shell, app } from 'electron'
-import { existsSync, readdirSync, rmSync, unlinkSync } from 'fs'
-import { join } from 'path'
+import { existsSync, rmSync, unlinkSync } from 'fs'
 import {
   isConfigured,
   getStorageLocation,
   setStorageLocation,
   getConfig,
-  getMasterFolder,
-  setMasterFolder,
   getConfigPath,
   resetConfig
 } from '../config'
 import { deleteDatabase, getAllAlbums } from '../database'
 import { clearAuth } from '../auth-storage'
-import { getFreeSpace, ensureBaseDirectory, scanImagesInFolder, formatBytes } from '../storage'
+import { getFreeSpace, ensureBaseDirectory, formatBytes } from '../storage'
 import { watcherService } from '../watcher'
 import { albumsApi } from '../api-client'
 import { createLogger, getErrorMessage } from '../logger'
@@ -102,52 +99,6 @@ export function registerConfigHandlers(): void {
         freeSpaceFormatted: '0 Bytes',
         isLowStorage: false
       }
-    }
-  })
-
-  // Master folder handlers
-  ipcMain.handle('config:getMasterFolder', () => {
-    return getMasterFolder()
-  })
-
-  ipcMain.handle('config:setMasterFolder', async (_event, path: string) => {
-    try {
-      if (!existsSync(path)) {
-        throw new Error('Selected path does not exist')
-      }
-      setMasterFolder(path)
-      watcherService.watchMasterFolder(path)
-      return { success: true }
-    } catch (error: unknown) {
-      logger.error('Failed to set master folder:', getErrorMessage(error))
-      return { success: false, error: getErrorMessage(error) }
-    }
-  })
-
-  ipcMain.handle('config:scanMasterFolder', () => {
-    try {
-      const masterFolder = getMasterFolder()
-      if (!masterFolder || !existsSync(masterFolder)) {
-        return { success: false, error: 'Master folder not configured', folders: [] }
-      }
-
-      const entries = readdirSync(masterFolder, { withFileTypes: true })
-      const folders = entries
-        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-        .map((entry) => {
-          const folderPath = join(masterFolder, entry.name)
-          const images = scanImagesInFolder(folderPath)
-          return {
-            name: entry.name,
-            path: folderPath,
-            imageCount: images.length
-          }
-        })
-
-      return { success: true, folders }
-    } catch (error: unknown) {
-      logger.error('Failed to scan master folder:', getErrorMessage(error))
-      return { success: false, error: getErrorMessage(error), folders: [] }
     }
   })
 

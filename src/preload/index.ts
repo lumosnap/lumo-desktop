@@ -45,14 +45,6 @@ const api = {
       isLowStorage: boolean
       error?: string
     }> => ipcRenderer.invoke('config:getCurrentStorageInfo'),
-    getMasterFolder: (): Promise<string | null> => ipcRenderer.invoke('config:getMasterFolder'),
-    setMasterFolder: (path: string): Promise<{ success: boolean; error?: string }> =>
-      ipcRenderer.invoke('config:setMasterFolder', path),
-    scanMasterFolder: (): Promise<{
-      success: boolean
-      folders: Array<{ name: string; path: string; imageCount: number }>
-      error?: string
-    }> => ipcRenderer.invoke('config:scanMasterFolder'),
     resetAllData: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('config:resetAllData')
   },
@@ -284,8 +276,6 @@ const api = {
       'upload:error',
       'album:status-changed',
       'albums:refresh',
-      'master-folder:change',
-      'master-folder:change',
       'network:status-changed',
       'update-status'
     ]
@@ -301,8 +291,6 @@ const api = {
       'upload:error',
       'album:status-changed',
       'albums:refresh',
-      'master-folder:change',
-      'master-folder:change',
       'network:status-changed',
       'update-status'
     ]

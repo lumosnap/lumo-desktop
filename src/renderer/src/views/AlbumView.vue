@@ -30,7 +30,6 @@ const usagePercentage = computed(() => profileStore.usagePercentage)
 const showCreateModal = ref(false)
 const albums = ref<Album[]>([])
 const loading = ref(true)
-const masterFolder = ref<string | null>(null)
 
 // Progress State
 const isProcessing = ref(false)
@@ -92,12 +91,6 @@ function openFolderInExplorer(album: Album): void {
   }
 }
 
-async function openWatchFolder(): Promise<void> {
-  if (masterFolder.value) {
-    await window.api.shell.openFolder(masterFolder.value)
-  }
-}
-
 let loadDebounceTimer: ReturnType<typeof setTimeout> | null = null
 const isRefreshing = ref(false)
 
@@ -139,14 +132,6 @@ async function handleForceRefresh(): Promise<void> {
     console.error('Failed to force refresh albums:', error)
   } finally {
     isRefreshing.value = false
-  }
-}
-
-async function loadMasterFolder(): Promise<void> {
-  try {
-    masterFolder.value = await window.api.config.getMasterFolder()
-  } catch (error) {
-    console.error('Failed to load master folder:', error)
   }
 }
 
@@ -255,7 +240,6 @@ const onAlbumsRefresh = (): void => {
 
 onMounted(() => {
   loadAlbums()
-  loadMasterFolder()
   profileStore.fetchProfile()
 
   // Register listeners
@@ -292,17 +276,6 @@ onUnmounted(() => {
         </div>
 
         <div class="flex items-center gap-3">
-          <!-- Open Watch Folder Button -->
-          <button
-            v-if="masterFolder"
-            class="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 transition-colors"
-            title="Open Watch Folder"
-            @click="openWatchFolder"
-          >
-            <FolderOpen class="h-4 w-4" />
-            Open Watch Folder
-          </button>
-
           <!-- Refresh Button -->
           <button
             class="rounded-xl p-2.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"

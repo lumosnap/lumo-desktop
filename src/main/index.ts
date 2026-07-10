@@ -3,7 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { initDatabase, closeDatabase, getAllAlbums, getImagesByStatus } from './database'
-import { initConfig, getMasterFolder, getConfig } from './config'
+import { initConfig, getConfig } from './config'
 import { registerIpcHandlers } from './ipc'
 import { protocol } from 'electron'
 import { watcherService } from './watcher'
@@ -366,14 +366,6 @@ app.whenReady().then(() => {
     try {
       watcherService.initialize(mainWindow)
       logger.info('✓ Watcher service initialized')
-
-      // Start master folder watcher if configured
-      const masterFolder = getMasterFolder()
-      if (masterFolder) {
-        watcherService.watchMasterFolder(masterFolder)
-        watcherService.scanMasterFolderOnStartup(masterFolder)
-        logger.info('✓ Master folder watcher started')
-      }
     } catch (error) {
       logger.error('✗ Failed to initialize watcher service:', getErrorMessage(error))
     }

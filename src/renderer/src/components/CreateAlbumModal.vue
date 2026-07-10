@@ -30,39 +30,18 @@ const title = ref<string>('')
 const isCreating = ref(false)
 const error = ref<string | null>(null)
 
-// Optional folder path - if set, determines album type
+// Source folder path - required
 const sourceFolderPath = ref<string>('')
-const masterFolder = ref<string | null>(null)
 
-// Load master folder on mount
+// Reset form when the modal closes
 watch(
   () => props.show,
-  async (newValue) => {
-    if (newValue) {
-      try {
-        masterFolder.value = await window.api.config.getMasterFolder()
-      } catch (err) {
-        console.error('Failed to get master folder:', err)
-      }
-    } else {
+  (newValue) => {
+    if (!newValue) {
       resetForm()
     }
   }
 )
-
-// Auto-detect album type based on folder path
-const albumType = computed<'watch_folder' | 'standalone'>(() => {
-  if (!sourceFolderPath.value) {
-    return 'watch_folder' // Default: create in master folder
-  }
-
-  // Check if selected folder is inside master folder
-  if (masterFolder.value && sourceFolderPath.value.startsWith(masterFolder.value)) {
-    return 'watch_folder'
-  }
-
-  return 'standalone'
-})
 
 // Computed for limit warning message
 const limitWarning = computed(() => {
@@ -85,18 +64,9 @@ const limitWarning = computed(() => {
   return null
 })
 
-// Check if form is valid
+// Check if form is valid - both a title and a source folder are required
 const isFormValid = computed(() => {
-  const hasTitle = title.value.trim().length > 0
-
-  // If master folder is configured, source folder is optional (defaults to creating in master)
-  // If master folder is NOT configured, source folder is REQUIRED
-  if (masterFolder.value) {
-    return hasTitle
-  }
-
-  // No master folder = must pick source folder
-  return hasTitle && sourceFolderPath.value.trim().length > 0
+  return title.value.trim().length > 0 && sourceFolderPath.value.trim().length > 0
 })
 
 async function selectFolder(): Promise<void> {
@@ -121,7 +91,7 @@ function clearFolder(): void {
 
 async function createAlbum(): Promise<void> {
   if (!isFormValid.value) {
-    error.value = 'Please enter an album title'
+    error.value = 'Please enter an album title and select a source folder'
     return
   }
 
@@ -133,7 +103,7 @@ async function createAlbum(): Promise<void> {
       title: title.value.trim(),
       eventDate: null,
       sourceFolderPath: sourceFolderPath.value,
-      albumType: albumType.value
+      albumType: 'standalone'
     })
 
     if (result.success) {
@@ -219,11 +189,10 @@ function handleClose(): void {
         />
       </div>
 
-      <!-- Optional Folder Picker -->
+      <!-- Source Folder Picker (required) -->
       <div>
         <label class="block text-sm font-medium text-slate-700 mb-2">
-          Source Folder
-          <span class="text-slate-400 font-normal">(optional)</span>
+          Source Folder <span class="text-red-500">*</span>
         </label>
 
         <div v-if="!sourceFolderPath" class="flex gap-2">
@@ -256,23 +225,12 @@ function handleClose(): void {
         </div>
 
         <p class="mt-2 text-xs text-slate-500">
-          <template v-if="!sourceFolderPath">
-            <span v-if="masterFolder">
-              Leave empty to create a new folder in your watch folder, or select an existing folder
-              with photos.
-            </span>
-            <span v-else class="text-amber-600 font-medium">
-              You must select a source folder because no Watch Folder is configured.
-            </span>
-          </template>
-          <template v-else-if="albumType === 'standalone'">
-            <span class="text-indigo-600 font-medium">Standalone album:</span> This folder will be
-            watched independently.
-          </template>
-          <template v-else>
-            <span class="text-indigo-600 font-medium">Watch folder album:</span> This folder is
-            inside your master folder.
-          </template>
+          <span v-if="!sourceFolderPath" class="text-amber-600 font-medium">
+            Select the folder on your computer that contains the photos you want to import.
+          </span>
+          <span v-else>
+            This folder will be watched independently for new photos.
+          </span>
         </p>
       </div>
 
@@ -289,19 +247,8 @@ function handleClose(): void {
       <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
         <p class="text-sm text-slate-600">
           <strong class="text-indigo-600">Tip:</strong>
-          <template v-if="sourceFolderPath">
-            The app will scan and upload all photos from the selected folder. Any new photos added
-            later will be detected automatically.
-          </template>
-          <template v-else>
-            <span v-if="masterFolder">
-              A folder will be created in your watch folder. Add photos to it and they'll be
-              automatically detected and processed.
-            </span>
-            <span v-else>
-              Please select a folder on your computer that contains the photos you want to import.
-            </span>
-          </template>
+          The app will scan and upload all photos from the selected folder. Any new photos added
+          later will be detected automatically.
         </p>
       </div>
 

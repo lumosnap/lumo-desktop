@@ -52,13 +52,6 @@ declare global {
           isLowStorage: boolean
           error?: string
         }>
-        getMasterFolder: () => Promise<string | null>
-        setMasterFolder: (path: string) => Promise<{ success: boolean; error?: string }>
-        scanMasterFolder: () => Promise<{
-          success: boolean
-          folders: Array<{ name: string; path: string; imageCount: number }>
-          error?: string
-        }>
         resetAllData: () => Promise<{ success: boolean; error?: string }>
       }
       albums: {
