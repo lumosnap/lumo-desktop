@@ -18,6 +18,9 @@ import {
   ArrowUpCircle
 } from 'lucide-vue-next'
 import type { Album } from '../stores/album'
+import type { IpcRendererEvent } from 'electron'
+import type { SyncChanges } from '../../../main/ipc/sync'
+import type { UploadProgress } from '../../../main/pipeline'
 import { useUIStore } from '../stores/ui'
 import { useProfileStore } from '../stores/profile'
 
@@ -55,7 +58,7 @@ const deleteError = ref('')
 // Sync State
 const showSyncModal = ref(false)
 const syncAlbum = ref<Album | null>(null)
-const syncChanges = ref<any>(null)
+const syncChanges = ref<SyncChanges | null>(null)
 const isSyncLoading = ref(false)
 
 // Pastel color palette for albums
@@ -159,7 +162,7 @@ async function openSyncModal(album: Album): Promise<void> {
   try {
     const result = await window.api.sync.detectChanges(album.id)
     if (result.success) {
-      syncChanges.value = result.changes
+      syncChanges.value = result.changes ?? null
     }
   } catch (error) {
     console.error('Failed to detect sync changes:', error)
@@ -200,12 +203,15 @@ async function handleDeleteAlbum(): Promise<void> {
 }
 
 // Event handlers
-const onBatchStart = (_e: any, data: any): void => {
+const onBatchStart = (
+  _e: IpcRendererEvent,
+  data: { batchIndex: number; totalBatches: number }
+): void => {
   isProcessing.value = true
   batchInfo.value = data
 }
 
-const onProgress = (_e: any, data: any): void => {
+const onProgress = (_e: IpcRendererEvent, data: UploadProgress): void => {
   isProcessing.value = true
   uploadProgress.value = data
   if (data.albumId) {
@@ -225,7 +231,10 @@ const onError = (): void => {
   isProcessing.value = false
 }
 
-const onAlbumStatusChanged = (_e: any, data: { albumId: string; needsSync: number }): void => {
+const onAlbumStatusChanged = (
+  _e: IpcRendererEvent,
+  data: { albumId: string; needsSync: number }
+): void => {
   console.log('Album status changed:', data)
   const album = albums.value.find((a) => a.id === data.albumId)
   if (album) {

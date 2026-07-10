@@ -1,11 +1,26 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { AppConfig } from '../main/config'
+import type { Album, Image } from '../main/database'
+import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/sync'
+import type { FileStats } from '../main/storage'
+import type { UploadProgress } from '../main/pipeline'
+import type { Booking, ApiFavoriteImage } from '../main/api-client'
+
+type AuthUser = { id: string; email: string; name: string; image?: string }
+
+type AlbumImageWithFavorites = Image & {
+  isFavorite: boolean
+  favoriteCount: number
+  notesCount: number
+  comments: Array<{ clientName: string; notes: string | null; createdAt: string }>
+}
 
 const api = {
   auth: {
-    getStoredAuth: (): Promise<{ success: boolean; token: string | null; user: any }> =>
+    getStoredAuth: (): Promise<{ success: boolean; token: string | null; user: AuthUser | null }> =>
       ipcRenderer.invoke('auth:getStoredAuth'),
-    startAuth: (): Promise<{ success: boolean; user?: any; error?: string }> =>
+    startAuth: (): Promise<{ success: boolean; user?: AuthUser; error?: string }> =>
       ipcRenderer.invoke('auth:startAuth'),
     requestDeviceCode: (): Promise<{
       success: boolean
@@ -17,13 +32,15 @@ const api = {
       interval?: number
       error?: string
     }> => ipcRenderer.invoke('auth:requestDeviceCode'),
-    pollDeviceToken: (deviceCode: string): Promise<{
+    pollDeviceToken: (
+      deviceCode: string
+    ): Promise<{
       success: boolean
       pending?: boolean
       error?: string
       error_description?: string
       interval?: number
-      user?: any
+      user?: AuthUser
     }> => ipcRenderer.invoke('auth:pollDeviceToken', deviceCode),
     logout: (): Promise<{ success: boolean }> => ipcRenderer.invoke('auth:logout')
   },
@@ -35,7 +52,7 @@ const api = {
       ipcRenderer.invoke('config:setStorageLocation', path),
     getFreeSpace: (path: string): Promise<{ bytes: number; formatted: string; error?: string }> =>
       ipcRenderer.invoke('config:getFreeSpace', path),
-    getConfig: (): Promise<any> => ipcRenderer.invoke('config:getConfig'),
+    getConfig: (): Promise<AppConfig> => ipcRenderer.invoke('config:getConfig'),
     getAppVersion: (): Promise<string> => ipcRenderer.invoke('config:getAppVersion'),
     getCurrentStorageInfo: (): Promise<{
       success: boolean
@@ -54,41 +71,75 @@ const api = {
       eventDate: string | null
       sourceFolderPath: string
       albumType?: 'watch_folder' | 'standalone'
-    }): Promise<any> => ipcRenderer.invoke('album:create', data),
+    }): Promise<{ success: true; album: Album } | { success: false; error: string }> =>
+      ipcRenderer.invoke('album:create', data),
     list: (): Promise<any> => ipcRenderer.invoke('album:list'),
-    get: (albumId: string): Promise<any> => ipcRenderer.invoke('album:get', albumId),
-    delete: (albumId: string): Promise<any> => ipcRenderer.invoke('album:delete', albumId),
-    getImages: (albumId: string): Promise<any> => ipcRenderer.invoke('album:getImages', albumId),
-    deleteImage: (albumId: string, imageId: number): Promise<any> =>
+    get: (
+      albumId: string
+    ): Promise<{ success: true; album: Album } | { success: false; error: string }> =>
+      ipcRenderer.invoke('album:get', albumId),
+    delete: (albumId: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('album:delete', albumId),
+    getImages: (
+      albumId: string
+    ): Promise<{ success: boolean; images: AlbumImageWithFavorites[]; error?: string }> =>
+      ipcRenderer.invoke('album:getImages', albumId),
+    deleteImage: (
+      albumId: string,
+      imageId: number
+    ): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('album:deleteImage', albumId, imageId),
-    deleteImages: (albumId: string, imageIds: number[]): Promise<any> =>
+    deleteImages: (
+      albumId: string,
+      imageIds: number[]
+    ): Promise<{ success: boolean; deletedCount?: number; error?: string }> =>
       ipcRenderer.invoke('album:deleteImages', albumId, imageIds),
-    copyImages: (albumId: string, imageIds: number[]): Promise<any> =>
+    copyImages: (
+      albumId: string,
+      imageIds: number[]
+    ): Promise<{ success: boolean; count?: number; errorCount?: number; error?: string }> =>
       ipcRenderer.invoke('album:copyImages', albumId, imageIds),
-    scanSourceFolder: (path: string): Promise<any> =>
+    scanSourceFolder: (
+      path: string
+    ): Promise<{ success: boolean; count: number; images: FileStats[]; error?: string }> =>
       ipcRenderer.invoke('album:scanSourceFolder', path),
-    startUpload: (albumId: string): Promise<any> =>
+    startUpload: (albumId: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('album:startUpload', albumId),
-    getProgress: (albumId: string): Promise<any> =>
+    getProgress: (
+      albumId: string
+    ): Promise<{ success: boolean; progress?: UploadProgress; error?: string }> =>
       ipcRenderer.invoke('album:getProgress', albumId),
-    retryFailed: (albumId: string): Promise<any> => ipcRenderer.invoke('album:retryFailed', albumId),
+    retryFailed: (albumId: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('album:retryFailed', albumId),
     forceRefresh: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('albums:forceRefresh')
   },
   sync: {
-    detectChanges: (albumId: string): Promise<any> =>
+    detectChanges: (albumId: string): Promise<SyncResult> =>
       ipcRenderer.invoke('sync:detectChanges', albumId),
-    execute: (albumId: string, changes: any): Promise<any> =>
+    execute: (albumId: string, changes: Partial<SyncChanges>): Promise<ExecuteSyncResult> =>
       ipcRenderer.invoke('sync:execute', albumId, changes)
   },
   dialog: {
     openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory')
   },
   api: {
-    generateShareLink: (albumId: string): Promise<any> =>
-      ipcRenderer.invoke('api:generateShareLink', albumId),
-    getFavorites: (albumId: string, clientName?: string): Promise<any> =>
-      ipcRenderer.invoke('api:getFavorites', albumId, clientName)
+    generateShareLink: (
+      albumId: string
+    ): Promise<{
+      success: boolean
+      shareLink?: { shareLinkToken: string | null; shareUrl: string; expiresAt: null }
+      error?: string
+    }> => ipcRenderer.invoke('api:generateShareLink', albumId),
+    getFavorites: (
+      albumId: string,
+      clientName?: string
+    ): Promise<{
+      success: boolean
+      favorites: ApiFavoriteImage[]
+      clientNames: string[]
+      error?: string
+    }> => ipcRenderer.invoke('api:getFavorites', albumId, clientName)
   },
   plans: {
     list: (): Promise<{
@@ -153,7 +204,7 @@ const api = {
     }> => ipcRenderer.invoke('profile:getBookingUrl'),
     getBookings: (): Promise<{
       success: boolean
-      data?: Array<any>
+      data?: Booking[]
       error?: string
     }> => ipcRenderer.invoke('profile:getBookings'),
     getBillingAddresses: (): Promise<{
@@ -260,7 +311,8 @@ const api = {
     checkConnectivity: (): Promise<{ online: boolean }> =>
       ipcRenderer.invoke('network:checkConnectivity'),
     onStatusChange: (callback: (online: boolean) => void): (() => void) => {
-      const handler = (_event: any, data: { online: boolean }) => callback(data.online)
+      const handler = (_event: IpcRendererEvent, data: { online: boolean }): void =>
+        callback(data.online)
       ipcRenderer.on('network:status-changed', handler)
       return () => ipcRenderer.removeListener('network:status-changed', handler)
     }
@@ -268,7 +320,10 @@ const api = {
 
   // Progress events listener
   // Event listeners
-  on: (channel: string, callback: (event: any, ...args: any[]) => void) => {
+  on: <A extends unknown[]>(
+    channel: string,
+    callback: (event: IpcRendererEvent, ...args: A) => void
+  ) => {
     const validChannels = [
       'upload:progress',
       'upload:batch-start',
@@ -283,7 +338,10 @@ const api = {
       ipcRenderer.on(channel, callback)
     }
   },
-  off: (channel: string, callback: (event: any, ...args: any[]) => void) => {
+  off: <A extends unknown[]>(
+    channel: string,
+    callback: (event: IpcRendererEvent, ...args: A) => void
+  ) => {
     const validChannels = [
       'upload:progress',
       'upload:batch-start',

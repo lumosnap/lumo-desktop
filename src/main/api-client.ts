@@ -172,6 +172,19 @@ export interface ApiResponse<T> {
 
 // ==================== Profile Types ====================
 
+export interface Booking {
+  id: number
+  photographerId: string
+  eventType: string
+  name: string
+  phone: string
+  eventDate: string
+  location: string
+  details: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ApiProfile {
   id: number
   userId: string | null
@@ -256,9 +269,9 @@ export const profileApi = {
   /**
    * Get bookings
    */
-  async getBookings(): Promise<Array<any>> {
+  async getBookings(): Promise<Booking[]> {
     console.log('[API] Getting bookings')
-    const response = await apiFetch<ApiResponse<Array<any>>>('/profile/bookings')
+    const response = await apiFetch<ApiResponse<Booking[]>>('/profile/bookings')
     if (!response.data) {
       throw new Error('No data in response')
     }

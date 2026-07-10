@@ -1,4 +1,5 @@
 import { ref, onMounted, onUnmounted } from 'vue'
+import type { IpcRendererEvent } from 'electron'
 
 export function useUpdater() {
   const updateStatus = ref<string>('')
@@ -13,7 +14,7 @@ export function useUpdater() {
     }
   })
 
-  const handleUpdateStatus = (_event: any, message: string) => {
+  const handleUpdateStatus = (_event: IpcRendererEvent, message: string): void => {
     updateStatus.value = message
     if (message.includes('Update available')) {
       updateAvailable.value = true

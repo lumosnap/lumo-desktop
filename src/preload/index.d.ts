@@ -1,5 +1,26 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import type { ApiProfile, ApiBillingAddress, ApiPlan } from '../main/api-client'
+import type { IpcRendererEvent } from 'electron'
+import type {
+  ApiProfile,
+  ApiBillingAddress,
+  ApiPlan,
+  ApiFavoriteImage,
+  Booking
+} from '../main/api-client'
+import type { Album, Image } from '../main/database'
+import type { AppConfig } from '../main/config'
+import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/sync'
+import type { FileStats } from '../main/storage'
+import type { UploadProgress } from '../main/pipeline'
+
+type AuthUser = { id: string; email: string; name: string; image?: string }
+
+type AlbumImageWithFavorites = Image & {
+  isFavorite: boolean
+  favoriteCount: number
+  notesCount: number
+  comments: Array<{ clientName: string; notes: string | null; createdAt: string }>
+}
 
 declare global {
   interface Window {
@@ -43,7 +64,7 @@ declare global {
         getFreeSpace: (
           path: string
         ) => Promise<{ bytes: number; formatted: string; error?: string }>
-        getConfig: () => Promise<any>
+        getConfig: () => Promise<AppConfig>
         getAppVersion: () => Promise<string>
         getCurrentStorageInfo: () => Promise<{
           success: boolean
@@ -61,11 +82,15 @@ declare global {
           eventDate: string | null
           sourceFolderPath: string
           albumType?: 'watch_folder' | 'standalone'
-        }) => Promise<any>
+        }) => Promise<{ success: true; album: Album } | { success: false; error: string }>
         list: () => Promise<any>
-        get: (albumId: string) => Promise<any>
-        delete: (albumId: string) => Promise<any>
-        getImages: (albumId: string) => Promise<any>
+        get: (
+          albumId: string
+        ) => Promise<{ success: true; album: Album } | { success: false; error: string }>
+        delete: (albumId: string) => Promise<{ success: boolean; error?: string }>
+        getImages: (
+          albumId: string
+        ) => Promise<{ success: boolean; images: AlbumImageWithFavorites[]; error?: string }>
         deleteImage: (
           albumId: string,
           imageId: number
@@ -77,23 +102,39 @@ declare global {
         copyImages: (
           albumId: string,
           imageIds: number[]
-        ) => Promise<{ success: boolean; count?: number; error?: string }>
-        scanSourceFolder: (path: string) => Promise<any>
-        startUpload: (albumId: string) => Promise<any>
-        getProgress: (albumId: string) => Promise<any>
-        retryFailed: (albumId: string) => Promise<any>
+        ) => Promise<{ success: boolean; count?: number; errorCount?: number; error?: string }>
+        scanSourceFolder: (
+          path: string
+        ) => Promise<{ success: boolean; count: number; images: FileStats[]; error?: string }>
+        startUpload: (albumId: string) => Promise<{ success: boolean; error?: string }>
+        getProgress: (
+          albumId: string
+        ) => Promise<{ success: boolean; progress?: UploadProgress; error?: string }>
+        retryFailed: (albumId: string) => Promise<{ success: boolean; error?: string }>
         forceRefresh: () => Promise<{ success: boolean; error?: string }>
       }
       sync: {
-        detectChanges: (albumId: string) => Promise<any>
-        execute: (albumId: string, changes: any) => Promise<any>
+        detectChanges: (albumId: string) => Promise<SyncResult>
+        execute: (albumId: string, changes: Partial<SyncChanges>) => Promise<ExecuteSyncResult>
       }
       dialog: {
         openDirectory: () => Promise<string | null>
       }
       api: {
-        generateShareLink: (albumId: string) => Promise<any>
-        getFavorites: (albumId: string, clientName?: string) => Promise<any>
+        generateShareLink: (albumId: string) => Promise<{
+          success: boolean
+          shareLink?: { shareLinkToken: string | null; shareUrl: string; expiresAt: null }
+          error?: string
+        }>
+        getFavorites: (
+          albumId: string,
+          clientName?: string
+        ) => Promise<{
+          success: boolean
+          favorites: ApiFavoriteImage[]
+          clientNames: string[]
+          error?: string
+        }>
       }
       plans: {
         list: () => Promise<{
@@ -124,18 +165,7 @@ declare global {
         }>
         getBookings: () => Promise<{
           success: boolean
-          data?: Array<{
-            id: number
-            photographerId: string
-            eventType: string
-            name: string
-            phone: string
-            eventDate: string
-            location: string
-            details: string
-            createdAt: string
-            updatedAt: string
-          }>
+          data?: Booking[]
           error?: string
         }>
         getBillingAddresses: () => Promise<{
@@ -215,10 +245,20 @@ declare global {
         checkConnectivity: () => Promise<{ online: boolean }>
         onStatusChange: (callback: (online: boolean) => void) => () => void
       }
-      onUploadProgress: (callback: (event: any, progress: any) => void) => void
-      offUploadProgress: (callback: (event: any, progress: any) => void) => void
-      on: (channel: string, callback: (event: any, ...args: any[]) => void) => void
-      off: (channel: string, callback: (event: any, ...args: any[]) => void) => void
+      onUploadProgress: (
+        callback: (event: IpcRendererEvent, progress: UploadProgress) => void
+      ) => void
+      offUploadProgress: (
+        callback: (event: IpcRendererEvent, progress: UploadProgress) => void
+      ) => void
+      on: <A extends unknown[]>(
+        channel: string,
+        callback: (event: IpcRendererEvent, ...args: A) => void
+      ) => void
+      off: <A extends unknown[]>(
+        channel: string,
+        callback: (event: IpcRendererEvent, ...args: A) => void
+      ) => void
     }
   }
 }

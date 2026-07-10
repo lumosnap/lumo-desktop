@@ -1,4 +1,4 @@
-import { autoUpdater } from 'electron-updater'
+import { autoUpdater, type UpdateInfo } from 'electron-updater'
 import log from 'electron-log'
 import { app, dialog, BrowserWindow } from 'electron'
 
@@ -78,7 +78,7 @@ export class AppUpdater {
     }
   }
 
-  private showUpdateDialog(info: any) {
+  private showUpdateDialog(info: UpdateInfo) {
     dialog.showMessageBox({
       type: 'info',
       title: 'Update Available',
