@@ -69,7 +69,14 @@ async function apiFetch<T>(
           }
         } catch (error) {
           console.error('[API] Failed to parse response:', responseData)
-          reject(new Error('Failed to parse API response'))
+          // Preserve the original parse error as the cause and include response
+          // context, instead of discarding it behind a vague message.
+          reject(
+            new Error(
+              `Failed to parse API response (status ${response.statusCode ?? 'unknown'}): ${responseData.slice(0, 500)}`,
+              { cause: error }
+            )
+          )
         }
       })
     })

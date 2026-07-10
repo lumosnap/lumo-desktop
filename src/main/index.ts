@@ -236,22 +236,39 @@ app.whenReady().then(() => {
     }
   }
 
-  // Initialize database
+  // Initialize database. The app cannot function without its local DB, so a
+  // failure here is fatal: surface it to the user and abort startup rather than
+  // continuing in a broken state.
   logger.info('Initializing database...')
   try {
     initDatabase()
     logger.info('✓ Database initialized successfully')
   } catch (error) {
-    logger.error('✗ Failed to initialize database:', getErrorMessage(error))
+    const message = getErrorMessage(error)
+    logger.error('✗ Failed to initialize database:', message)
+    dialog.showErrorBox(
+      'Failed to start',
+      `The local database could not be initialized and the app cannot continue.\n\n${message}`
+    )
+    app.exit(1)
+    return
   }
 
-  // Initialize config
+  // Initialize config. Config is required for the app to operate correctly, so a
+  // failure here is also fatal rather than silently continuing.
   logger.info('Initializing config...')
   try {
     initConfig()
     logger.info('✓ Config initialized successfully')
   } catch (error) {
-    logger.error('✗ Failed to initialize config:', getErrorMessage(error))
+    const message = getErrorMessage(error)
+    logger.error('✗ Failed to initialize config:', message)
+    dialog.showErrorBox(
+      'Failed to start',
+      `Application configuration could not be initialized and the app cannot continue.\n\n${message}`
+    )
+    app.exit(1)
+    return
   }
 
   // ==================== System Tray ====================

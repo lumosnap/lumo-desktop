@@ -2,6 +2,9 @@ import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, unlinkSync } from 'fs'
+import { createLogger, getErrorMessage } from './logger'
+
+const logger = createLogger('Database')
 
 let db: Database.Database | null = null
 
@@ -56,7 +59,11 @@ export function initDatabase(): void {
       db.exec('ALTER TABLE images ADD COLUMN serverId INTEGER')
     }
   } catch (error) {
-    console.error('[Database] Migration failed:', error)
+    // The column-existence guard above means this catch only fires on a genuine,
+    // unexpected migration failure (not the benign "column already exists" case).
+    // Do not swallow it: a half-migrated schema is worse than a surfaced failure.
+    logger.error('serverId migration failed:', getErrorMessage(error), error)
+    throw error
   }
 
   // Migration: Add startTime and endTime columns to albums table
@@ -74,7 +81,8 @@ export function initDatabase(): void {
       db.exec('ALTER TABLE albums ADD COLUMN endTime TEXT')
     }
   } catch (error) {
-    console.error('[Database] Album migration failed:', error)
+    logger.error('albums startTime/endTime migration failed:', getErrorMessage(error), error)
+    throw error
   }
 
   // Migration: Add isOrphaned column if it doesn't exist
@@ -86,7 +94,8 @@ export function initDatabase(): void {
       db.exec('ALTER TABLE albums ADD COLUMN isOrphaned INTEGER DEFAULT 0')
     }
   } catch (error) {
-    console.error('[Database] isOrphaned migration failed:', error)
+    logger.error('isOrphaned migration failed:', getErrorMessage(error), error)
+    throw error
   }
 
   // Migration: Add albumType column if it doesn't exist
@@ -98,7 +107,8 @@ export function initDatabase(): void {
       db.exec("ALTER TABLE albums ADD COLUMN albumType TEXT DEFAULT 'watch_folder'")
     }
   } catch (error) {
-    console.error('[Database] albumType migration failed:', error)
+    logger.error('albumType migration failed:', getErrorMessage(error), error)
+    throw error
   }
 
   // Create indexes

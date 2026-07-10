@@ -11,6 +11,9 @@
 
 import { existsSync, readFileSync, writeFileSync, statSync, readdirSync } from 'fs'
 import { join, extname } from 'path'
+import { createLogger, getErrorMessage } from './logger'
+
+const logger = createLogger('AlbumMetadata')
 
 const METADATA_FILENAME = '.lumosnap'
 const METADATA_VERSION = 1
@@ -95,7 +98,14 @@ export function writeAlbumMetadata(folderPath: string, metadata: AlbumMetadata):
     console.log(`[AlbumMetadata] Wrote metadata for album ${metadata.albumId} to ${folderPath}`)
     return true
   } catch (error) {
-    console.error(`[AlbumMetadata] Failed to write metadata to ${folderPath}:`, error)
+    // Surface the real failure through the app logger (electron-log). console.error
+    // here is not captured to the log files, so a write failure would otherwise be
+    // invisible. Callers still receive `false` and can react.
+    logger.error(
+      `Failed to write metadata to ${folderPath}:`,
+      getErrorMessage(error),
+      error
+    )
     return false
   }
 }

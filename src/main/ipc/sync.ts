@@ -420,7 +420,12 @@ export async function executeAlbumSync(
           filesToProcess = changes.new.slice(0, remaining)
         }
       } catch (err) {
-        logger.error('Failed to check image limit, proceeding anyway:', getErrorMessage(err))
+        // The plan-limit check failed. Do not silently proceed as if the user has
+        // unlimited quota — surface the failure to the user (the server still
+        // enforces the limit and may reject over-quota uploads).
+        logger.error('Failed to verify image limit before sync:', getErrorMessage(err))
+        syncLimitWarning =
+          'Could not verify your plan image limit. New images will still be synced, but the server may reject uploads that exceed your plan. Please retry if your images do not appear.'
       }
 
       const currentImages = getAlbumImages(albumId)
