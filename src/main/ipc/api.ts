@@ -7,25 +7,20 @@
 import { ipcMain } from 'electron'
 import { albumsApi } from '../api-client'
 import { createLogger, getErrorMessage } from '../logger'
+import { handleIpc } from './types'
 
 const logger = createLogger('IPC:API')
 
 export function registerApiHandlers(): void {
-  ipcMain.handle('api:generateShareLink', async (_event, albumId: string) => {
-    try {
-      logger.info(`Generating share link for album ${albumId}`)
-      const result = await albumsApi.createShareLink(albumId)
-      return {
-        success: true,
-        shareLink: {
-          shareLinkToken: result.shareLinkToken,
-          shareUrl: result.shareLink,
-          expiresAt: null
-        }
+  handleIpc('api:generateShareLink', logger, async (_event, albumId: string) => {
+    logger.info(`Generating share link for album ${albumId}`)
+    const result = await albumsApi.createShareLink(albumId)
+    return {
+      shareLink: {
+        shareLinkToken: result.shareLinkToken,
+        shareUrl: result.shareLink,
+        expiresAt: null
       }
-    } catch (error: unknown) {
-      logger.error('Failed to generate share link:', getErrorMessage(error))
-      return { success: false, error: getErrorMessage(error) }
     }
   })
 
