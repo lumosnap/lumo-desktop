@@ -64,7 +64,6 @@ const limitWarning = computed(() => {
   return null
 })
 
-// Check if form is valid - both a title and a source folder are required
 const isFormValid = computed(() => {
   return title.value.trim().length > 0 && sourceFolderPath.value.trim().length > 0
 })

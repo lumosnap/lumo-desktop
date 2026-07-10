@@ -28,7 +28,7 @@ const uiStore = useUIStore()
 const profileStore = useProfileStore()
 const router = useRouter()
 
-// Usage percentage for circular progress - now using imageLimit from profileStore
+// Usage percentage for circular progress
 const usagePercentage = computed(() => profileStore.usagePercentage)
 const showCreateModal = ref(false)
 const albums = ref<Album[]>([])
@@ -138,10 +138,9 @@ async function handleForceRefresh(): Promise<void> {
   }
 }
 
-function handleAlbumCreated(albumId: string): void {
+function handleAlbumCreated(): void {
   showCreateModal.value = false
   loadAlbums()
-  console.log('Album created:', albumId)
 }
 
 // Delete Functions

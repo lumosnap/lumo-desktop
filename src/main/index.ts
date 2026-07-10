@@ -18,7 +18,7 @@ import { AppUpdater } from './AppUpdater'
 // Scoped logger for main process
 const logger = createLogger('Main')
 
-// ==================== App State ====================
+// App State
 let mainWindow: BrowserWindow | null = null
 let appUpdater: AppUpdater | null = null
 let isQuitting = false // Track if app is actually quitting vs minimize-to-tray
@@ -26,7 +26,7 @@ let isQuitting = false // Track if app is actually quitting vs minimize-to-tray
 // Check if launched with --hidden flag (for Linux hidden start)
 const isHiddenLaunch = process.argv.includes('--hidden')
 
-// ==================== Deep Link Protocol ====================
+// Deep Link Protocol
 const PROTOCOL = 'lumosnap'
 
 // Handle deep link URL - just opens the app for now
@@ -76,7 +76,7 @@ if (!gotTheLock) {
   })
 }
 
-// ==================== Global Error Handlers ====================
+// Global Error Handlers
 // Catch unhandled exceptions to prevent silent crashes
 process.on('uncaughtException', (error: Error) => {
   log.error('Uncaught Exception:', error)
@@ -106,10 +106,9 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-// ==================== Window Management ====================
+// Window Management
 function createWindow(): void {
   logger.info('Creating browser window...')
-  // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -197,7 +196,7 @@ function quitApp(): void {
   app.quit()
 }
 
-// ==================== App Initialization ====================
+// App Initialization
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -271,7 +270,7 @@ app.whenReady().then(() => {
     return
   }
 
-  // ==================== System Tray ====================
+  // System Tray
   logger.info('Creating system tray...')
   trayManager.create({
     onShowWindow: showMainWindow,
@@ -323,7 +322,7 @@ app.whenReady().then(() => {
     }
   }
 
-  // ==================== Renderer Crash Recovery ====================
+  // Renderer Crash Recovery
   // Handle renderer process crashes - attempt to recreate window
   app.on('render-process-gone', (_event, _webContents, details) => {
     logger.error('Renderer process gone:', details.reason, 'exitCode:', details.exitCode)
@@ -439,7 +438,7 @@ app.whenReady().then(() => {
   })
 })
 
-// ==================== App Lifecycle ====================
+// App Lifecycle
 // Don't quit when all windows are closed - keep running in tray
 app.on('window-all-closed', () => {
   // On macOS, apps typically stay in dock. On other platforms, we stay in tray.

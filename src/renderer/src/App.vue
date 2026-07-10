@@ -10,8 +10,6 @@ const authStore = useAuthStore()
 const networkStore = useNetworkStore()
 
 onMounted(async () => {
-  console.log('App.vue mounted successfully!')
-
   // Initialize network monitoring
   networkStore.setupListener()
   await networkStore.checkStatus()

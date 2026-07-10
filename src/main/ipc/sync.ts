@@ -19,7 +19,6 @@ import {
 import { scanImagesInFolder, clearScanCache } from '../storage'
 import { uploadPipeline } from '../pipeline'
 import { createLogger, getErrorMessage } from '../logger'
-// import { hashFileSync } from '../hash' // removed
 
 import {
   needsSync as metadataNeedsSync,
@@ -350,47 +349,19 @@ export async function executeAlbumSync(
       deleteImages(localIds)
     }
 
-    // Process renames (DELETE from local/cloud + marking as NEW is not optimal, but robust)
-    // Ideally we should have a rename API. For now, we'll treat renames as:
-    // 1. Update DB record with new filename and path
-    // 2. Rename local file (if exists)
-    // 3. Since we don't have a rename API yet, we might have to re-upload or keep server ID if possible.
-    // Wait, the current logic returned by detectChanges puts them in 'renamed'.
-    // BUT the previous implementation didn't handle 'renamed' in execute.
-    // Let's implement rename handling: verify if we can just update the DB.
-    // The previous implementation was: renames were treated as deleted + new if not handled.
-    // BUT 'sync:detectChanges' returns 'renamed'.
-    // Let's look at how we want to handle them.
-    // If we just update the DB, the server file remains with old name.
-    // If we want to keep it simple as requested:
-    // Update local DB to point to new file.
-    // Ideally we should tell server about rename.
-    // If server doesn't support rename, we might drift.
-    // FOR NOW: Let's treat renames as: Update local DB record to point to new matched file.
-    // This preserves comments/ratings if they exist locally.
-    // We will assume server filename matches originalFilename.
-    // If we change originalFilename locally, we might break server link if server relies on filename.
-    // Let's check 'createImage' - it sends originalFilename.
-    // Let's ASSUME for this iteration we just update the local record to match the new file on disk.
+    // No server rename API: update the local DB record and copy the renamed
+    // source file into the local folder (LumoSnap syncs source->local).
     if (changes.renamed && changes.renamed.length > 0) {
       logger.info(`Processing ${changes.renamed.length} renamed files`)
       for (const rename of changes.renamed) {
-        // Update DB record
         updateImage(rename.id, {
           originalFilename: rename.newFilename,
           localFilePath: join(album.localFolderPath, rename.newFilename)
-          // Keep serverId, mtime, etc.
-          // We might want to update mtime if changed
         })
-        // We should also rename the local file if it exists, OR copy the new file from source if we are syncing source->local.
-        // Wait, LumoSnap copies FROM source TO local.
-        // So we need to copy the new file from source to local.
         const sourcePath = join(album.sourceFolderPath, rename.newFilename)
         const localPath = join(album.localFolderPath, rename.newFilename)
         try {
           copyFileSync(sourcePath, localPath)
-          // Delete old local file
-          // unlinkSync(rename.localFilePath) // Optional cleanup
         } catch (e) {
           logger.warn(`Failed to copy renamed file ${rename.newFilename}`, e)
         }

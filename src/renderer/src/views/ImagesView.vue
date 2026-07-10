@@ -145,9 +145,6 @@ async function copySelectedImages() {
       // Show success notification or toast (using native alert for now or status update)
       console.log(`Successfully copied ${result.count} images.`)
       
-      // Optional: Clear selection after copy? or keep it? 
-      // User might want to do other things. Let's keep it but maybe show feedback.
-      // Ideally we should use a toast notification system here.
       alert(`Successfully copied ${result.count} images to destination.`)
       clearSelection()
     } else {

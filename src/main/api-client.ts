@@ -13,9 +13,6 @@ import { getToken } from './auth-storage'
 const API_URL = process.env.API_URL || 'http://localhost:8787/api/v1'
 const APP_DOMAIN = process.env.APP_DOMAIN || 'https://lumosnap.app'
 
-console.log('[API] Initialized with URL:', API_URL)
-console.log('[API] App domain:', APP_DOMAIN)
-
 // Generic fetch wrapper
 async function apiFetch<T>(
   endpoint: string,
@@ -95,7 +92,7 @@ async function apiFetch<T>(
   })
 }
 
-// ==================== Types ====================
+// Types
 
 export interface ApiAlbum {
   id: string
@@ -177,7 +174,7 @@ export interface ApiResponse<T> {
   clientNames?: string[]
 }
 
-// ==================== Profile Types ====================
+// Profile Types
 
 export interface Booking {
   id: number
@@ -220,7 +217,7 @@ export interface ApiBillingAddress {
   createdAt: string
 }
 
-// ==================== Plan Types ====================
+// Plan Types
 
 export interface ApiPlan {
   id: number
@@ -231,7 +228,7 @@ export interface ApiPlan {
   description: string
 }
 
-// ==================== Profile API ====================
+// Profile API
 
 export const profileApi = {
   /**
@@ -345,7 +342,7 @@ export const profileApi = {
   }
 }
 
-// ==================== Plans API ====================
+// Plans API
 
 export const plansApi = {
   /**
@@ -370,7 +367,7 @@ export const plansApi = {
   }
 }
 
-// ==================== Album API ====================
+// Album API
 
 export const albumsApi = {
   /**
@@ -531,7 +528,7 @@ export const albumsApi = {
   }
 }
 
-// ==================== Upload Helpers ====================
+// Upload Helpers
 
 /**
  * Upload a file to a presigned URL (B2 storage)
@@ -604,7 +601,7 @@ export async function uploadToPresignedUrl(
   })
 }
 
-// ==================== Share Link Helpers ====================
+// Share Link Helpers
 
 /**
  * Generate a share URL for an album

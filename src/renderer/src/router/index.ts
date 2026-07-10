@@ -65,8 +65,7 @@ router.beforeEach(async (to, _from, next) => {
     await authStore.checkSession()
   }
 
-  // Setup wizard no longer requires selecting a master folder.
-  // Treat onboarding as complete once authentication succeeds.
+  // Onboarding is complete once authenticated (no master-folder step).
   const isSetupComplete = authStore.isAuthenticated
 
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
