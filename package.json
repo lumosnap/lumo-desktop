@@ -32,7 +32,6 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource/outfit": "^5.2.8",
     "@tailwindcss/vite": "^4.1.17",
-    "axios": "^1.13.2",
     "better-auth": "^1.4.5",
     "better-sqlite3": "^12.5.0",
     "chokidar": "^5.0.0",
