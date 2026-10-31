@@ -17,13 +17,22 @@ import {
   X,
   ExternalLink,
   FolderOpen,
-  FolderSearch,
-  MessageSquare,
-  ImageOff
+  Layers
 } from 'lucide-vue-next'
+import PhotoTile from '../components/PhotoTile.vue'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import type PhotoSwipe from 'photoswipe'
+import type { SlideData } from 'photoswipe'
 import 'photoswipe/style.css'
+import { useVirtualizer, defaultRangeExtractor, type Range } from '@tanstack/vue-virtual'
+import {
+  columnsForWidth,
+  flattenRows,
+  orderForGrouping,
+  GRID_GAP,
+  type GroupableImage,
+  type Tile
+} from '../utils/grid'
 
 const route = useRoute()
 const networkStore = useNetworkStore()
@@ -41,7 +50,7 @@ interface Comment {
   createdAt: string
 }
 
-interface Image {
+interface Image extends GroupableImage {
   id: number
   originalFilename: string
   localFilePath: string
@@ -101,28 +110,39 @@ const showNotesSidebar = ref(false)
 const currentNotesImage = ref<Image | null>(null)
 let notesReturnFocus: HTMLElement | null = null
 
-// Lightbox
+// Lightbox: slides come from this array, since tiles may be virtualized away
 let lightbox: PhotoSwipeLightbox | null = null
+let lbItems: Image[] = []
+let lbFromGrid = false // false while browsing one burst's frames
 const galleryEl = ref<HTMLElement | null>(null)
 
 // "Picked by" tooltip
 const tip = ref<{ left: number; top: number; names: string[] } | null>(null)
 
-// Pagination
-const page = ref(1)
-const PAGE_SIZE = 50
-const loadMoreTrigger = ref<HTMLElement | null>(null)
-let observer: IntersectionObserver | null = null
+// Virtualized rows, scrolled by AppLayout's #main
+const scrollEl = ref<HTMLElement | null>(null)
+const columns = ref(4)
+const galleryWidth = ref(0)
+const scrollMargin = ref(0)
+const stackBursts = ref(true)
 
 // Selection
 const selectedImageIds = ref<Set<number>>(new Set())
 const isSelectionMode = computed(() => selectedImageIds.value.size > 0)
 const copying = ref(false)
 
-function toggleSelection(imageId: number): void {
+// A stacked burst selects and deselects as a whole
+const tileIds = (tile: Tile<Image>): number[] => (tile.burst ?? [tile.image]).map((i) => i.id)
+const isTileSelected = (tile: Tile<Image>): boolean =>
+  tileIds(tile).every((id) => selectedImageIds.value.has(id))
+
+function toggleTile(tile: Tile<Image>): void {
+  const on = isTileSelected(tile)
   const next = new Set(selectedImageIds.value)
-  if (next.has(imageId)) next.delete(imageId)
-  else next.add(imageId)
+  for (const id of tileIds(tile)) {
+    if (on) next.delete(id)
+    else next.add(id)
+  }
   selectedImageIds.value = next
 }
 
@@ -162,12 +182,96 @@ async function copySelectedImages(): Promise<void> {
   }
 }
 
+// Capture-time order when the album has moments, else upload order
+const orderedImages = computed(() => orderForGrouping(images.value))
 const filteredImages = computed(() => {
-  if (!showFavoritesOnly.value) return images.value
-  return images.value.filter((img) => img.isFavorite)
+  if (!showFavoritesOnly.value) return orderedImages.value
+  return orderedImages.value.filter((img) => img.isFavorite)
 })
 
-const displayedImages = computed(() => filteredImages.value.slice(0, page.value * PAGE_SIZE))
+const grid = computed(() =>
+  flattenRows(filteredImages.value, { columns: columns.value, stackBursts: stackBursts.value })
+)
+const hasBursts = computed(() => images.value.some((img) => img.burstId != null))
+const HEADER_H = 44
+
+const tileH = (): number =>
+  galleryWidth.value
+    ? (((galleryWidth.value - GRID_GAP * (columns.value - 1)) / columns.value) * 2) / 3
+    : 160
+
+// The moment header at or above the first visible row stays rendered so it can stick.
+// Set inside rangeExtractor, read by virtualRows after the virtualizer notifies.
+let activeHeader: number | null = null
+
+const rowVirtualizer = useVirtualizer(
+  computed(() => ({
+    count: grid.value.rows.length,
+    getScrollElement: () => scrollEl.value,
+    estimateSize: (i: number) => (grid.value.rows[i]?.kind === 'header' ? HEADER_H : tileH()),
+    gap: GRID_GAP,
+    overscan: 3,
+    scrollMargin: scrollMargin.value,
+    getItemKey: (i: number) => grid.value.rows[i]?.key ?? i,
+    rangeExtractor: (range: Range) => {
+      activeHeader = null
+      for (const h of grid.value.headers) {
+        if (h.row > range.startIndex) break
+        activeHeader = h.row
+      }
+      const next = defaultRangeExtractor(range).filter((i) => i !== activeHeader)
+      return activeHeader === null ? next : [activeHeader, ...next]
+    }
+  }))
+)
+
+const virtualRows = computed(() =>
+  rowVirtualizer.value.getVirtualItems().map((v) => ({
+    v,
+    row: grid.value.rows[v.index],
+    sticky: v.index === activeHeader
+  }))
+)
+
+// Column count, row height and the gallery's offset in the scroller, kept in step with layout
+function updateGridLayout(): void {
+  const el = galleryEl.value
+  if (!el) return
+  scrollEl.value = el.closest('.main') as HTMLElement | null
+  columns.value = columnsForWidth(el.clientWidth, window.innerWidth)
+  galleryWidth.value = el.clientWidth
+  if (scrollEl.value)
+    scrollMargin.value =
+      el.getBoundingClientRect().top -
+      scrollEl.value.getBoundingClientRect().top +
+      scrollEl.value.scrollTop
+  rowVirtualizer.value.measure()
+}
+
+const resizeObserver = new ResizeObserver(() => updateGridLayout())
+// AppLayout's offline / low-storage banners come and go above the gallery and shift it
+const bannerObserver = new MutationObserver(() => updateGridLayout())
+watch(
+  galleryEl,
+  (el) => {
+    resizeObserver.disconnect()
+    bannerObserver.disconnect()
+    if (el) {
+      resizeObserver.observe(el)
+      updateGridLayout()
+      if (scrollEl.value) bannerObserver.observe(scrollEl.value, { childList: true })
+    }
+  },
+  { flush: 'post' }
+)
+// The selection bar is a little taller than the title bar, which moves the grid
+watch(isSelectionMode, () => nextTick(updateGridLayout))
+
+const currentHeader = computed(() => virtualRows.value.find((r) => r.sticky)?.v.index ?? null)
+
+function scrollToMoment(row: number): void {
+  rowVirtualizer.value.scrollToIndex(row, { align: 'start' })
+}
 
 const favoritedPhotosCount = computed(() => images.value.filter((img) => img.isFavorite).length)
 
@@ -202,29 +306,6 @@ const formattedEventDate = computed(() => {
   })
 })
 
-// Infinite scroll
-function setupObserver(): void {
-  if (observer) observer.disconnect()
-  observer = new IntersectionObserver(
-    (entries) => {
-      if (entries[0].isIntersecting && displayedImages.value.length < filteredImages.value.length) {
-        page.value++
-      }
-    },
-    { root: null, rootMargin: '200px', threshold: 0.1 }
-  )
-  if (loadMoreTrigger.value) observer.observe(loadMoreTrigger.value)
-}
-
-// Re-observe after each page so a trigger that stays in view keeps loading
-watch(
-  () => [loadMoreTrigger.value, filteredImages.value.length, displayedImages.value.length],
-  () => {
-    if (loadMoreTrigger.value) setupObserver()
-  },
-  { flush: 'post' }
-)
-
 // Thumbnail lives in a .thumbnails subfolder; falls back to the original on error
 function getThumbnailPath(localFilePath: string): string {
   const lastSlash = localFilePath.lastIndexOf('/')
@@ -237,7 +318,6 @@ function getThumbnailPath(localFilePath: string): string {
 async function loadAlbumImages(): Promise<void> {
   loading.value = true
   error.value = null
-  page.value = 1
   isFavoritesLoaded.value = false
 
   try {
@@ -259,9 +339,31 @@ async function loadAlbumImages(): Promise<void> {
     error.value = err instanceof Error ? err.message : 'Failed to load album'
   } finally {
     loading.value = false
-    await nextTick()
-    setupObserver()
   }
+}
+
+// Grouping changed in main: swap in the new fields in place, keeping picks and scroll position
+let offAnalyzed: (() => void) | null = null
+async function refreshGrouping(): Promise<void> {
+  const result = await window.api.albums.getImages(albumId)
+  if (!result.success || !result.images) return
+  const prev = new Map(images.value.map((img) => [img.id, img]))
+  const top = scrollEl.value?.scrollTop
+  images.value = result.images.map((img) => {
+    const old = prev.get(img.id)
+    return old
+      ? {
+          ...img,
+          isFavorite: old.isFavorite,
+          favoritedBy: old.favoritedBy,
+          favoriteCount: old.favoriteCount,
+          comments: old.comments,
+          notesCount: old.notesCount
+        }
+      : img
+  })
+  await nextTick()
+  if (scrollEl.value && top !== undefined) scrollEl.value.scrollTop = top
 }
 
 // Fetch picks and merge who-picked, notes and comments into the images
@@ -347,7 +449,6 @@ async function onClientFilterChange(): Promise<void> {
 
 async function viewAll(): Promise<void> {
   showFavoritesOnly.value = false
-  page.value = 1
   if (selectedClientName.value) {
     selectedClientName.value = ''
     await onClientFilterChange()
@@ -357,13 +458,11 @@ async function viewAll(): Promise<void> {
 async function viewFav(): Promise<void> {
   await waitForFavorites()
   showFavoritesOnly.value = true
-  page.value = 1
 }
 
 async function pickClient(name: string): Promise<void> {
   selectedClientName.value = selectedClientName.value === name ? '' : name
   showFavoritesOnly.value = true
-  page.value = 1
   clearSelection()
   await onClientFilterChange()
 }
@@ -449,13 +548,37 @@ function closeNotesSidebar(): void {
   notesReturnFocus?.focus()
 }
 
-// In selection mode a click selects instead of opening the lightbox
-function handleImageClick(event: MouseEvent, image: Image): void {
+function toSlide(image: Image): SlideData {
+  return {
+    src: `file://${image.localFilePath}`,
+    msrc:
+      getDisplayStatus(image.uploadStatus) === 'Failed'
+        ? undefined
+        : `file://${getThumbnailPath(image.localFilePath)}`,
+    width: image.width || 1920,
+    height: image.height || 1280,
+    alt: image.originalFilename
+  }
+}
+
+// In selection mode a click selects instead of opening the lightbox.
+// A stacked burst opens over just its own frames.
+function handleImageClick(event: MouseEvent, tile: Tile<Image>): void {
   if (isSelectionMode.value) {
     event.preventDefault()
-    event.stopPropagation() // keep PhotoSwipe's gallery click handler from opening
-    toggleSelection(image.id)
+    toggleTile(tile)
+    return
   }
+  // Modifier clicks keep the link's default, as PhotoSwipe's own handler did
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !lightbox) return
+  event.preventDefault()
+  lbFromGrid = !tile.burst
+  lbItems = tile.burst ?? grid.value.tiles.map((t) => t.image)
+  const start = tile.burst ? tile.burst.indexOf(tile.image) : tile.index
+  lightbox.loadAndOpen(Math.max(0, start), lbItems.map(toSlide), {
+    x: event.clientX,
+    y: event.clientY
+  })
 }
 
 const ICON = (paths: string): string =>
@@ -463,14 +586,9 @@ const ICON = (paths: string): string =>
 
 // The image behind the current PhotoSwipe slide
 function slideImage(pswp: PhotoSwipe): Image | undefined {
-  const anchor = pswp.currSlide?.data.element as HTMLAnchorElement | undefined
-  if (!anchor) return undefined
-  const imageSrc = anchor.href
-  return images.value.find(
-    (img) =>
-      `file://${img.localFilePath}` === imageSrc ||
-      imageSrc.startsWith(`file://${img.localFilePath}`)
-  )
+  const id = lbItems[pswp.currIndex]?.id
+  // Prefer the live copy, which picks up client picks merged in after opening
+  return images.value.find((img) => img.id === id) ?? lbItems[pswp.currIndex]
 }
 
 function initLightbox(): void {
@@ -480,8 +598,6 @@ function initLightbox(): void {
   }
 
   lightbox = new PhotoSwipeLightbox({
-    gallery: '#gallery',
-    children: 'a',
     pswpModule: () => import('photoswipe'),
     padding: { top: 0, bottom: 0, left: 0, right: 0 },
     bgOpacity: 0.95,
@@ -550,17 +666,24 @@ function initLightbox(): void {
     })
   })
 
+  // Zoom from the tile while it's mounted; null falls back to a fade
+  lightbox.addFilter('thumbEl', (_el, _data, index) => {
+    const at = lbFromGrid ? index : grid.value.tiles.findIndex((t) => t.image.id === lbItems[0]?.id)
+    return document.querySelector(`#gallery [data-pswp-index="${at}"] img`) as HTMLElement // null falls back to a fade
+  })
+
+  // Keep the current slide's row rendered so closing animates back to it
+  const scrollToCurrent = (): void => {
+    const index = lightbox?.pswp?.currIndex
+    if (!lbFromGrid || index === undefined) return
+    const row = grid.value.tileRow[index]
+    if (row !== undefined) rowVirtualizer.value.scrollToIndex(row)
+  }
+  lightbox.on('change', scrollToCurrent)
+  lightbox.on('close', scrollToCurrent)
+
   lightbox.init()
 }
-
-// Re-init whenever the #gallery element is (re)created
-watch(
-  galleryEl,
-  (el) => {
-    if (el) initLightbox()
-  },
-  { flush: 'post' }
-)
 
 function showTip(e: Event, names: string[]): void {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -590,14 +713,20 @@ const onAlbumStatusChanged = (_e: unknown, data: { albumId: string; needsSync: n
 
 onMounted(() => {
   loadAlbumImages()
+  initLightbox()
   window.addEventListener('keydown', onKeydown, true)
   if (window.api && window.api.on) window.api.on('album:status-changed', onAlbumStatusChanged)
+  offAnalyzed = window.api.albums.onAnalyzed((id) => {
+    if (id === albumId && !loading.value) refreshGrouping()
+  })
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown, true)
   if (window.api && window.api.off) window.api.off('album:status-changed', onAlbumStatusChanged)
-  observer?.disconnect()
+  resizeObserver.disconnect()
+  bannerObserver.disconnect()
+  offAnalyzed?.()
   if (lightbox) {
     lightbox.destroy()
     lightbox = null
@@ -724,6 +853,15 @@ onUnmounted(() => {
         <div v-else class="g-bar">
           <span class="t">{{ barTitle }}</span>
           <span class="m num">{{ nf(filteredImages.length) }}</span>
+          <button
+            v-if="hasBursts"
+            class="btn sm ghost stack-toggle"
+            style="margin-left: auto"
+            :aria-pressed="stackBursts"
+            @click="stackBursts = !stackBursts"
+          >
+            <Layers />Stack bursts
+          </button>
         </div>
 
         <div v-if="gridLoading" class="photos" aria-busy="true">
@@ -748,108 +886,63 @@ onUnmounted(() => {
         </div>
 
         <template v-else>
-          <div id="gallery" ref="galleryEl" class="photos" :class="{ selecting: isSelectionMode }">
-            <div
-              v-for="image in displayedImages"
-              :key="image.id"
-              class="ph"
-              :class="{
-                on: selectedImageIds.has(image.id),
-                failed: getDisplayStatus(image.uploadStatus) === 'Failed'
-              }"
-            >
-              <a
-                :href="`file://${image.localFilePath}`"
-                :data-pswp-width="image.width || 1920"
-                :data-pswp-height="image.height || 1280"
-                target="_blank"
-                :aria-label="
-                  image.originalFilename +
-                  (image.favoritedBy?.length
-                    ? ', picked by ' + image.favoritedBy.map(firstName).join(', ')
-                    : '')
-                "
-                style="
-                  display: grid;
-                  place-items: center;
-                  width: 100%;
-                  height: 100%;
-                  color: inherit;
-                  text-decoration: none;
-                "
-                @click.capture="handleImageClick($event, image)"
+          <div class="g-browse">
+            <div id="gallery" ref="galleryEl" :class="{ selecting: isSelectionMode }">
+              <div
+                style="position: relative"
+                :style="{ height: `${rowVirtualizer.getTotalSize()}px` }"
               >
-                <span v-if="getDisplayStatus(image.uploadStatus) === 'Failed'"
-                  ><ImageOff /><br />{{ image.originalFilename }}<br />couldn't be read</span
-                >
-                <img
-                  v-else
-                  :src="`file://${getThumbnailPath(image.localFilePath)}`"
-                  :alt="image.originalFilename"
-                  loading="lazy"
-                  @error="
-                    (e) => ((e.target as HTMLImageElement).src = `file://${image.localFilePath}`)
-                  "
-                />
-              </a>
-              <span v-if="getDisplayStatus(image.uploadStatus) === 'Failed'" class="chip"
-                >Failed</span
-              >
-              <button
-                class="sel-ctl"
-                :aria-pressed="selectedImageIds.has(image.id)"
-                :aria-label="`Select ${image.originalFilename}`"
-                @click.stop="toggleSelection(image.id)"
-              >
-                <Check />
-              </button>
-              <div class="chips">
-                <span
-                  v-if="image.favoritedBy?.length"
-                  class="chip fav"
-                  tabindex="0"
-                  :aria-label="`Picked by ${image.favoritedBy.join(', ')}`"
-                  @pointerenter="showTip($event, image.favoritedBy)"
-                  @pointerleave="tip = null"
-                  @focus="showTip($event, image.favoritedBy)"
-                  @blur="tip = null"
-                >
-                  <Heart />{{ image.favoritedBy.length }}
-                </span>
-                <button
-                  v-if="(image.notesCount || 0) > 0"
-                  class="chip"
-                  :aria-label="`${image.notesCount} client notes`"
-                  @click.stop="openNotesSidebar(image)"
-                >
-                  <MessageSquare />{{ image.notesCount }}
-                </button>
-              </div>
-              <span v-if="getDisplayStatus(image.uploadStatus) === 'Processing'" class="chip proc">
-                <span
-                  class="spin brand"
-                  style="width: 12px; height: 12px; border-width: 1.5px"
-                ></span
-                >Processing
-              </span>
-              <div class="fname">
-                <span>{{ image.originalFilename }}</span>
-                <button
-                  aria-label="Show original in Finder"
-                  title="Show original in Finder"
-                  @click.stop="showOriginalInFolder(image)"
-                >
-                  <FolderSearch />
-                </button>
+                <template v-for="{ v, row, sticky } in virtualRows" :key="v.key">
+                  <div
+                    v-if="row.kind === 'header'"
+                    class="g-moment"
+                    :class="{ sticky }"
+                    :style="
+                      sticky ? undefined : { transform: `translateY(${v.start - scrollMargin}px)` }
+                    "
+                  >
+                    {{ row.label }}
+                  </div>
+                  <div
+                    v-else
+                    class="photos g-row"
+                    :style="{
+                      gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                      transform: `translateY(${v.start - scrollMargin}px)`
+                    }"
+                  >
+                    <PhotoTile
+                      v-for="tile in row.tiles"
+                      :key="tile.image.id"
+                      :image="tile.image"
+                      :burst="tile.burst"
+                      :index="tile.index"
+                      :status="getDisplayStatus(tile.image.uploadStatus)"
+                      :thumb="`file://${getThumbnailPath(tile.image.localFilePath)}`"
+                      :selected="isTileSelected(tile)"
+                      @open="handleImageClick($event, tile)"
+                      @toggle="toggleTile(tile)"
+                      @tip="showTip"
+                      @untip="tip = null"
+                      @notes="openNotesSidebar(tile.image)"
+                      @reveal="showOriginalInFolder(tile.image)"
+                    />
+                  </div>
+                </template>
               </div>
             </div>
-          </div>
-          <div
-            v-if="displayedImages.length < filteredImages.length"
-            ref="loadMoreTrigger"
-            class="loadmore"
-          >
-            <span class="spin"></span>Loading more photos
+            <nav v-if="grid.headers.length > 1" class="g-scrub" aria-label="Moments">
+              <button
+                v-for="h in grid.headers"
+                :key="h.row"
+                :aria-label="h.label"
+                :title="h.label"
+                :aria-current="h.row === currentHeader || undefined"
+                @click="scrollToMoment(h.row)"
+              >
+                {{ h.label.split(' · ')[1] }}
+              </button>
+            </nav>
           </div>
         </template>
       </section>
@@ -895,6 +988,76 @@ onUnmounted(() => {
     </Modal>
   </AppLayout>
 </template>
+
+<style scoped>
+.g-row,
+.g-moment {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+.g-moment {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: var(--card);
+}
+.g-moment.sticky {
+  position: sticky;
+  z-index: 2;
+}
+.stack-toggle[aria-pressed='true'] {
+  background: var(--brand-wash);
+  border-color: var(--brand-soft);
+}
+/* The scrubber takes its own column, so the grid's width (and column count) leaves room for it */
+.g-browse {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+#gallery {
+  flex: 1;
+  min-width: 0;
+}
+.g-scrub {
+  position: sticky;
+  top: 50vh;
+  transform: translateY(-50%);
+  flex: none;
+  z-index: 5;
+  display: grid;
+  gap: 2px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--card);
+  border-radius: var(--r-inset);
+  box-shadow: var(--lift);
+}
+.g-scrub button {
+  border: 0;
+  background: none;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+  text-align: right;
+  white-space: nowrap;
+}
+.g-scrub button:hover {
+  background: var(--inset);
+  color: var(--ink);
+}
+.g-scrub button[aria-current='true'] {
+  background: var(--brand-wash);
+  color: var(--ink);
+}
+</style>
 
 <style>
 /* PhotoSwipe chrome in the mock's lightbox look (.lb) */

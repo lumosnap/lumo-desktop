@@ -20,6 +20,16 @@ type AlbumImageWithFavorites = Image & {
   favoriteCount: number
   notesCount: number
   comments: Array<{ clientName: string; notes: string | null; createdAt: string }>
+  // Browse grouping (null on albums not yet analysed)
+  capturedAt: number | null // EXIF wall-clock encoded as UTC: format with timeZone 'UTC'
+  cameraId: string | null
+  rating: number | null
+  phash: string | null
+  sharpness: number | null
+  thumbhash: string | null // base64
+  burstId: string | null
+  isBurstCover: boolean
+  momentId: string | null
 }
 
 declare global {
@@ -91,6 +101,7 @@ declare global {
         getImages: (
           albumId: string
         ) => Promise<{ success: boolean; images: AlbumImageWithFavorites[]; error?: string }>
+        onAnalyzed: (callback: (albumId: string) => void) => () => void
         deleteImage: (
           albumId: string,
           imageId: number

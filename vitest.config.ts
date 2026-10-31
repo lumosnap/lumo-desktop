@@ -7,7 +7,7 @@ export default defineConfig({
     environment: 'node',
 
     // Include main process test files
-    include: ['src/main/**/*.test.ts'],
+    include: ['src/main/**/*.test.ts', 'src/renderer/**/*.test.ts'],
 
     // Exclude E2E tests (handled by Playwright)
     exclude: ['e2e/**', 'node_modules/**'],

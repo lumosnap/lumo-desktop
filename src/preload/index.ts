@@ -84,6 +84,13 @@ const api = {
       albumId: string
     ): Promise<{ success: boolean; images: AlbumImageWithFavorites[]; error?: string }> =>
       ipcRenderer.invoke('album:getImages', albumId),
+    // Grouping/analysis results changed for an album; returns the unsubscribe
+    onAnalyzed: (callback: (albumId: string) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, data: { albumId: string }): void =>
+        callback(data.albumId)
+      ipcRenderer.on('album:analyzed', handler)
+      return () => ipcRenderer.removeListener('album:analyzed', handler)
+    },
     deleteImage: (
       albumId: string,
       imageId: number
