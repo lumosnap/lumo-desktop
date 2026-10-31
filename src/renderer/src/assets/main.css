@@ -448,7 +448,7 @@ svg.lucide {
 }
 .input:focus {
   border-color: var(--brand);
-  background: var(--card);
+  background-color: var(--card); /* not the shorthand: select.input keeps its chevron */
   box-shadow: 0 0 0 3px var(--brand-wash);
 }
 .input[readonly] {
@@ -2264,4 +2264,11 @@ dialog[open] {
 .main::-webkit-scrollbar-thumb {
   background: var(--line-2);
   border-radius: 8px;
+}
+
+/* Wedding tradition presets: an even 2×2, never one orphan on its own row */
+.tag-trad {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }

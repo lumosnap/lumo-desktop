@@ -4,6 +4,7 @@ import Modal from './ui/Modal.vue'
 import { FolderOpen, Folder, X } from 'lucide-vue-next'
 import { useProfileStore } from '../stores/profile'
 import { useNetworkStore } from '../stores/network'
+import { EVENT_TYPES } from '../utils/tags'
 
 const profileStore = useProfileStore()
 const networkStore = useNetworkStore()
@@ -18,6 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const title = ref<string>('')
+const eventType = ref('wedding') // picks the tags AI suggests; changeable later in Album tags
 const isCreating = ref(false)
 const error = ref<string | null>(null)
 
@@ -90,7 +92,8 @@ async function createAlbum(): Promise<void> {
       title: title.value.trim(),
       eventDate: null,
       sourceFolderPath: sourceFolderPath.value,
-      albumType: 'standalone'
+      albumType: 'standalone',
+      eventType: eventType.value
     })
 
     if (result.success) {
@@ -112,6 +115,7 @@ async function createAlbum(): Promise<void> {
 
 function resetForm(): void {
   title.value = ''
+  eventType.value = 'wedding'
   error.value = null
   sourceFolderPath.value = ''
 }
@@ -126,11 +130,11 @@ function handleClose(): void {
 
 <template>
   <Modal :show="show" title="New album" @close="handleClose">
-    <form id="create-album" @submit.prevent="createAlbum">
+    <form id="create-album" style="display: grid; gap: 16px" @submit.prevent="createAlbum">
       <div
         v-if="limitWarning"
         class="inset"
-        style="display: flex; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 16px"
+        style="display: flex; gap: 8px; align-items: center; font-size: 13px"
       >
         <span class="dot" :class="limitWarning.type"></span>
         <span style="flex: 1">{{ limitWarning.message }}</span>
@@ -146,10 +150,17 @@ function handleClose(): void {
           v-model="title"
           class="input"
           required
-          placeholder="Meera's 1st birthday"
+          placeholder="Anjali &amp; Rahul"
           :disabled="isCreating"
           autofocus
         />
+      </div>
+
+      <div class="field">
+        <label for="a-event">What kind of event?</label>
+        <select id="a-event" v-model="eventType" class="input" :disabled="isCreating">
+          <option v-for="e in EVENT_TYPES" :key="e.id" :value="e.id">{{ e.label }}</option>
+        </select>
       </div>
 
       <div class="field">

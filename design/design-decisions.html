@@ -174,6 +174,29 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-10-31-tags">
+<h2>Session 2026-10-31 (3): album tags by kind of event</h2>
+<p>Existing work, Minimal level, component scope: the New album dialog, the Album tags dialog and the tag picker. The requester asked that the tag settings must not feel complex. Each album now has a kind of event (Wedding, Birthday &amp; party, Corporate, Baby shower &amp; naming, Concert &amp; stage show, Something else). The kind of event sets the tags that AI suggests. Screens: 960 px to 2560 px, desktop only.</p>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>New album</td><td>One field, "What kind of event?", a native select under the name. Wedding is the default. The name example is now "Anjali &amp; Rahul"</td><td>The photographer chooses once and moves on. A select is one row tall and uses the system's own <code>select.input</code></td><td class="rejected">Six radio cards with icons; a tag step in the dialog</td></tr>
+<tr><td>Album tags, default view</td><td>The event select, then one grey line: "Suggesting Bride, Groom, Family, Kids and 25 more". Then the "Choose tags…" link. No checklist</td><td>Most photographers never need to change one tag. The line shows what "suggested" means without a list. The dialog is 300 px tall and does not scroll</td><td class="rejected">The old dialog: 60 checkboxes in six groups, open at all times</td></tr>
+<tr><td>Change the event</td><td>The grey line changes to "Suggestions switch to birthday &amp; party tags when you save. Tags you added by hand stay." The "Choose tags…" link goes away until you save</td><td>A new event starts from its own suggested tags. The app does not know those tags until main gives them, so we do not show a list that is wrong</td><td class="rejected">Apply the event at once (Cancel would not undo it)</td></tr>
+<tr><td>Choose tags…</td><td>A native <code>details</code>. Inside: the event's tags by category, then "More tags" (tags from the other events, A to Z). One checkbox each. No counts and no All / None links</td><td>Only people who want control see it. Counts and All / None doubled the noise for a rare task</td><td class="rejected">Keep the old checklist; a second dialog</td></tr>
+<tr><td>Chosen tags</td><td>The grey line says "Suggesting 28 tags you chose · Use the suggested ones". The link goes back to the event's tags</td><td>The one way back is next to the sentence that shows you left the default</td><td class="rejected">A "Reset" button in the footer</td></tr>
+<tr><td>Wedding tradition</td><td>Kept, only for Wedding, only inside "Choose tags…": Kerala Hindu, North Indian Hindu, Christian, Muslim. Each is the wedding tags without the rituals that tradition does not have. "All" is removed</td><td>Without them, a Christian wedding gets "Pheras" and "Nikah" suggestions, and you must clear about ten boxes. "Use the suggested ones" now does what "All" did</td><td class="rejected">Remove the presets; show them at the top for every event</td></tr>
+<tr><td>Tag picker</td><td>On the photo, then the album's tags by category, then "More tags" (A to Z), then Custom. "More tags" uses the same small grey heading</td><td>The tags for this event come first. Other tags stay one scroll away for the odd photo</td><td class="rejected">Hide tags from other events</td></tr>
+<tr><td>Focus</td><td>The dialog opens on the event select. Esc and Cancel return focus to the button that opened it (native <code>dialog</code>)</td><td>The event is the main choice; keyboard users do not lose their place</td><td class="rejected">Focus on the first preset</td></tr>
+<tr><td>Select focus</td><td><code>.input:focus</code> sets <code>background-color</code>, not <code>background</code></td><td>The shorthand removed the chevron from a focused select (drift fix)</td><td class="rejected">Keep the shorthand</td></tr>
+<tr><td>New album spacing</td><td>The form is a grid with 16 px gaps</td><td>The fields touched each other (drift fix; the dialog body uses 16 px)</td><td class="rejected">No gap</td></tr>
+</table>
+<h3>Mechanics</h3>
+<p>All IPC calls get plain copies (<code>[...set]</code>), because contextBridge cannot clone Vue proxies. Save sends one call: <code>setEventType</code> when the event changed, otherwise <code>setAlbumConfig</code> (null when the chosen tags equal the event's tags). The rule is <code>tagSavePlan</code> in <code>utils/tags.ts</code>, with tests.</p>
+<h3>Checks</h3>
+<p>Rendered the Vite page in headless Chromium with a mocked <code>window.api</code> at 1280 × 820: default, open, chosen tags, event changed, picker, New album. Focus starts on the select and goes back to the opener on Esc. Not done: a fresh-reviewer critique, check.py, and the real Electron window with main's real tag packs.</p>
+</article>
+
 <article id="session-2026-10-31-pinned">
 <h2>Session 2026-10-31 (2): the gallery controls stay in reach</h2>
 <p>Existing work, Minimal level, component scope: the top of the album gallery. Problem: in a 10,000-photo album the sets, the tag search and the tag chips scrolled away with the photos. On windows 960 px tall or less the side panel (album name, Share, Picks, Picked by) scrolled away too. Screens: 960 px (the app minimum) to 2560 px, desktop only.</p>

@@ -9,7 +9,11 @@ import {
   groupVocab,
   PRESETS,
   presetSlugs,
-  CATEGORIES
+  CATEGORIES,
+  listSome,
+  pickerGroups,
+  tagSavePlan,
+  sameSet
 } from './tags'
 import { TAGS } from '../../../main/tags/vocabulary'
 
@@ -101,17 +105,17 @@ const vocab = TAGS.map((t) => ({ slug: t.slug, label: tagLabel(t.slug), category
 describe('PRESETS', () => {
   it('only name real slugs, and none excludes a tag twice', () => {
     const slugs = new Set(TAGS.map((t) => t.slug))
-    expect(slugs.size).toBe(60)
     for (const p of PRESETS) {
       expect(p.exclude.filter((s) => !slugs.has(s))).toEqual([])
       expect(new Set(p.exclude).size).toBe(p.exclude.length)
     }
   })
-  it('turn on everything but the excluded tags', () => {
-    expect(presetSlugs([], vocab)).toHaveLength(60)
-    const christian = presetSlugs(PRESETS.find((p) => p.name === 'Christian')!.exclude, vocab)
+  it('turn on the pack minus the excluded tags', () => {
+    const pack = vocab.map((t) => t.slug)
+    const christian = presetSlugs(PRESETS.find((p) => p.name === 'Christian')!.exclude, pack)
     expect(christian).toContain('church-wedding')
     expect(christian).not.toContain('pheras')
+    expect(presetSlugs(['pheras'], ['bride', 'pheras'])).toEqual(['bride'])
   })
 })
 
@@ -126,5 +130,64 @@ describe('groupVocab', () => {
       ]
     )
     expect(groupVocab(vocab, 'zzz')).toEqual([])
+  })
+})
+
+describe('listSome', () => {
+  it('names a few and counts the rest', () => {
+    expect(listSome(['A'])).toBe('A')
+    expect(listSome(['A', 'B', 'C'])).toBe('A, B and C')
+    expect(listSome(['A', 'B', 'C', 'D', 'E'])).toBe('A, B, C, D and E')
+    expect(listSome(['A', 'B', 'C', 'D', 'E', 'F'])).toBe('A, B, C, D and 2 more')
+  })
+})
+
+describe('pickerGroups', () => {
+  const v = [
+    { slug: 'bride', label: 'Bride', category: 'people' },
+    { slug: 'stage', label: 'Stage', category: 'settings' },
+    { slug: 'cake', label: 'Cake', category: 'things' },
+    { slug: 'balloons', label: 'Balloons', category: 'things' }
+  ]
+  it('puts the active tags first by category, then the rest as More tags', () => {
+    expect(
+      pickerGroups(v, ['bride', 'stage']).map((g) => [g.label, g.tags.map((t) => t.slug)])
+    ).toEqual([
+      ['People', ['bride']],
+      ['Settings', ['stage']],
+      ['More tags', ['balloons', 'cake']]
+    ])
+  })
+  it('filters both parts and drops empty groups', () => {
+    expect(pickerGroups(v, ['bride'], 'ca').map((g) => g.label)).toEqual(['More tags'])
+    expect(
+      pickerGroups(
+        v,
+        v.map((t) => t.slug)
+      ).some((g) => g.category === 'more')
+    ).toBe(false)
+  })
+})
+
+describe('tagSavePlan', () => {
+  const cfg = { eventType: 'wedding', enabled: null, pack: ['bride', 'groom', 'haldi'] }
+  it('sends a new event type alone', () => {
+    expect(tagSavePlan(cfg, 'birthday', ['bride'])).toEqual({ eventType: 'birthday' })
+  })
+  it('sends nothing when nothing changed', () => {
+    expect(tagSavePlan(cfg, 'wedding', null)).toEqual({})
+    expect(tagSavePlan(cfg, 'wedding', ['haldi', 'groom', 'bride'])).toEqual({})
+    expect(tagSavePlan({ ...cfg, enabled: ['bride'] }, 'wedding', ['bride'])).toEqual({})
+  })
+  it('sends a chosen set, or null to follow the pack again', () => {
+    expect(tagSavePlan(cfg, 'wedding', ['bride'])).toEqual({ enabled: ['bride'] })
+    expect(tagSavePlan({ ...cfg, enabled: ['bride'] }, 'wedding', null)).toEqual({ enabled: null })
+    expect(tagSavePlan({ ...cfg, enabled: ['bride'] }, 'wedding', [...cfg.pack])).toEqual({
+      enabled: null
+    })
+  })
+  it('compares as sets', () => {
+    expect(sameSet(['a', 'b'], ['b', 'a'])).toBe(true)
+    expect(sameSet(['a'], ['a', 'b'])).toBe(false)
   })
 })

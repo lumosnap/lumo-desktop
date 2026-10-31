@@ -55,10 +55,13 @@ import {
   searchTags,
   slugify,
   groupVocab,
+  pickerGroups,
+  listSome,
+  tagSavePlan,
+  sameSet,
   PRESETS,
   presetSlugs,
-  type AlbumTagConfig,
-  type VocabTag
+  type AlbumTagConfig
 } from '../utils/tags'
 
 const route = useRoute()
@@ -491,7 +494,7 @@ async function editTag(op: 'add' | 'remove', ids: number[], slug: string): Promi
   return true
 }
 
-// Tag picker (popover): tags on the photos, then the album's tag set by category, then custom
+// Tag picker (popover): tags on the photos, the album's tag set by category, More tags, custom
 const pickPop = computed(() => (pop.value?.kind === 'tags' ? pop.value : null))
 const pickPresent = computed(() => {
   const p = pickPop.value
@@ -502,9 +505,9 @@ const pickGroups = computed(() => {
   const c = tagConfig.value
   if (!p || !c) return []
   const present = new Set(tagCountsFor(images.value, new Set(p.ids)).map(([t]) => t))
-  const vocab = c.enabled ? c.vocabulary.filter((t) => c.enabled!.includes(t.slug)) : c.vocabulary
-  const groups = groupVocab(
-    vocab.filter((t) => !present.has(t.slug)),
+  const groups = pickerGroups(
+    c.vocabulary.filter((t) => !present.has(t.slug)),
+    c.enabled ?? c.pack,
     p.query
   )
   // Custom tags already used in this album
@@ -548,49 +551,63 @@ async function pickRemove(slug: string): Promise<void> {
   popEl.value?.querySelector('input')?.focus()
 }
 
-// Album tag set dialog
+// Album tags dialog: event type, then (only if asked for) the tags themselves
 const showTagSet = ref(false)
-const tagDraft = ref(new Set<string>())
+const draftEvent = ref('')
+const tagDraft = ref<Set<string> | null>(null) // null = the event's suggested tags
 const savingTagSet = ref(false)
-const tagSetGroups = computed(() => groupVocab(tagConfig.value?.vocabulary ?? []))
+const eventChanged = computed(() => draftEvent.value !== tagConfig.value?.eventType)
+const draftOn = computed(() => tagDraft.value ?? new Set(tagConfig.value?.pack))
+const draftIsPack = computed(
+  () => !tagDraft.value || sameSet([...tagDraft.value], tagConfig.value?.pack ?? [])
+)
+const eventLabel = (id: string): string =>
+  tagConfig.value?.eventTypes.find((e) => e.id === id)?.label ?? id
+const packSummary = computed(() => listSome((tagConfig.value?.pack ?? []).map(labelOf)))
+const tagSetGroups = computed(() => {
+  const c = tagConfig.value
+  if (!c) return []
+  const pack = new Set(c.pack)
+  return [
+    ...groupVocab(c.vocabulary.filter((t) => pack.has(t.slug))),
+    ...pickerGroups(
+      c.vocabulary.filter((t) => !pack.has(t.slug)),
+      []
+    )
+  ]
+})
 
 function openTagSet(): void {
   const c = tagConfig.value
   if (!c) return
-  tagDraft.value = new Set(c.enabled ?? c.vocabulary.map((t) => t.slug))
+  draftEvent.value = c.eventType
+  tagDraft.value = c.enabled ? new Set(c.enabled) : null
   showTagSet.value = true
 }
 function toggleDraft(slug: string): void {
-  const next = new Set(tagDraft.value)
+  const next = new Set(draftOn.value)
   if (!next.delete(slug)) next.add(slug)
   tagDraft.value = next
 }
-function setDraftGroup(tags: VocabTag[], on: boolean): void {
-  const next = new Set(tagDraft.value)
-  for (const t of tags) {
-    if (on) next.add(t.slug)
-    else next.delete(t.slug)
-  }
-  tagDraft.value = next
-}
-const presetOn = (exclude: string[]): string[] =>
-  presetSlugs(exclude, tagConfig.value?.vocabulary ?? [])
-const isPreset = (exclude: string[]): boolean => {
-  const on = presetOn(exclude)
-  return on.length === tagDraft.value.size && on.every((s) => tagDraft.value.has(s))
-}
+const isPreset = (exclude: string[]): boolean =>
+  sameSet([...draftOn.value], presetSlugs(exclude, tagConfig.value?.pack ?? []))
 async function saveTagSet(): Promise<void> {
-  const vocab = tagConfig.value?.vocabulary
-  if (!vocab || savingTagSet.value) return
+  const c = tagConfig.value
+  if (!c || savingTagSet.value) return
+  // contextBridge can't clone Vue reactive proxies: the plan holds plain copies
+  const plan = tagSavePlan(c, draftEvent.value, tagDraft.value && [...tagDraft.value])
+  if (!plan.eventType && plan.enabled === undefined) return void (showTagSet.value = false)
   savingTagSet.value = true
   try {
-    const on = vocab.map((t) => t.slug).filter((s) => tagDraft.value.has(s))
-    tagConfig.value = await tagsApi.setAlbumConfig(
-      albumId,
-      on.length === vocab.length ? null : [...on]
-    )
+    tagConfig.value = plan.eventType
+      ? await tagsApi.setEventType(albumId, plan.eventType)
+      : await tagsApi.setAlbumConfig(albumId, plan.enabled ?? null)
     showTagSet.value = false
-    toast('Album tags saved. AI suggestions update in a few seconds.')
+    toast(
+      plan.eventType
+        ? `Now suggesting ${eventLabel(plan.eventType).toLowerCase()} tags. Photos update in a few seconds.`
+        : 'Album tags saved. AI suggestions update in a few seconds.'
+    )
   } catch (err) {
     toast(`Couldn't save album tags: ${err instanceof Error ? err.message : String(err)}`)
   } finally {
@@ -1741,61 +1758,60 @@ onUnmounted(() => {
     <Modal
       :show="showTagSet"
       title="Album tags"
-      sub="The tags AI suggests for this album"
-      wide
+      sub="What AI looks for in these photos"
       @close="!savingTagSet && (showTagSet = false)"
     >
-      <div class="tag-presets" role="group" aria-label="Start from">
-        <button
-          v-for="(p, i) in PRESETS"
-          :key="p.name"
-          class="btn sm ghost"
-          :aria-pressed="isPreset(p.exclude)"
-          :autofocus="i === 0"
-          @click="tagDraft = new Set(presetOn(p.exclude))"
-        >
-          {{ p.name }}
-        </button>
+      <div class="field">
+        <label for="tag-event">What kind of event?</label>
+        <select id="tag-event" v-model="draftEvent" class="input" autofocus>
+          <option v-for="e in tagConfig?.eventTypes" :key="e.id" :value="e.id">
+            {{ e.label }}
+          </option>
+        </select>
+        <span class="hint" aria-live="polite">
+          <template v-if="eventChanged">
+            Suggestions switch to {{ eventLabel(draftEvent).toLowerCase() }} tags when you save.
+            Tags you added by hand stay.
+          </template>
+          <template v-else-if="draftIsPack">Suggesting {{ packSummary }}</template>
+          <template v-else>
+            Suggesting {{ nf(draftOn.size) }} tags you chose ·
+            <button class="link" @click="tagDraft = null">Use the suggested ones</button>
+          </template>
+        </span>
       </div>
-      <div class="tag-cats">
-        <fieldset v-for="g in tagSetGroups" :key="g.category">
-          <legend>
-            {{ g.label }}
-            <span class="n num"
-              >{{ g.tags.filter((t) => tagDraft.has(t.slug)).length }} of {{ g.tags.length }}</span
-            >
-          </legend>
-          <span class="tag-cat-ctl">
+      <details v-if="!eventChanged" class="tag-choose">
+        <summary>Choose tags…</summary>
+        <div v-if="tagConfig?.eventType === 'wedding'" class="tag-presets">
+          <span id="tag-trad">Wedding tradition</span>
+          <div role="group" aria-labelledby="tag-trad" class="tag-trad">
             <button
-              class="link"
-              :aria-label="`Select all ${g.label}`"
-              @click="setDraftGroup(g.tags, true)"
+              v-for="p in PRESETS"
+              :key="p.name"
+              class="btn sm ghost"
+              :aria-pressed="isPreset(p.exclude)"
+              @click="tagDraft = new Set(presetSlugs(p.exclude, tagConfig.pack))"
             >
-              All
+              {{ p.name }}
             </button>
-            <button
-              class="link"
-              :aria-label="`Select no ${g.label}`"
-              @click="setDraftGroup(g.tags, false)"
-            >
-              None
-            </button>
-          </span>
-          <div class="tag-checks">
-            <label v-for="t in g.tags" :key="t.slug" class="check-row">
-              <input
-                type="checkbox"
-                :checked="tagDraft.has(t.slug)"
-                @change="toggleDraft(t.slug)"
-              />
-              {{ t.label }}
-            </label>
           </div>
-        </fieldset>
-      </div>
-      <p class="tag-note">
-        Tags you add by hand stay put. AI suggestions update in a few seconds after you save.
-      </p>
+        </div>
+        <div class="tag-cats">
+          <fieldset v-for="g in tagSetGroups" :key="g.category">
+            <legend>{{ g.label }}</legend>
+            <div class="tag-checks">
+              <label v-for="t in g.tags" :key="t.slug" class="check-row">
+                <input
+                  type="checkbox"
+                  :checked="draftOn.has(t.slug)"
+                  @change="toggleDraft(t.slug)"
+                />
+                {{ t.label }}
+              </label>
+            </div>
+          </fieldset>
+        </div>
+      </details>
       <template #footer>
         <button class="btn ghost" :disabled="savingTagSet" @click="showTagSet = false">
           Cancel
@@ -1966,7 +1982,38 @@ onUnmounted(() => {
   padding: 0;
   justify-content: center;
 }
+.tag-choose summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--brand);
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.tag-choose summary::-webkit-details-marker {
+  display: none;
+}
+.tag-choose summary:hover {
+  text-decoration: underline;
+}
+.tag-choose summary:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.tag-choose[open] summary {
+  margin-bottom: 16px;
+}
 .tag-presets {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-bottom: 16px;
+}
+.tag-presets [role='group'] {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -1978,7 +2025,7 @@ onUnmounted(() => {
 .tag-cats {
   display: grid;
   gap: 16px;
-  max-height: 46vh;
+  max-height: 40vh;
   overflow-y: auto;
   margin: 0 -24px;
   padding: 0 24px;
@@ -1987,29 +2034,15 @@ onUnmounted(() => {
   border: 0;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  row-gap: 4px;
 }
 .tag-cats legend {
-  float: left; /* lets the All / None links share its line */
   font-size: 13px;
   color: var(--ink-2);
-}
-.tag-cats legend .n {
-  color: var(--ink-3);
-  font-size: 12px;
-  margin-left: 4px;
-}
-.tag-cat-ctl {
-  display: flex;
-  gap: 12px;
-  font-size: 13px;
+  padding: 0;
 }
 .tag-checks {
-  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 }
 .tag-checks .check-row {
   margin: 0;
@@ -2019,9 +2052,6 @@ onUnmounted(() => {
 .tag-checks .check-row input {
   width: 18px;
   height: 18px;
-}
-.tag-note {
-  font-size: 13px;
 }
 .set-bar .n,
 .menu .n {

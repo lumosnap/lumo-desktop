@@ -77,9 +77,22 @@ export interface VocabTag {
   category: string
 }
 export interface AlbumTagConfig {
-  enabled: string[] | null // null = every tag
-  vocabulary: VocabTag[]
+  eventType: string
+  eventTypes: { id: string; label: string }[]
+  enabled: string[] | null // null = the event type's pack
+  vocabulary: VocabTag[] // every pack's tags
+  pack: string[] // the event type's suggested tags
 }
+/** For album creation, before any album config exists. Main's list wins in the tags dialog. */
+export const EVENT_TYPES: { id: string; label: string }[] = [
+  { id: 'wedding', label: 'Wedding' },
+  { id: 'birthday', label: 'Birthday & party' },
+  { id: 'corporate', label: 'Corporate' },
+  { id: 'baby', label: 'Baby shower & naming' },
+  { id: 'concert', label: 'Concert & stage show' },
+  { id: 'general', label: 'Something else' }
+]
+
 export const CATEGORIES: [TagCategory, string][] = [
   ['events', 'Events'],
   ['people', 'People'],
@@ -89,14 +102,17 @@ export const CATEGORIES: [TagCategory, string][] = [
   ['settings', 'Settings']
 ]
 
+const matcher = (query: string): ((t: VocabTag) => boolean) => {
+  const q = query.trim().toLowerCase()
+  return (t) => !q || t.label.toLowerCase().includes(q) || t.slug.includes(q)
+}
+
 /** Vocabulary by category (in CATEGORIES order), keeping tags whose label or slug contains `query`. */
 export function groupVocab(
   vocab: readonly VocabTag[],
   query = ''
 ): { category: string; label: string; tags: VocabTag[] }[] {
-  const q = query.trim().toLowerCase()
-  const hit = (t: VocabTag): boolean =>
-    !q || t.label.toLowerCase().includes(q) || t.slug.includes(q)
+  const hit = matcher(query)
   return CATEGORIES.map(([category, label]) => ({
     category,
     label,
@@ -113,7 +129,6 @@ export function groupVocab(
  * - Kerala Hindu keeps `varmala` (garlands are exchanged) and `mehendi`, now usual for brides.
  */
 export const PRESETS: { name: string; exclude: string[] }[] = [
-  { name: 'All', exclude: [] },
   {
     name: 'Kerala Hindu',
     exclude: ['haldi', 'sangeet', 'baraat', 'pheras', 'nikah', 'church-wedding', 'church']
@@ -140,6 +155,51 @@ export const PRESETS: { name: string; exclude: string[] }[] = [
   }
 ]
 
-/** The slugs a preset turns on, in vocabulary order. */
-export const presetSlugs = (exclude: readonly string[], vocab: readonly VocabTag[]): string[] =>
-  vocab.map((t) => t.slug).filter((s) => !exclude.includes(s))
+/** The slugs a preset turns on: the wedding pack minus the rituals it excludes. */
+export const presetSlugs = (exclude: readonly string[], pack: readonly string[]): string[] =>
+  pack.filter((s) => !exclude.includes(s))
+
+export const sameSet = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && b.every((s) => a.includes(s))
+
+/** "Bride, Groom, Haldi, Mehendi and 27 more" */
+export function listSome(labels: readonly string[], n = 4): string {
+  if (labels.length <= n + 1) return labels.join(', ').replace(/, ([^,]*)$/, ' and $1')
+  return `${labels.slice(0, n).join(', ')} and ${labels.length - n} more`
+}
+
+/**
+ * Tag picker groups: the album's active tags by category, then every other tag under
+ * "More tags" (by label), each filtered by `query`.
+ */
+export function pickerGroups(
+  vocab: readonly VocabTag[],
+  active: readonly string[],
+  query = ''
+): { category: string; label: string; tags: VocabTag[] }[] {
+  const on = new Set(active)
+  const groups = groupVocab(
+    vocab.filter((t) => on.has(t.slug)),
+    query
+  )
+  const hit = matcher(query)
+  const more = vocab
+    .filter((t) => !on.has(t.slug) && hit(t))
+    .sort((a, b) => a.label.localeCompare(b.label))
+  return more.length ? [...groups, { category: 'more', label: 'More tags', tags: more }] : groups
+}
+
+/**
+ * What the tags dialog's Save sends. A new event type resets the tag set on its own, so it
+ * goes alone; a chosen set equal to the pack is sent as null, so it follows the pack.
+ */
+export function tagSavePlan(
+  cfg: Pick<AlbumTagConfig, 'eventType' | 'enabled' | 'pack'>,
+  eventType: string,
+  draft: readonly string[] | null
+): { eventType?: string; enabled?: string[] | null } {
+  if (eventType !== cfg.eventType) return { eventType }
+  const next = draft && !sameSet(draft, cfg.pack) ? [...draft] : null
+  const same = next === null ? cfg.enabled === null : !!cfg.enabled && sameSet(next, cfg.enabled)
+  return same ? {} : { enabled: next }
+}
