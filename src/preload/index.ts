@@ -124,20 +124,19 @@ const api = {
     forceRefresh: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('albums:forceRefresh')
   },
-  // Spread arrays: Vue reactive proxies can't cross IPC (structured clone fails).
   sets: {
     list: (albumId: string): Promise<SetsResult> => ipcRenderer.invoke('sets:list', albumId),
     create: (albumId: string, name: string, imageIds?: number[]): Promise<SetsResult> =>
-      ipcRenderer.invoke('sets:create', albumId, name, imageIds && [...imageIds]),
+      ipcRenderer.invoke('sets:create', albumId, name, imageIds),
     rename: (setId: string, name: string): Promise<SetsResult> =>
       ipcRenderer.invoke('sets:rename', setId, name),
     delete: (setId: string): Promise<SetsResult> => ipcRenderer.invoke('sets:delete', setId),
     reorder: (albumId: string, orderedIds: string[]): Promise<SetsResult> =>
-      ipcRenderer.invoke('sets:reorder', albumId, [...orderedIds]),
+      ipcRenderer.invoke('sets:reorder', albumId, orderedIds),
     addImages: (setId: string, imageIds: number[]): Promise<SetsResult> =>
-      ipcRenderer.invoke('sets:addImages', setId, [...imageIds]),
+      ipcRenderer.invoke('sets:addImages', setId, imageIds),
     removeImages: (setId: string, imageIds: number[]): Promise<SetsResult> =>
-      ipcRenderer.invoke('sets:removeImages', setId, [...imageIds]),
+      ipcRenderer.invoke('sets:removeImages', setId, imageIds),
     setCover: (setId: string, imageId: number | null): Promise<SetsResult> =>
       ipcRenderer.invoke('sets:setCover', setId, imageId),
     fromMoment: (albumId: string, momentId: string, name: string): Promise<SetsResult> =>
@@ -155,19 +154,19 @@ const api = {
       ipcRenderer.invoke('tags:getAlbumConfig', albumId),
     // Re-scores the album's AI tags from stored embeddings
     setAlbumConfig: (albumId: string, enabled: string[] | null): Promise<TagConfig> =>
-      ipcRenderer.invoke('tags:setAlbumConfig', albumId, enabled && [...enabled]),
+      ipcRenderer.invoke('tags:setAlbumConfig', albumId, enabled),
     add: (
       albumId: string,
       imageIds: number[],
       tag: string
     ): Promise<{ success: boolean; error?: string }> =>
-      ipcRenderer.invoke('tags:add', albumId, [...imageIds], tag),
+      ipcRenderer.invoke('tags:add', albumId, imageIds, tag),
     remove: (
       albumId: string,
       imageIds: number[],
       tag: string
     ): Promise<{ success: boolean; error?: string }> =>
-      ipcRenderer.invoke('tags:remove', albumId, [...imageIds], tag)
+      ipcRenderer.invoke('tags:remove', albumId, imageIds, tag)
   },
   sync: {
     detectChanges: (albumId: string): Promise<SyncResult> =>
