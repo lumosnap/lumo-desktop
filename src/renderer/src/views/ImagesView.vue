@@ -2437,7 +2437,8 @@ onUnmounted(() => {
             v-bind="menuBusy(`add:${s.id}`)"
             @click="addSelectedTo(s)"
           >
-            <Folder class="set-ic" />{{ s.name }}<span v-if="pending === `add:${s.id}`" class="spin"></span
+            <Folder class="set-ic" />{{ s.name
+            }}<span v-if="pending === `add:${s.id}`" class="spin"></span
             ><span v-else class="n num">{{ nf(s.imageIds.length) }}</span>
           </button>
           <hr v-if="sets.length" />
