@@ -1116,9 +1116,14 @@ select.input {
   fill: var(--ink);
   stroke: var(--ink);
 }
-/* A note to act on: the one dark chip on the tile, so it reads on any photo and apart from hearts.
-   Once done it goes back to a plain chip with a tick. */
-.chip.note.open {
+/* The client's note sits with the hearts and looks like them: same white chip, the icon filled
+   while there's something to do, outline + tick once done. Your own note (bottom right) stays the
+   one dark chip on the tile. */
+.chip.note.open:not(.mine) svg {
+  fill: var(--ink);
+  stroke: var(--ink);
+}
+.chip.note.mine.open {
   background: oklch(21% 0.01 255 / 0.88);
   color: white;
 }
