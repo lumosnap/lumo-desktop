@@ -126,11 +126,11 @@ describe('matchPeople', () => {
 })
 
 describe('decisions and gridMove', () => {
-  it('answers yes for every face not marked no', () => {
+  it('answers yes only for the faces picked', () => {
     expect(decisions([{ faceId: 1 }, { faceId: 2 }, { faceId: 3 }], new Set([2]))).toEqual([
-      { faceId: 1, yes: true },
-      { faceId: 2, yes: false },
-      { faceId: 3, yes: true }
+      { faceId: 1, yes: false },
+      { faceId: 2, yes: true },
+      { faceId: 3, yes: false }
     ])
   })
 

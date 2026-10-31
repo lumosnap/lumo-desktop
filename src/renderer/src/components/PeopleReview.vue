@@ -1,7 +1,9 @@
 <script setup lang="ts">
-// "Is this Anjali?": faces the app is not sure about. Each is a yes until clicked; Confirm sends all.
+// "Is this Anjali?": faces the app is not sure about. Tap the ones that are her; the rest are a no.
+// Picking yeses (not rejecting noes) is safer: most of these are not her, and an unread Save
+// can't turn strangers into reference faces.
 import { ref, computed, onMounted, nextTick } from 'vue'
-import { X } from 'lucide-vue-next'
+import { Check, X } from 'lucide-vue-next'
 import { toast } from '../composables/useToast'
 import {
   decisions,
@@ -26,20 +28,20 @@ const dlg = ref<HTMLDialogElement>()
 const grid = ref<HTMLElement>()
 const faces = ref<ReviewFace[] | null>(null) // null while loading
 const loadFailed = ref(false)
-const no = ref(new Set<number>())
+const yes = ref(new Set<number>())
 const remaining = ref(props.person.reviewCount)
 const busy = ref(false)
 const first = computed(() => props.person.name.split(' ')[0])
 const saveLabel = computed(() => {
-  const yes = (faces.value?.length ?? 0) - no.value.size
-  return yes ? `Save ${yes} as ${first.value}` : 'Save'
+  const n = yes.value.size
+  return n ? `Save ${n} as ${first.value}` : `None of these are ${first.value}`
 })
 const later = computed(() => Math.max(0, remaining.value - (faces.value?.length ?? 0)))
 
 async function load(): Promise<void> {
   faces.value = null
   loadFailed.value = false
-  no.value = new Set()
+  yes.value = new Set()
   try {
     faces.value = await props.api.reviewQueue(props.albumId, props.person.id, BATCH)
   } catch {
@@ -64,12 +66,12 @@ function finish(): void {
   emit('close')
 }
 
-function set(id: number, isNo: boolean): void {
+function set(id: number, isYes: boolean): void {
   if (busy.value) return // the answers being saved stay as they were sent
-  const next = new Set(no.value)
-  if (isNo) next.add(id)
+  const next = new Set(yes.value)
+  if (isYes) next.add(id)
   else next.delete(id)
-  no.value = next
+  yes.value = next
 }
 
 async function confirm(): Promise<void> {
@@ -79,7 +81,7 @@ async function confirm(): Promise<void> {
     const r = await props.api.review(
       props.albumId,
       props.person.id,
-      decisions(faces.value, no.value)
+      decisions(faces.value, yes.value)
     )
     if (!r.success) throw new Error(r.error)
     emit('changed')
@@ -106,10 +108,10 @@ function onKey(e: KeyboardEvent, i: number): void {
   let to = i
   const k = e.key.toLowerCase()
   if (k === 'y' || k === 'n') {
-    set(list[i].faceId, k === 'n')
+    set(list[i].faceId, k === 'y')
     to = Math.min(i + 1, list.length - 1)
     if (i === list.length - 1) {
-      dlg.value?.querySelector<HTMLElement>('.pr-f .primary')?.focus()
+      dlg.value?.querySelector<HTMLElement>('.pr-save')?.focus()
       e.preventDefault()
       return
     }
@@ -139,7 +141,7 @@ function crop(f: ReviewFace): Record<string, string> {
       <span class="avatar face" :style="faceStyle(person)"></span>
       <div>
         <h2 id="pr-title">Is this {{ first }}?</h2>
-        <small>Click the faces that are not {{ first }}. The rest are saved as {{ first }}.</small>
+        <small>Click the faces that are {{ first }}. The rest won't be suggested again.</small>
       </div>
       <button class="icon-btn sm plain" aria-label="Close" @click="emit('close')"><X /></button>
     </div>
@@ -164,14 +166,14 @@ function crop(f: ReviewFace): Record<string, string> {
           v-for="(f, i) in faces"
           :key="f.faceId"
           class="pr-face"
-          :aria-pressed="no.has(f.faceId)"
-          :aria-label="no.has(f.faceId) ? `Not ${first}` : first"
+          :aria-pressed="yes.has(f.faceId)"
+          :aria-label="first"
           :tabindex="i === 0 ? 0 : -1"
-          @click="set(f.faceId, !no.has(f.faceId))"
+          @click="set(f.faceId, !yes.has(f.faceId))"
           @keydown="onKey($event, i)"
         >
           <span class="crop" :style="crop(f)"></span>
-          <span v-if="no.has(f.faceId)" class="pr-not"><X />Not {{ first }}</span>
+          <span v-if="yes.has(f.faceId)" class="pr-yes"><Check />{{ first }}</span>
         </button>
       </div>
     </div>
@@ -179,14 +181,14 @@ function crop(f: ReviewFace): Record<string, string> {
     <div class="pr-f">
       <span class="num" aria-live="polite">
         <template v-if="faces">
-          {{ faces.length - no.size }} yes · {{ no.size }} no
+          {{ yes.size }} of {{ faces.length }} picked
           <template v-if="later"> · {{ later }} more after these</template>
         </template>
       </span>
       <template v-if="!loadFailed">
-        <span class="keys" aria-hidden="true"><kbd>Y</kbd> yes <kbd>N</kbd> no</span>
+        <span class="keys" aria-hidden="true"><kbd>Y</kbd> is {{ first }} <kbd>N</kbd> isn't</span>
         <button
-          class="btn primary"
+          :class="['btn', 'pr-save', yes.size ? 'primary' : 'ghost']"
           :disabled="busy || !faces?.length"
           :aria-busy="busy"
           @click="confirm"
@@ -278,9 +280,13 @@ function crop(f: ReviewFace): Record<string, string> {
     opacity 0.12s var(--ease),
     filter 0.12s var(--ease);
 }
-.pr-face[aria-pressed='true'] .crop {
-  opacity: 0.35;
-  filter: grayscale(1);
+.pr-face[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 3px var(--brand);
+  pointer-events: none;
 }
 .pr-face:hover .crop {
   filter: brightness(1.06);
@@ -289,7 +295,7 @@ function crop(f: ReviewFace): Record<string, string> {
   outline: 2px solid var(--brand);
   outline-offset: 3px;
 }
-.pr-face .pr-not {
+.pr-face .pr-yes {
   position: absolute;
   inset: auto 6px 6px;
   display: flex;
@@ -298,12 +304,12 @@ function crop(f: ReviewFace): Record<string, string> {
   gap: 4px;
   height: 24px;
   border-radius: 99px;
-  background: var(--card);
-  color: var(--ink);
+  background: var(--brand);
+  color: #fff;
   font-size: 12px;
   white-space: nowrap;
 }
-.pr-face .pr-not svg {
+.pr-face .pr-yes svg {
   width: 14px;
   height: 14px;
 }

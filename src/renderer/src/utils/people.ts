@@ -158,11 +158,12 @@ export function matchPeople<T extends { name: string }>(
 }
 
 /** Review answers: every face is a yes until it is marked no */
+/** Faces start unpicked: only the ones tapped are the person; the rest are a no */
 export function decisions(
   faces: readonly { faceId: number }[],
-  no: ReadonlySet<number>
+  yes: ReadonlySet<number>
 ): Array<{ faceId: number; yes: boolean }> {
-  return faces.map((f) => ({ faceId: f.faceId, yes: !no.has(f.faceId) }))
+  return faces.map((f) => ({ faceId: f.faceId, yes: yes.has(f.faceId) }))
 }
 
 /** Arrow keys in a grid of `n` items, `cols` wide; stays inside the grid */
