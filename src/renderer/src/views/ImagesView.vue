@@ -34,10 +34,6 @@ import {
   ScanFace,
   UserRound,
   EyeOff,
-  BookImage,
-  Users,
-  ArrowUp,
-  ArrowDown,
   NotebookPen,
   Image as ImageIcon
 } from 'lucide-vue-next'
@@ -87,21 +83,6 @@ import {
   type PeopleConfig,
   type Person
 } from '../utils/people'
-import {
-  pickersByImage,
-  listsByImage,
-  progress,
-  sentText,
-  limitsText,
-  listSummary,
-  dateValue,
-  endOfDay,
-  picksLost,
-  EVERYONE,
-  type ClientScope,
-  type Draft,
-  type List
-} from '../utils/lists'
 
 const route = useRoute()
 const networkStore = useNetworkStore()
@@ -168,14 +149,6 @@ const clientNames = ref<string[]>([])
 const selectedClientName = ref<string>('')
 const isFavoritesLoaded = ref(false)
 const isLoadingFavorites = ref(false)
-// A client selection list shown inside Picks, and one client (or EVERYONE) in it
-const activeListId = ref<string | null>(null)
-const listClient = ref<ClientScope>(null)
-const lists = ref<List[]>([])
-const activeList = computed(() => lists.value.find((l) => l.id === activeListId.value) ?? null)
-const listPickers = computed(() =>
-  activeList.value ? pickersByImage(activeList.value, listClient.value) : null
-)
 // The photographer's private notes by photo, and the filter to photos that have one
 const privateNotes = ref<Record<number, string>>({})
 const notesOnly = ref(false)
@@ -199,7 +172,7 @@ let lbFromGrid = false // false while browsing one burst's frames
 const galleryEl = ref<HTMLElement | null>(null)
 
 // "Picked by" tooltip
-const tip = ref<{ left: number; top: number; names: string[]; lists: string[] } | null>(null)
+const tip = ref<{ left: number; top: number; names: string[] } | null>(null)
 
 // Virtualized rows, scrolled by AppLayout's #main
 const scrollEl = ref<HTMLElement | null>(null)
@@ -513,12 +486,7 @@ const orderedImages = computed(() => orderForGrouping(images.value))
 // Set, picks, then people: the scope tag chips count over
 const scopedImages = computed(() => {
   const inView = inSet(orderedImages.value, activeSet.value?.imageIds ?? null)
-  const lp = listPickers.value
-  const picked = !showFavoritesOnly.value
-    ? inView
-    : lp
-      ? inView.filter((img) => lp.has(img.id))
-      : inView.filter((img) => img.isFavorite)
+  const picked = showFavoritesOnly.value ? inView.filter((img) => img.isFavorite) : inView
   const noted = notesOnly.value ? picked.filter((img) => privateNotes.value[img.id]) : picked
   return withPeople(noted, activePeople.value)
 })
@@ -1127,16 +1095,7 @@ watch(
 )
 // A new set or filter starts from its first photo. The pinned bar stays put under the pointer.
 watch(
-  [
-    activeSetId,
-    activeTags,
-    showFavoritesOnly,
-    selectedClientName,
-    activePeople,
-    activeListId,
-    listClient,
-    notesOnly
-  ],
+  [activeSetId, activeTags, showFavoritesOnly, selectedClientName, activePeople, notesOnly],
   () => {
     const el = scrollEl.value
     if (el && el.scrollTop > stuckAt.value) el.scrollTop = stuckAt.value
@@ -1169,18 +1128,11 @@ const statusLine = computed(() => {
 
 const barTitle = computed(() => {
   const base = activeSet.value?.name
-  const list = activeList.value
   const picks = !showFavoritesOnly.value
     ? (base ?? 'All photos')
-    : list
-      ? listClient.value === EVERYONE
-        ? `${list.name}, picked by everyone`
-        : listClient.value
-          ? `${list.name}, ${listClient.value}`
-          : list.name
-      : selectedClientName.value
-        ? `${firstName(selectedClientName.value)}'s picks`
-        : 'Client picks'
+    : selectedClientName.value
+      ? `${firstName(selectedClientName.value)}'s picks`
+      : 'Client picks'
   const head = base && showFavoritesOnly.value ? `${base} · ${picks}` : picks
   const withPeopleTitle = activePeople.value.length
     ? `${head} · with ${peopleNames(activePeople.value)}`
@@ -1225,7 +1177,6 @@ async function loadAlbumImages(): Promise<void> {
     // Non-blocking: let the grid render before fetching picks
     setTimeout(() => {
       loadFavorites()
-      loadLists()
     }, 100)
     loadNotes()
   } catch (err: unknown) {
@@ -1368,8 +1319,6 @@ async function onClientFilterChange(): Promise<void> {
 
 async function viewAll(): Promise<void> {
   showFavoritesOnly.value = false
-  activeListId.value = null
-  listClient.value = null
   if (selectedClientName.value) {
     selectedClientName.value = ''
     await onClientFilterChange()
@@ -1377,175 +1326,18 @@ async function viewAll(): Promise<void> {
 }
 
 async function viewFav(): Promise<void> {
-  activeListId.value = null
-  listClient.value = null
   await waitForFavorites()
   showFavoritesOnly.value = true
 }
 
 async function pickClient(name: string): Promise<void> {
-  activeListId.value = null
-  listClient.value = null
   selectedClientName.value = selectedClientName.value === name ? '' : name
   showFavoritesOnly.value = true
   clearSelection()
   await onClientFilterChange()
 }
 
-// Client selection lists ("Main album · up to 300"), on the server. A list is a kind of Picks:
-// the Picks switch stays on and the list, then one client in it, narrow what it shows.
-const listsLoaded = ref(false)
-const listsLoading = ref(false)
-const listsError = ref<string | null>(null)
-const inLists = computed(() => listsByImage(lists.value))
-const clientRows = computed(() => {
-  const l = activeList.value
-  return l ? l.clients.map((c) => ({ c, p: progress(l, c, sets.value) })) : []
-})
-const listPhotoCount = (l: List): number => pickersByImage(l).size
-const everyoneCount = (l: List): number => pickersByImage(l, EVERYONE).size
-const pickedBy = (img: Image): string[] =>
-  listPickers.value ? (listPickers.value.get(img.id) ?? []) : (img.favoritedBy ?? [])
-
-type ListsResult = Awaited<ReturnType<typeof window.api.lists.get>>
-function applyLists(r: ListsResult): boolean {
-  if (!r.success) return false
-  lists.value = r.lists
-  if (activeListId.value && !activeList.value) {
-    activeListId.value = null
-    listClient.value = null
-  }
-  listsLoaded.value = true
-  listsError.value = null
-  return true
-}
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
-
-// On album open and from the refresh button; no polling
-async function loadLists(): Promise<void> {
-  if (listsLoading.value) return
-  listsLoading.value = true
-  try {
-    const r = await window.api.lists.get(albumId)
-    if (!applyLists(r)) listsError.value = r.success ? null : r.error
-  } catch (err) {
-    listsError.value = errText(err)
-  } finally {
-    listsLoading.value = false
-  }
-}
-
-async function viewList(id: string): Promise<void> {
-  const off = activeListId.value === id && !listClient.value
-  activeListId.value = off ? null : id
-  listClient.value = null
-  clearSelection()
-  if (selectedClientName.value) {
-    // the hearts were narrowed to one client; a list shows everyone's
-    selectedClientName.value = ''
-    await onClientFilterChange()
-  }
-  showFavoritesOnly.value = true
-}
-function pickListClient(name: string): void {
-  listClient.value = listClient.value === name ? null : name
-  clearSelection()
-}
-
-function reopen(list: List, clientName: string): Promise<boolean> {
-  return run(`reopen:${list.id}:${clientName}`, async () => {
-    try {
-      const r = await window.api.lists.reopen(albumId, list.id, clientName)
-      if (!r.success) throw new Error(r.error)
-      applyLists(r)
-      toast(`${clientName} can change their picks for “${list.name}” and send again.`)
-      return true
-    } catch (err) {
-      toast(`Couldn't reopen it: ${errText(err)}`, {
-        label: 'Try again',
-        run: () => void reopen(list, clientName)
-      })
-      return false
-    }
-  })
-}
-
-// The editor works on a copy; nothing changes on the server until Save
-const listDraft = ref<Draft[] | null>(null)
-const newDraft = (name: string, position: number): Draft => ({
-  id: crypto.randomUUID(),
-  name,
-  position,
-  maxPicks: null,
-  deadline: null,
-  setLimits: null
-})
-function editLists(): void {
-  listDraft.value = lists.value.length
-    ? lists.value.map(({ clients, ...d }) => {
-        void clients
-        return { ...d, setLimits: d.setLimits?.map((l) => ({ ...l })) ?? null }
-      })
-    : [newDraft('Main album', 0)]
-}
-const draftLost = computed(() => (listDraft.value ? picksLost(lists.value, listDraft.value) : []))
-const draftBlank = computed(() => !!listDraft.value?.some((d) => !d.name.trim()))
-const wholeNumber = (e: Event): number | null => {
-  const n = Number((e.target as HTMLInputElement).value)
-  return Number.isInteger(n) && n > 0 ? n : null
-}
-const setMax = (d: Draft, setId: string): number | '' =>
-  d.setLimits?.find((l) => l.setId === setId)?.max ?? ''
-function changeSetMax(d: Draft, setId: string, e: Event): void {
-  const max = wholeNumber(e)
-  const rest = (d.setLimits ?? []).filter((l) => l.setId !== setId)
-  const next = max ? [...rest, { setId, max }] : rest
-  d.setLimits = next.length ? next : null
-}
-function moveDraft(i: number, delta: number): void {
-  const d = listDraft.value
-  if (!d) return
-  const order = moved(
-    d.map((x) => x.id),
-    d[i].id,
-    delta
-  )
-  listDraft.value = order.map((id) => d.find((x) => x.id === id)!)
-}
-async function addDraft(): Promise<void> {
-  const d = listDraft.value
-  if (!d) return
-  d.push(newDraft('', d.length))
-  await nextTick()
-  document.querySelector<HTMLInputElement>('.le-row:last-child .le-name')?.focus()
-}
-async function saveLists(): Promise<void> {
-  const d = listDraft.value
-  if (!d || draftBlank.value) return
-  // contextBridge can't clone Vue proxies: send a plain copy
-  const plain: Draft[] = JSON.parse(JSON.stringify(d.map((x, i) => ({ ...x, position: i }))))
-  await run('lists-save', async () => {
-    try {
-      const r = await window.api.lists.save(albumId, plain)
-      if (!r.success) throw new Error(r.error)
-      applyLists(r)
-      listDraft.value = null
-      toast('Saved. Your client sees these albums on their link.')
-      return true
-    } catch (err) {
-      toast(`Couldn't save the albums: ${errText(err)}`, { label: 'Try again', run: saveLists })
-      return false
-    }
-  })
-}
-const lostText = computed(() =>
-  draftLost.value
-    .map(
-      (l) =>
-        `${nf(l.picks)} ${l.picks === 1 ? 'pick' : 'picks'} in “${l.name}” (${l.clients.join(', ')})`
-    )
-    .join('; ')
-)
 
 // Private notes: the photographer's own, on this computer only
 const albumNote = ref('')
@@ -1799,20 +1591,12 @@ function initLightbox(): void {
       onInit: (el, pswp) => {
         el.className += ' status'
         pswp.on('change', () => {
-          const img = slideImage(pswp)
-          const by = img ? pickedBy(img) : []
-          const where = (img && inLists.value.get(img.id)) || []
-          el.hidden = by.length === 0 && where.length === 0
+          const by = slideImage(pswp)?.favoritedBy || []
+          el.hidden = by.length === 0
           el.innerHTML = ICON(
             '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>'
           )
           el.append(by.join(', '))
-          if (where.length) {
-            const w = document.createElement('span')
-            w.className = 'lb-lists'
-            w.textContent = `${by.length ? ' · ' : ''}in ${where.join(', ')}`
-            el.append(w)
-          }
         })
       }
     })
@@ -1902,13 +1686,12 @@ function initLightbox(): void {
   lightbox.init()
 }
 
-function showTip(e: Event, names: string[], inLists: string[] = []): void {
+function showTip(e: Event, names: string[]): void {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
   tip.value = {
     left: Math.max(8, Math.min(r.right - 150, innerWidth - 216)),
     top: r.bottom + 6,
-    names,
-    lists: inLists
+    names
   }
 }
 
@@ -2064,7 +1847,7 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div class="card picks-card">
+        <div class="card" :style="clientNames.length ? 'padding-bottom:8px' : ''">
           <div class="seg" role="group" aria-label="Show" style="width: 100%">
             <button style="flex: 1" :aria-pressed="!showFavoritesOnly" @click="viewAll">
               All <span class="n num">{{ nf(images.length) }}</span>
@@ -2079,11 +1862,8 @@ onUnmounted(() => {
               <span v-else class="n num">{{ nf(favoritedPhotosCount) }}</span>
             </button>
           </div>
-          <template v-if="clientNames.length && !activeList">
-            <!-- Hearts are their own pool; once albums exist, say so, so the counts don't clash -->
-            <div style="margin: 16px 0 8px; font-size: 13px; color: var(--ink-3)">
-              {{ lists.length ? 'Hearted by' : 'Picked by' }}
-            </div>
+          <template v-if="clientNames.length">
+            <div style="margin: 16px 0 8px; font-size: 13px; color: var(--ink-3)">Picked by</div>
             <div class="people">
               <div v-for="name in clientNames" :key="name" class="person-row">
                 <button
@@ -2116,139 +1896,6 @@ onUnmounted(() => {
               </div>
             </div>
           </template>
-
-          <!-- Client selection: the albums the client picks for, each with its own limits -->
-          <div class="sel-h">
-            <span>Client selection</span>
-            <span v-if="listsLoaded || listsError" class="sel-acts">
-              <button
-                v-if="lists.length"
-                class="icon-btn sm plain"
-                aria-haspopup="dialog"
-                aria-label="Edit the albums for your client"
-                title="Edit the albums for your client"
-                @click="editLists"
-              >
-                <Pencil />
-              </button>
-              <button
-                class="icon-btn sm plain"
-                aria-label="Refresh client selection"
-                title="Refresh client selection"
-                :aria-busy="listsLoading"
-                :disabled="listsLoading"
-                @click="loadLists"
-              >
-                <RefreshCw />
-              </button>
-            </span>
-          </div>
-          <p v-if="listsError && listsLoaded" class="sel-note stale" role="status">
-            Couldn't refresh: {{ listsError }}
-            <button class="link" :disabled="listsLoading" @click="loadLists">Try again</button>
-          </p>
-          <p v-if="!listsLoaded && !listsError" class="sel-note" aria-busy="true">
-            <span class="spin"></span>
-          </p>
-          <p v-else-if="listsError && !listsLoaded" class="sel-note" role="status">
-            {{ listsError }}
-            <button class="link" :disabled="listsLoading" @click="loadLists">Try again</button>
-          </p>
-          <template v-else-if="!lists.length">
-            <p class="sel-note">
-              Picks go into one pool. To have your client pick for each printed album, set the
-              albums up, like “Main album · 300” and “Parents' album · 60”.
-            </p>
-            <button class="btn sm ghost" aria-haspopup="dialog" @click="editLists">
-              <BookImage />Set up albums for your client…
-            </button>
-          </template>
-          <div v-else class="people lists">
-            <template v-for="l in lists" :key="l.id">
-              <div class="person-row">
-                <button
-                  class="person"
-                  :aria-pressed="activeListId === l.id && !listClient"
-                  :aria-expanded="activeListId === l.id"
-                  @click="viewList(l.id)"
-                >
-                  <!-- At rest an album says where its selections are; its limits are in the
-                       title, the editor and each client's row -->
-                  <span class="lt" :title="limitsText(l, sets)">
-                    <span class="lt-n">{{ l.name }}</span>
-                    <small class="num" :class="{ late: listSummary(l).late }">{{
-                      listSummary(l).text || limitsText(l, sets)
-                    }}</small>
-                  </span>
-                  <span class="n num" :title="`${photos(listPhotoCount(l))} picked`">{{
-                    nf(listPhotoCount(l))
-                  }}</span>
-                </button>
-              </div>
-              <template v-if="activeListId === l.id">
-                <template v-for="{ c, p } in clientRows" :key="c.clientName">
-                  <div class="person-row sub">
-                    <button
-                      class="person"
-                      :aria-pressed="listClient === c.clientName"
-                      @click="pickListClient(c.clientName)"
-                    >
-                      <span
-                        v-if="linkedPerson(c.clientName)"
-                        class="avatar face"
-                        :style="faceStyle(linkedPerson(c.clientName))"
-                      ></span>
-                      <span v-else class="avatar">{{ initials(c.clientName) }}</span>
-                      <span class="lt">
-                        <span class="lt-n">{{ c.clientName }}</span>
-                        <small :class="{ late: p.overdue }">{{ sentText(p, l.deadline) }}</small>
-                        <small v-if="p.perSet.length" class="num">
-                          <template v-for="(ps, k) in p.perSet" :key="ps.name"
-                            ><template v-if="k"> · </template
-                            ><span :class="{ over: ps.over }"
-                              >{{ ps.name }} {{ nf(ps.count) }}/{{ nf(ps.max) }}</span
-                            ></template
-                          >
-                        </small>
-                      </span>
-                      <span class="n num" :class="{ over: p.over }"
-                        >{{ nf(p.count) }}<template v-if="p.max"> / {{ nf(p.max) }}</template></span
-                      >
-                    </button>
-                  </div>
-                  <!-- A sent selection is locked for the client; reopening is rare, so it shows
-                     only on the client the photographer is looking at -->
-                  <div v-if="listClient === c.clientName && c.submittedAt" class="sub-act">
-                    <span>Sent, so {{ c.clientName }} can't change it.</span>
-                    <button
-                      class="btn sm ghost"
-                      :disabled="lockedFor(`reopen:${l.id}:${c.clientName}`)"
-                      :aria-busy="pending === `reopen:${l.id}:${c.clientName}`"
-                      :aria-label="`Reopen ${c.clientName}'s picks for ${l.name}`"
-                      @click="reopen(l, c.clientName)"
-                    >
-                      <span v-if="pending === `reopen:${l.id}:${c.clientName}`" class="spin"></span
-                      >Reopen
-                    </button>
-                  </div>
-                </template>
-                <div v-if="l.clients.length > 1" class="person-row sub">
-                  <button
-                    class="person"
-                    :aria-pressed="listClient === EVERYONE"
-                    @click="pickListClient(EVERYONE)"
-                  >
-                    <span class="avatar"><Users /></span>
-                    <span class="lt"><span class="lt-n">Picked by everyone</span></span>
-                    <span class="n num">{{ nf(everyoneCount(l)) }}</span>
-                  </button>
-                </div>
-                <p v-if="!l.clients.length" class="sel-note sub">
-                  No picks yet. They show here as your client picks on their link.
-                </p>
-              </template>
-            </template>
-          </div>
         </div>
 
         <div v-if="peopleCfg" class="card faces-card">
@@ -2582,14 +2229,6 @@ onUnmounted(() => {
           <button class="btn ghost" @click="viewSet(null)">View all photos</button>
         </div>
 
-        <div v-else-if="filteredImages.length === 0 && activeList" class="empty">
-          <h2 v-if="listClient === EVERYONE">No photo picked by everyone yet</h2>
-          <h2 v-else-if="listClient">No picks from {{ listClient }} for “{{ activeList.name }}”</h2>
-          <h2 v-else>No picks for “{{ activeList.name }}” yet</h2>
-          <p>They show up here as your client picks on their link.</p>
-          <button class="btn ghost" @click="viewAll">View all photos</button>
-        </div>
-
         <div v-else-if="filteredImages.length === 0" class="empty">
           <h2>No picks yet</h2>
           <p>When your client hearts a photo on their link, it shows up here</p>
@@ -2639,8 +2278,6 @@ onUnmounted(() => {
                       :status="getDisplayStatus(tile.image.uploadStatus)"
                       :thumb="`file://${getThumbnailPath(tile.image.localFilePath)}`"
                       :selected="isTileSelected(tile)"
-                      :picked-by="pickedBy(tile.image)"
-                      :lists="inLists.get(tile.image.id)"
                       :my-note="privateNotes[tile.image.id]"
                       @open="handleImageClick($event, tile)"
                       @toggle="toggleTile(tile)"
@@ -2672,14 +2309,8 @@ onUnmounted(() => {
 
     <Teleport to="body">
       <div v-if="tip" class="tip" :style="{ left: `${tip.left}px`, top: `${tip.top}px` }">
-        <template v-if="tip.names.length">
-          <b>Picked by</b>
-          <template v-for="(n, i) in tip.names" :key="n"><br v-if="i" />{{ n }}</template>
-        </template>
-        <template v-if="tip.lists.length">
-          <b :class="{ gap: tip.names.length }">In</b>
-          <template v-for="(n, i) in tip.lists" :key="n"><br v-if="i" />{{ n }}</template>
-        </template>
+        <b>Picked by</b>
+        <template v-for="(n, i) in tip.names" :key="n"><br v-if="i" />{{ n }}</template>
       </div>
     </Teleport>
 
@@ -2931,131 +2562,6 @@ onUnmounted(() => {
         </template>
       </div>
     </Teleport>
-
-    <Modal
-      :show="!!listDraft"
-      title="Albums for your client"
-      sub="Your client picks photos for each one on their link"
-      wide
-      @close="pending !== 'lists-save' && (listDraft = null)"
-    >
-      <ol v-if="listDraft" class="le">
-        <li v-for="(d, i) in listDraft" :key="d.id" class="le-row">
-          <div class="le-main">
-            <input
-              v-model="d.name"
-              class="input le-name"
-              maxlength="80"
-              placeholder="Parents' album"
-              :aria-label="`Name of album ${i + 1}`"
-              :aria-invalid="!d.name.trim() || undefined"
-              :autofocus="i === 0"
-            />
-            <label class="le-max">
-              <span>Up to</span>
-              <input
-                class="input num"
-                type="number"
-                min="1"
-                step="1"
-                placeholder="any"
-                :value="d.maxPicks ?? ''"
-                :aria-label="`Most photos for ${d.name || `album ${i + 1}`}`"
-                @input="d.maxPicks = wholeNumber($event)"
-              />
-              <span>photos</span>
-            </label>
-            <span class="le-acts">
-              <button
-                class="icon-btn sm plain"
-                :disabled="i === 0"
-                :aria-label="`Move ${d.name || 'album'} up`"
-                title="Move up"
-                @click="moveDraft(i, -1)"
-              >
-                <ArrowUp />
-              </button>
-              <button
-                class="icon-btn sm plain"
-                :disabled="i === listDraft.length - 1"
-                :aria-label="`Move ${d.name || 'album'} down`"
-                title="Move down"
-                @click="moveDraft(i, 1)"
-              >
-                <ArrowDown />
-              </button>
-              <button
-                class="icon-btn sm plain"
-                :aria-label="`Remove ${d.name || 'album'}`"
-                title="Remove"
-                @click="listDraft.splice(i, 1)"
-              >
-                <Trash2 />
-              </button>
-            </span>
-          </div>
-          <div class="le-more">
-            <label class="le-due">
-              <span>Send by</span>
-              <input
-                class="input"
-                type="date"
-                :value="dateValue(d.deadline)"
-                :aria-label="`Send by, for ${d.name || `album ${i + 1}`}`"
-                @change="d.deadline = endOfDay(($event.target as HTMLInputElement).value)"
-              />
-            </label>
-            <details v-if="sets.length" class="le-sets" :open="!!d.setLimits">
-              <summary>
-                <ChevronRight />Per set<template v-if="d.setLimits">
-                  · {{ d.setLimits.length }}
-                  {{ d.setLimits.length === 1 ? 'limit' : 'limits' }}</template
-                >
-              </summary>
-              <div class="le-grid">
-                <label v-for="st in sets" :key="st.id">
-                  <span>{{ st.name }}</span>
-                  <input
-                    class="input num"
-                    type="number"
-                    min="1"
-                    step="1"
-                    placeholder="any"
-                    :value="setMax(d, st.id)"
-                    :aria-label="`Most photos from ${st.name}`"
-                    @input="changeSetMax(d, st.id, $event)"
-                  />
-                </label>
-              </div>
-            </details>
-          </div>
-        </li>
-      </ol>
-      <p v-if="listDraft && !listDraft.length" class="le-none">
-        No albums. Your client's picks go into one pool, as before.
-      </p>
-      <button v-if="listDraft && listDraft.length < 20" class="btn sm ghost" @click="addDraft">
-        <Plus />Add an album
-      </button>
-      <p v-if="draftLost.length" class="le-warn" role="alert">
-        Saving deletes {{ lostText }}. This can't be undone.
-      </p>
-      <template #footer>
-        <button class="btn ghost" :disabled="pending === 'lists-save'" @click="listDraft = null">
-          Cancel
-        </button>
-        <button
-          class="btn"
-          :class="draftLost.length ? 'danger' : 'primary'"
-          :disabled="draftBlank || (!!pending && pending !== 'lists-save')"
-          :aria-busy="pending === 'lists-save'"
-          @click="saveLists"
-        >
-          <span v-if="pending === 'lists-save'" class="spin"></span
-          >{{ draftLost.length ? 'Delete picks and save' : 'Save' }}
-        </button>
-      </template>
-    </Modal>
 
     <Modal
       :show="!!setToDelete"
@@ -3810,89 +3316,6 @@ onUnmounted(() => {
   color: var(--ink-2);
 }
 
-/* Client selection: lists under Picks, in the same rows as Picked by */
-.picks-card {
-  padding-bottom: 8px;
-}
-.sel-h {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 32px;
-  margin: 16px -8px 4px 0;
-  font-size: 13px;
-  color: var(--ink-3);
-}
-.sel-acts {
-  display: flex;
-  gap: 2px;
-}
-.sel-note {
-  margin: 4px 0 12px;
-  font-size: 13px;
-  color: var(--ink-2);
-  text-wrap: pretty;
-}
-.sel-note.stale {
-  margin-top: 0;
-  color: var(--ink-3);
-}
-.picks-card > .btn {
-  margin-bottom: 16px;
-}
-.lists .lt {
-  display: grid;
-  min-width: 0;
-  text-align: left;
-}
-.lists .lt-n {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lists .lt small {
-  font-size: 12px;
-  color: var(--ink-3);
-}
-.lists .lt small.late,
-.lists .over {
-  color: var(--warn-ink);
-}
-.lists .avatar svg {
-  width: 16px;
-  height: 16px;
-}
-/* A list's clients sit under it, one step in, so the list reads as their heading */
-.person-row.sub .person {
-  padding-left: 32px;
-}
-.person-row.sub .avatar {
-  width: 28px;
-  height: 28px;
-  font-size: 12px;
-}
-.sel-note.sub {
-  padding: 8px 24px 4px 32px;
-  margin: 0 -24px;
-  border-top: 1px solid var(--line);
-}
-.lists .n {
-  white-space: nowrap;
-}
-.sub-act {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 -24px;
-  flex-wrap: wrap;
-  padding: 0 24px 10px 72px;
-  background: var(--brand-wash);
-  font-size: 12px;
-  color: var(--ink-2);
-}
-.sub-act span {
-  flex: 1 1 120px;
-}
 .album-note {
   margin-top: 16px;
 }
@@ -3913,124 +3336,6 @@ onUnmounted(() => {
   margin-left: auto;
   display: flex;
   gap: 4px;
-}
-.tip b.gap {
-  margin-top: 8px;
-}
-
-/* The albums editor: one row per album, its name first */
-.le {
-  list-style: none;
-  margin: 0 0 12px;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-.le-row {
-  background: var(--inset);
-  border-radius: var(--r-inset);
-  padding: 12px;
-  display: grid;
-  gap: 8px;
-}
-.le-row .input {
-  background-color: var(--card);
-}
-.le-main,
-.le-more {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.le-name {
-  flex: 1;
-  min-width: 0;
-}
-.le-max,
-.le-due {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--ink-2);
-  white-space: nowrap;
-}
-.le-max .input {
-  width: 84px;
-  padding: 0 10px;
-}
-.le-due .input {
-  width: 150px;
-  padding: 0 10px;
-}
-.le-acts {
-  display: flex;
-}
-.le-sets {
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.le-sets summary {
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  padding: 4px 0;
-}
-.le-sets summary::-webkit-details-marker {
-  display: none;
-}
-.le-sets summary svg {
-  width: 16px;
-  height: 16px;
-  color: var(--ink-3);
-  transition: transform 0.2s var(--ease);
-}
-.le-sets[open] summary svg {
-  transform: rotate(90deg);
-}
-.le-more {
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-.le-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
-  margin-top: 6px;
-}
-.le-grid label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.le-grid span {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.le-grid .input {
-  width: 72px;
-  height: 32px;
-  padding: 0 8px;
-}
-.le + .btn {
-  justify-self: start;
-}
-.le-none {
-  margin: 0 0 12px;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.le-warn {
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border-radius: var(--r-ctl);
-  background: oklch(96% 0.03 27);
-  color: oklch(42% 0.15 27);
-  font-size: 13px;
 }
 </style>
 
@@ -4067,9 +3372,6 @@ onUnmounted(() => {
 .pswp__lb-picked {
   color: oklch(80% 0 0);
   margin-right: 8px;
-}
-.pswp__lb-picked .lb-lists {
-  color: oklch(66% 0 0);
 }
 /* The notes button carries a dot while the photo has your private note */
 .pswp__button--notes-button.has-note {

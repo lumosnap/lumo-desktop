@@ -9,7 +9,6 @@ import { net } from 'electron'
 import { createReadStream } from 'fs'
 import { stat } from 'fs/promises'
 import { getToken } from './auth-storage'
-import type { SelectionList, ServerList } from './lists'
 
 // Get API URL from environment (set in electron.vite.config.ts)
 const API_URL = process.env.API_URL || 'http://localhost:8787/api/v1'
@@ -567,30 +566,6 @@ export const albumsApi = {
       method: 'PUT',
       body: { people }
     })
-  },
-
-  /** The album's selection lists, each with every client's picks (server image ids). */
-  async getLists(albumId: string): Promise<ServerList[]> {
-    const r = await apiFetch<ApiResponse<{ lists: ServerList[] }> & { lists?: ServerList[] }>(
-      `/albums/${albumId}/lists`
-    )
-    return r.data?.lists ?? r.lists ?? []
-  },
-
-  /** Replace the album's lists. Lists left out are deleted on the server with their picks. */
-  async putLists(albumId: string, lists: SelectionList[]): Promise<void> {
-    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/lists`, {
-      method: 'PUT',
-      body: { lists }
-    })
-  },
-
-  /** Let a client change a selection they already sent. */
-  async reopenSubmission(albumId: string, listId: string, clientName: string): Promise<void> {
-    await apiFetch<ApiResponse<void>>(
-      `/albums/${albumId}/lists/${encodeURIComponent(listId)}/submissions/${encodeURIComponent(clientName)}`,
-      { method: 'DELETE' }
-    )
   },
 
   /** Link a client (by name) to a person in the album, or unlink with null. Photographer-only. */

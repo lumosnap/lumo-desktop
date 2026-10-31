@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { thumbHashToDataURL } from 'thumbhash'
 import { tagLabel } from '../utils/tags'
 import {
@@ -28,15 +28,12 @@ const props = defineProps<{
   status: 'Processing' | 'Failed' | 'Success'
   thumb: string
   selected: boolean
-  pickedBy?: string[] // who picked it in the list shown; the hearts otherwise
-  lists?: string[] // the client lists it is picked in
   myNote?: string // the photographer's private note
 }>()
-const by = computed(() => props.pickedBy ?? props.image.favoritedBy ?? [])
 const emit = defineEmits<{
   open: [e: MouseEvent]
   toggle: []
-  tip: [e: Event, names: string[], lists: string[]]
+  tip: [e: Event, names: string[]]
   untip: []
   notes: []
   reveal: []
@@ -64,8 +61,7 @@ onMounted(() => {
       target="_blank"
       :aria-label="
         image.originalFilename +
-        (by.length ? ', picked by ' + by.join(', ') : '') +
-        (lists?.length ? ', in ' + lists.join(', ') : '') +
+        (image.favoritedBy?.length ? ', picked by ' + image.favoritedBy.join(', ') : '') +
         (myNote ? ', has your note' : '') +
         (burst ? `, burst of ${burst.length}` : '')
       "
@@ -117,21 +113,16 @@ onMounted(() => {
         <NotebookPen />
       </button>
       <span
-        v-if="by.length || lists?.length"
-        class="chip"
-        :class="{ fav: by.length }"
+        v-if="image.favoritedBy?.length"
+        class="chip fav"
         tabindex="0"
-        :aria-label="
-          [by.length && `Picked by ${by.join(', ')}`, lists?.length && `In ${lists.join(', ')}`]
-            .filter(Boolean)
-            .join('. ')
-        "
-        @pointerenter="emit('tip', $event, by, lists ?? [])"
+        :aria-label="`Picked by ${image.favoritedBy.join(', ')}`"
+        @pointerenter="emit('tip', $event, image.favoritedBy)"
         @pointerleave="emit('untip')"
-        @focus="emit('tip', $event, by, lists ?? [])"
+        @focus="emit('tip', $event, image.favoritedBy)"
         @blur="emit('untip')"
       >
-        <Heart />{{ by.length || '' }}
+        <Heart />{{ image.favoritedBy.length }}
       </span>
       <button
         v-if="(image.notesCount || 0) > 0"

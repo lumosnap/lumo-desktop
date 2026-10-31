@@ -8,9 +8,7 @@ import type { UploadProgress } from '../main/pipeline'
 import type { Booking, ApiFavoriteImage } from '../main/api-client'
 import type { TagConfig } from '../main/ipc/albums'
 import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
-import type { LocalList, SelectionList } from '../main/lists'
 
-type ListsResult = { success: true; lists: LocalList[] } | { success: false; error: string }
 type NotesResult =
   | { success: true; notes: Record<number, string>; albumNote: string }
   | { success: false; error: string }
@@ -233,14 +231,6 @@ const api = {
       ipcRenderer.on('album:peopleChanged', handler)
       return () => ipcRenderer.removeListener('album:peopleChanged', handler)
     }
-  },
-  // Client selection lists: on the server, so they fail with a clear error when offline
-  lists: {
-    get: (albumId: string): Promise<ListsResult> => ipcRenderer.invoke('lists:get', albumId),
-    save: (albumId: string, lists: SelectionList[]): Promise<ListsResult> =>
-      ipcRenderer.invoke('lists:save', albumId, lists),
-    reopen: (albumId: string, listId: string, clientName: string): Promise<ListsResult> =>
-      ipcRenderer.invoke('lists:reopen', albumId, listId, clientName)
   },
   // The photographer's private notes: on this computer only
   notes: {
