@@ -958,10 +958,11 @@ async function renderLbFaces(): Promise<void> {
   slide.container.append(layer)
 }
 
-async function assignFace(to: FaceTarget): Promise<boolean> {
+async function assignFace(to: FaceTarget, faceId?: number): Promise<boolean> {
   const p = pop.value
-  if (p?.kind !== 'face') return false
-  const ok = await peopleCall(() => peopleApi!.assignFace(albumId, p.face.faceId, to), 'save')
+  const id = faceId ?? (p?.kind === 'face' ? p.face.faceId : undefined)
+  if (id === undefined) return false
+  const ok = await peopleCall(() => peopleApi!.assignFace(albumId, id, to), 'save')
   if (ok) {
     closePop()
     await afterPeopleEdit()
@@ -970,7 +971,11 @@ async function assignFace(to: FaceTarget): Promise<boolean> {
 }
 
 function newPersonForFace(): void {
-  promptName('New person', '', (name) => assignFace({ newName: name }), undefined, 'Name')
+  const p = pop.value
+  if (p?.kind !== 'face') return
+  // The name prompt replaces the face menu, so carry the face id with the submit
+  const { faceId } = p.face
+  promptName('New person', '', (name) => assignFace({ newName: name }, faceId), undefined, 'Name')
 }
 
 function useFaceAsCover(): Promise<void> {
