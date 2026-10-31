@@ -259,6 +259,17 @@ const migrations: Array<(database: Database.Database) => void> = [
       UPDATE faces SET source = 'ref' WHERE person_id IS NOT NULL;
       DROP TABLE face_overrides;
     `)
+  },
+  // 10: the photographer's private notes. Only on this computer: never pushed, never in the gallery.
+  (database) => {
+    database.exec(`
+      CREATE TABLE image_notes (
+        image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+        body TEXT NOT NULL,
+        updated_at INTEGER
+      );
+      ALTER TABLE albums ADD COLUMN private_note TEXT;
+    `)
   }
 ]
 
@@ -1413,6 +1424,47 @@ export function getClientPeople(albumId: string): Record<string, string> {
     .prepare('SELECT client_name, person_id FROM client_people WHERE album_id = ?')
     .all(albumId) as Array<{ client_name: string; person_id: string }>
   return Object.fromEntries(rows.map((r) => [r.client_name, r.person_id]))
+}
+
+// Private notes: the photographer's own, kept on this computer only
+
+/** Every note in the album, by local image id. */
+export function getImageNotes(albumId: string): Record<number, string> {
+  const rows = conn()
+    .prepare(
+      'SELECT n.image_id, n.body FROM image_notes n JOIN images i ON i.id = n.image_id WHERE i.albumId = ?'
+    )
+    .all(albumId) as Array<{ image_id: number; body: string }>
+  return Object.fromEntries(rows.map((r) => [r.image_id, r.body]))
+}
+
+/** Saves a photo's note; an empty (or blank) body deletes it. The photo must be in the album. */
+export function setImageNote(albumId: string, imageId: number, body: string): void {
+  const d = conn()
+  if (!d.prepare('SELECT 1 FROM images WHERE id = ? AND albumId = ?').get(imageId, albumId))
+    throw new Error('Photo not found in this album')
+  if (!body.trim()) {
+    d.prepare('DELETE FROM image_notes WHERE image_id = ?').run(imageId)
+    return
+  }
+  d.prepare(
+    `INSERT INTO image_notes (image_id, body, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(image_id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at`
+  ).run(imageId, body, Date.now())
+}
+
+export function getAlbumNote(albumId: string): string {
+  const row = conn().prepare('SELECT private_note FROM albums WHERE id = ?').get(albumId) as
+    | { private_note: string | null }
+    | undefined
+  return row?.private_note ?? ''
+}
+
+export function setAlbumNote(albumId: string, body: string): void {
+  const r = conn()
+    .prepare('UPDATE albums SET private_note = ? WHERE id = ?')
+    .run(body.trim() ? body : null, albumId)
+  if (!r.changes) throw new Error('Album not found')
 }
 
 /** Clears the dirty counter only if no change landed since `seen` was read. */

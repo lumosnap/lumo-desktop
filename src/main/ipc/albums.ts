@@ -30,7 +30,11 @@ import {
   reorderSets,
   addImagesToSet,
   removeImagesFromSet,
-  setSetCover
+  setSetCover,
+  getImageNotes,
+  setImageNote,
+  getAlbumNote,
+  setAlbumNote
 } from '../database'
 import { albumsApi } from '../api-client'
 import { uploadPipeline } from '../pipeline'
@@ -56,6 +60,7 @@ import { TAG_SLUG } from '../tags/select'
 import { imagePeople, peoplePhotosChanged } from '../people'
 import { watcherService } from '../watcher'
 import { createLogger, getErrorMessage } from '../logger'
+import { handleIpc } from './types'
 
 const logger = createLogger('IPC:Album')
 
@@ -554,6 +559,20 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
   setsMutation('sets:setCover', (setId: string, imageId: number | null) =>
     setSetCover(setId, Number.isInteger(imageId) ? imageId : null)
   )
+
+  // Private notes: the photographer's own, on this computer only (never pushed)
+  const noteBody = (v: unknown): string => (typeof v === 'string' ? v.slice(0, 5000) : '')
+  handleIpc('notes:get', logger, (_event, albumId: string) => ({
+    notes: getImageNotes(String(albumId)),
+    albumNote: getAlbumNote(String(albumId))
+  }))
+  handleIpc('notes:set', logger, (_event, albumId: string, imageId: unknown, body: unknown) => {
+    if (!Number.isInteger(imageId)) throw new Error('Photo id is required')
+    setImageNote(String(albumId), imageId as number, noteBody(body))
+  })
+  handleIpc('notes:setAlbum', logger, (_event, albumId: string, body: unknown) => {
+    setAlbumNote(String(albumId), noteBody(body))
+  })
 
   // AI tags: per-album tag set + manual per-photo overrides
   const vocabulary = TAGS.map((t) => ({

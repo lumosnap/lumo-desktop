@@ -1115,6 +1115,11 @@ select.input {
   fill: var(--ink);
   stroke: var(--ink);
 }
+/* The photographer's own note: an outline pen, apart from the client's notes and hearts */
+.chip.mine {
+  padding: 0 6px;
+  color: var(--ink-2);
+}
 .ph .fname {
   position: absolute;
   left: 0;

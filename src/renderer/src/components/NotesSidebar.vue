@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
 import { X } from 'lucide-vue-next'
+import PrivateNote from './PrivateNote.vue'
 
 interface Comment {
   clientName: string
@@ -18,6 +19,8 @@ interface Image {
 const props = defineProps<{
   isOpen: boolean
   image: Image | null
+  note: string
+  saveNote: (imageId: number, body: string) => Promise<boolean>
 }>()
 
 const emit = defineEmits<{
@@ -25,6 +28,11 @@ const emit = defineEmits<{
 }>()
 
 const closeBtn = ref<HTMLButtonElement>()
+// Bound to the photo's id now: the note still saves to it after the panel closes
+const saveFor =
+  (id: number) =>
+  (body: string): Promise<boolean> =>
+    props.saveNote(id, body)
 watch(
   () => props.isOpen,
   async (open) => {
@@ -60,10 +68,10 @@ function formatDate(dateString: string): string {
 
 <template>
   <Teleport to="body">
-    <aside v-if="isOpen" class="notes" role="dialog" aria-label="Client notes">
+    <aside v-if="isOpen" class="notes" role="dialog" aria-label="Notes">
       <header>
         <div>
-          <h2>Client notes</h2>
+          <h2>Notes</h2>
           <small>{{ image?.originalFilename }}</small>
         </div>
         <button ref="closeBtn" class="icon-btn sm" aria-label="Close notes" @click="emit('close')">
@@ -71,6 +79,18 @@ function formatDate(dateString: string): string {
         </button>
       </header>
       <div class="list">
+        <!-- Yours first: it is what the photographer writes here. Keyed, so moving to another
+             photo saves the note of the one before. -->
+        <PrivateNote
+          v-if="image"
+          :key="image.id"
+          class="mine"
+          :value="note"
+          label="Your note"
+          placeholder="Retouch, print size, who to send it to…"
+          :save="saveFor(image.id)"
+        />
+        <div class="from">From your client</div>
         <template v-if="filteredComments.length">
           <div v-for="(comment, index) in filteredComments" :key="index" class="note">
             <div class="h">
@@ -81,17 +101,30 @@ function formatDate(dateString: string): string {
             <p>{{ comment.notes }}</p>
           </div>
         </template>
-        <div v-else class="empty" style="padding: 64px 8px">
-          <p>No notes on this photo. Clients add them from their link.</p>
-        </div>
+        <p v-else class="none">No notes from your client. They add them from their link.</p>
       </div>
-      <footer class="num">
-        {{
-          filteredComments.length
-            ? `${filteredComments.length} note${filteredComments.length > 1 ? 's' : ''} from clients`
-            : 'No notes'
-        }}
+      <footer v-if="filteredComments.length" class="num">
+        {{ filteredComments.length }} note{{ filteredComments.length > 1 ? 's' : '' }} from your
+        client
       </footer>
     </aside>
   </Teleport>
 </template>
+
+<style scoped>
+.mine {
+  padding: 0 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.from {
+  padding: 8px 8px 0;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.none {
+  margin: 0;
+  padding: 0 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+</style>

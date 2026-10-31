@@ -14,6 +14,12 @@ import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { TagConfig } from '../main/ipc/albums'
 import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
+import type { LocalList, SelectionList } from '../main/lists'
+
+type ListsResult = { success: true; lists: LocalList[] } | { success: false; error: string }
+type NotesResult =
+  | { success: true; notes: Record<number, string>; albumNote: string }
+  | { success: false; error: string }
 
 type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
 
@@ -225,6 +231,20 @@ declare global {
         ) => Promise<PeopleResult>
         clientLinks: (albumId: string) => Promise<Record<string, string>>
         onPeopleChanged: (callback: (albumId: string) => void) => () => void
+      }
+      lists: {
+        get: (albumId: string) => Promise<ListsResult>
+        save: (albumId: string, lists: SelectionList[]) => Promise<ListsResult>
+        reopen: (albumId: string, listId: string, clientName: string) => Promise<ListsResult>
+      }
+      notes: {
+        get: (albumId: string) => Promise<NotesResult>
+        set: (
+          albumId: string,
+          imageId: number,
+          body: string
+        ) => Promise<{ success: boolean; error?: string }>
+        setAlbum: (albumId: string, body: string) => Promise<{ success: boolean; error?: string }>
       }
       sync: {
         detectChanges: (albumId: string) => Promise<SyncResult>

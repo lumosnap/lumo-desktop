@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { thumbHashToDataURL } from 'thumbhash'
 import { tagLabel } from '../utils/tags'
-import { Heart, Check, FolderSearch, MessageSquare, ImageOff, Layers } from 'lucide-vue-next'
+import {
+  Heart,
+  Check,
+  FolderSearch,
+  MessageSquare,
+  ImageOff,
+  Layers,
+  NotebookPen
+} from 'lucide-vue-next'
 
 interface TileImage {
   originalFilename: string
@@ -20,17 +28,19 @@ const props = defineProps<{
   status: 'Processing' | 'Failed' | 'Success'
   thumb: string
   selected: boolean
+  pickedBy?: string[] // who picked it in the list shown; the hearts otherwise
+  lists?: string[] // the client lists it is picked in
+  myNote?: string // the photographer's private note
 }>()
+const by = computed(() => props.pickedBy ?? props.image.favoritedBy ?? [])
 const emit = defineEmits<{
   open: [e: MouseEvent]
   toggle: []
-  tip: [e: Event, names: string[]]
+  tip: [e: Event, names: string[], lists: string[]]
   untip: []
   notes: []
   reveal: []
 }>()
-
-const firstName = (s: string): string => s.split(' ')[0]
 
 // Blurry ThumbHash preview behind the thumbnail while it loads
 const placeholder = ref<string>()
@@ -54,9 +64,9 @@ onMounted(() => {
       target="_blank"
       :aria-label="
         image.originalFilename +
-        (image.favoritedBy?.length
-          ? ', picked by ' + image.favoritedBy.map(firstName).join(', ')
-          : '') +
+        (by.length ? ', picked by ' + by.join(', ') : '') +
+        (lists?.length ? ', in ' + lists.join(', ') : '') +
+        (myNote ? ', has your note' : '') +
         (burst ? `, burst of ${burst.length}` : '')
       "
       style="
@@ -96,17 +106,32 @@ onMounted(() => {
       <span v-if="burst" class="chip" :title="`Burst of ${burst.length}`">
         <Layers />{{ burst.length }}
       </span>
+      <!-- The photographer's own note: an outline mark, apart from the client's filled ones -->
+      <button
+        v-if="myNote"
+        class="chip mine"
+        :aria-label="`Your note: ${myNote}`"
+        :title="`Your note: ${myNote}`"
+        @click.stop="emit('notes')"
+      >
+        <NotebookPen />
+      </button>
       <span
-        v-if="image.favoritedBy?.length"
-        class="chip fav"
+        v-if="by.length || lists?.length"
+        class="chip"
+        :class="{ fav: by.length }"
         tabindex="0"
-        :aria-label="`Picked by ${image.favoritedBy.join(', ')}`"
-        @pointerenter="emit('tip', $event, image.favoritedBy)"
+        :aria-label="
+          [by.length && `Picked by ${by.join(', ')}`, lists?.length && `In ${lists.join(', ')}`]
+            .filter(Boolean)
+            .join('. ')
+        "
+        @pointerenter="emit('tip', $event, by, lists ?? [])"
         @pointerleave="emit('untip')"
-        @focus="emit('tip', $event, image.favoritedBy)"
+        @focus="emit('tip', $event, by, lists ?? [])"
         @blur="emit('untip')"
       >
-        <Heart />{{ image.favoritedBy.length }}
+        <Heart />{{ by.length || '' }}
       </span>
       <button
         v-if="(image.notesCount || 0) > 0"

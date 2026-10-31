@@ -174,6 +174,79 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-11-01-selection">
+<h2>Session 2026-11-01 (7): albums for your client, and notes only you see</h2>
+<p>Existing work, Revamp level inside the gallery side panel, flow scope: client selection lists (Phase 5, photographer side) and private photographer notes. The look is kept. Screens: 960 px to 2560 px, desktop only.</p>
+<ul>
+<li><b>For:</b> the photographer after delivery, waiting for the couple and the family to choose photos for the printed albums.</li>
+<li><b>Job:</b> say what the client picks for ("Main album · 300", "Parents' album · 60", "Haldi · up to 40", by a date), see who sent and who is late, see the photos everyone agrees on, and keep a private note on a photo or on the shoot.</li>
+<li><b>Moment:</b> days after the wedding; the family picks on phones over a week; the photographer checks in between edits. Calm, no alarms.</li>
+<li><b>Direction (kept):</b> delivery tracking. A selection is the return parcel: "Sent 31 Oct", "Not sent · was due 30 Oct". Each client row answers "where is it".</li>
+<li><b>Words:</b> "albums for your client", not "lists" (the photographer's world is the printed album). "Sent", not "submitted". "Reopen", not "unlock".</li>
+</ul>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Where lists live</td><td>Under Picks, in the same card and the same rows as "Picked by". Pressing an album turns Picks on and narrows it; its clients open under it, one step in</td><td>A list is a kind of picks. One filter system: the grid, the heart chip, the tip and the lightbox all read "who picked this" from the album shown</td><td class="rejected">A separate "Selections" panel or tab with its own grid filter</td></tr>
+<tr><td>Album row at rest</td><td>Name, then where its selections are: "1 of 3 sent · 2 late" (amber when late). Its limits move to the row's title; with no clients yet it shows the limits. No icon</td><td>The direction is "where is it": who is late shows without opening the album. The same image icon on every row told nothing</td><td class="rejected">The limits as the second line, and an album icon per row (first try)</td></tr>
+<tr><td>"Picked by" once albums exist</td><td>Becomes "Hearted by"</td><td>Hearts are their own pool. "Picks 2" next to "212 / 300" read as a contradiction</td><td class="rejected">Leave the heading (the counts clashed in review)</td></tr>
+<tr><td>Client row</td><td>Name, then "Sent 31 Oct" or "Not sent yet"; per-set counts under it ("Haldi 3/40"); "212 / 300" on the right. Late and over-limit in the amber ink</td><td>The three things the photographer checks: did they send, how many, which chapter is over. Amber, not red: late is normal for families</td><td class="rejected">A progress bar per client (seven bars in a 300 px panel is noise)</td></tr>
+<tr><td>Reopen</td><td>Shows only under the client being looked at: "Sent, so Anjali Menon can't change it. [Reopen]". No confirm</td><td>Rare, and the client can send again. A button on every row cut the names to "Anjali M…"</td><td class="rejected">A Reopen button on each row (first try)</td></tr>
+<tr><td>Merged view</td><td>The heart chip counts who picked the photo in the album shown; the tip names them and the albums the photo is in. "Picked by everyone" is a row with its count</td><td>Reuses the chip the photographer already reads. "Everyone" is the question families ask ("what do we all want?")</td><td class="rejected">"Only Anjali" filter (left out: one more row per client; ask if needed)</td></tr>
+<tr><td>No lists yet</td><td>One line, then "Set up albums for your client…". The editor starts with one row, "Main album"</td><td>Today's Picks keep working untouched. The first row is the common case, so the photographer types a number, not a name</td><td class="rejected">An empty editor</td></tr>
+<tr><td>Editor</td><td>A row per album: name, "Up to [ ] photos", up, down, remove; "Send by" (native date); "Per set" folds out with a box per set. Blank limit = "any"</td><td>Every field is optional except the name. Native date input: the OS picker, nothing to load</td><td class="rejected">A step-by-step wizard; a date-picker library</td></tr>
+<tr><td>Deleting an album with picks</td><td>Nothing is deleted until Save. The dialog then says "Saving deletes 30 picks in “Parents' album” (Lakshmi Aunty). This can't be undone." and Save turns red: "Delete picks and save"</td><td>The server deletes the picks with the list. The confirm is the button the photographer is already about to press; Cancel is the undo</td><td class="rejected">A second confirm dialog per row</td></tr>
+<tr><td>Refresh</td><td>Fetch on album open and on the refresh button; no polling. A failed refresh keeps the albums shown with a line and "Try again"</td><td>Picks change over days, not seconds. Stale but visible beats empty</td><td class="rejected">Polling</td></tr>
+<tr><td>Private note on a photo</td><td>First in the notes panel (now "Notes"): a lock, "Your note", a writing area, "Only you see this"; then "From your client". Saves 0.7 s after typing stops, on blur, on close, on moving to another photo and before the window unloads</td><td>The photographer writes here; the client's notes are read. The lock and the words keep the two apart without a second panel</td><td class="rejected">A Save button; a separate panel for private notes</td></tr>
+<tr><td>Save states</td><td>Spinner after 300 ms; "Saved on this computer"; "Couldn't save. Try again" in red with the text kept. Closing with a failed save gives a toast with "Try again"</td><td>Says where it went (this computer, not the client). Nothing typed is lost</td><td class="rejected">"Saving…" text (flashes on fast saves)</td></tr>
+<tr><td>Tile marker</td><td>An outline pen chip, left of the heart; click opens the notes</td><td>Outline = yours, filled = the client's. Same chip shape as the others</td><td class="rejected">A coloured dot (colour alone carries meaning)</td></tr>
+<tr><td>"Your notes" filter</td><td>A toggle in the photo bar, only when a note exists; composes with set, picks, album, client, people and tags. The bar title adds "· with your note"</td><td>It is a view of the photos, like Stack bursts, not a client thing</td><td class="rejected">A chip in the tag bar</td></tr>
+<tr><td>Album note</td><td>"Note for yourself" link under Share; opens the same note field</td><td>Most albums have none. A link costs one line</td><td class="rejected">An always-open text area</td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th></tr>
+<tr><td>Album or client pressed, grid filters</td><td>none</td><td>instant; the grid scrolls to its top as other filters do</td></tr>
+<tr><td>Lists loading, refresh, reopen, save</td><td>micro</td><td>the shared <code>.spin</code>, after 300 ms</td></tr>
+<tr><td>Note saving</td><td>micro</td><td>spinner after 300 ms, then "Saved on this computer"</td></tr>
+</table>
+<h3>States</h3>
+<p>Lists: first load (spinner), none, loaded, a list with no picks, a client filter with no picks, everyone with none in common, refresh failed with albums kept, first load failed or offline ("You're offline. Client selections load when you're back online." with Try again; the editor cannot open, so an empty draft can never delete the server's lists), save pending, save failed (dialog stays, toast with Try again), reopen pending and failed. Notes: none, saving, saved, failed, failed then closed (toast), notes filter empty.</p>
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>Here</th></tr>
+<tr><td>Offline</td><td>Client selection says "You're offline. Client selections load when you're back online." with Try again; albums already shown stay. Private notes work offline (this computer only)</td></tr>
+<tr><td>Signed out, no access</td><td>The server's error shows in the same line with Try again; the editor cannot open without loaded albums</td></tr>
+<tr><td>Not found, crash, first launch</td><td>Not applicable: this is a panel inside an album that the gallery already loaded</td></tr>
+</table>
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Picks card</td><td>ImagesView.vue</td><td>this session</td><td>All / Picks, Picked by a client (server refetch), counts</td><td>Same with no albums set up: All and Picks and Picked by unchanged (capture 02). Picked by hides while an album is open</td></tr>
+<tr><td>Photo tile</td><td>PhotoTile.vue</td><td>this session</td><td>Heart chip with count and Picked by tip; notes chip</td><td>Same with no albums. With albums: the count is for the album shown; a photo only in an album shows an outline heart</td></tr>
+<tr><td>Notes panel</td><td>NotesSidebar.vue</td><td>this session</td><td>Client notes, read only; Esc and arrows held while open</td><td>Client notes unchanged, under "From your client". Title "Client notes" became "Notes"</td></tr>
+<tr><td>Lightbox</td><td>ImagesView.vue</td><td>this session</td><td>Picked by in the bar, Notes button</td><td>Same, plus "in Main album" and a dot on Notes when the photo has your note</td></tr>
+</table>
+<h3>Mechanics</h3>
+<p>Unchanged from earlier sessions: scoped styles in <code>ImagesView.vue</code>, PhotoSwipe chrome in its unscoped block, tokens in <code>main.css</code>. Calls to main get plain copies (<code>JSON.parse(JSON.stringify())</code>), never Vue proxies.</p>
+<h3>Look notes</h3>
+<p>Seen at 1280 and 960: the first try put Reopen on every client row and cut the names to "Anjali M…" and the count to two lines; moved under the client being looked at. The "Add an album" button stretched the dialog width; now its own width. The bar title did not say the notes filter was on; now "· with your note". Critique: a fresh reviewer, one round; see Critique caught.</p>
+<h3>Critique caught</h3>
+<table>
+<tr><th>Finding</th><th>Outcome</th></tr>
+<tr><td>Album rows repeat settings; who is late is hidden until opened</td><td>Fixed: "1 of 3 sent · 2 late"</td></tr>
+<tr><td>"Picks 2", "Picked by … 1" and "212 / 300" disagree</td><td>Fixed: the hearts' heading says "Hearted by" once albums exist</td></tr>
+<tr><td>Reopen cut at the panel edge</td><td>Fixed: the sentence wraps above the button. At 960 px the side panel itself is still wider than its column (flagged in session 6, not changed here)</td></tr>
+<tr><td>Toast across the dialog edge, cut at the window</td><td>Kept: a toast raised before the dialog opened; the toast placement is session 6's. The cut in capture 13 is the element capture's crop, not the window</td></tr>
+<tr><td>"No client notes" said twice</td><td>Fixed: the footer shows only when there are client notes</td></tr>
+<tr><td>Refresh error far from the button, lowercase after a stop</td><td>Fixed: under the heading, "Couldn't refresh: …". The lowercase text is the mock's</td></tr>
+<tr><td>Native disclosure triangle on "Per set"</td><td>Fixed: the app's chevron, turning as in the sync dialog</td></tr>
+<tr><td>Same icon on every album row</td><td>Fixed: removed</td></tr>
+</table>
+<h3>Checks</h3>
+<p>Vitest: id mapping and input cleaning (<code>src/main/lists.test.ts</code>), merged counts, progress, dates and lost picks (<code>utils/lists.test.ts</code>), autosave (<code>useAutosave.test.ts</code>), migration 10 and notes CRUD (<code>database.test.ts</code>, under Electron as Node). <code>check.py</code>: 0 errors; ASKs kept: straight apostrophes (app-wide, session 6), middle dots (each run reads as one phrase), the down arrow flagged as a chevron (it moves a row). Captures: <code>/private/tmp/claude-501/-Users-darkwebplayer-Documents-Work-Jithin-Lumosnap-lumo-desktop/58ccef73-429b-4c65-a14f-3eecf6e6535f/scratchpad/lists/shots-1280/</code> and <code>/private/tmp/claude-501/-Users-darkwebplayer-Documents-Work-Jithin-Lumosnap-lumo-desktop/58ccef73-429b-4c65-a14f-3eecf6e6535f/scratchpad/lists/shots-960/</code>.</p>
+</article>
+
 <article id="session-2026-10-31-async">
 <h2>Session 2026-10-31 (6): every save says it is saving</h2>
 <p>Existing work, Minimal level, flow scope: the pending, failure and empty states of the async actions added on this branch (People, tags, sets, gallery reload). The look is kept. The photographer reported that saving a new name in the pick view gave no sign of work. Screens: 960 px to 2560 px, desktop only.</p>

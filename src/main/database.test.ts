@@ -43,7 +43,11 @@ import {
   setPersonCover,
   setClientPerson,
   getClientPeople,
-  hasPerson
+  hasPerson,
+  getImageNotes,
+  setImageNote,
+  getAlbumNote,
+  setAlbumNote
 } from './database'
 
 // better-sqlite3 is rebuilt for Electron's ABI by postinstall; skip under plain Node if it won't load
@@ -67,7 +71,9 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(9)
+    expect(db.pragma('user_version', { simple: true })).toBe(10)
+    expect(cols('albums')).toContain('private_note')
+    expect(cols('image_notes')).toEqual(['image_id', 'body', 'updated_at'])
     expect(cols('albums')).toEqual(
       expect.arrayContaining(['startTime', 'endTime', 'isOrphaned', 'albumType'])
     )
@@ -495,6 +501,37 @@ describe.skipIf(!loadable)('people', () => {
     rematchPeople('a')
     expect(getAlbumPeople('a')).toEqual([])
     expect(hasPerson('a', id)).toBe(false)
+    closeDatabase()
+  })
+})
+
+describe.skipIf(!loadable)('private notes', () => {
+  it('saves, edits, deletes on empty, stays in its album and cascades', () => {
+    initDatabase(':memory:')
+    album('a')
+    album('b')
+    const [i1, i2] = mk('a', 2)
+    const [j1] = mk('b', 1)
+    setImageNote('a', i1, 'Retouch the stray hair')
+    setImageNote('a', i2, 'Print 12x18')
+    setImageNote('a', i2, 'Print 16x24')
+    setImageNote('b', j1, 'Other album')
+    expect(getImageNotes('a')).toEqual({ [i1]: 'Retouch the stray hair', [i2]: 'Print 16x24' })
+    setImageNote('a', i1, '   ')
+    expect(getImageNotes('a')).toEqual({ [i2]: 'Print 16x24' })
+    expect(() => setImageNote('a', j1, 'x')).toThrow()
+    deleteImages([i2])
+    expect(getImageNotes('a')).toEqual({})
+    expect(getImageNotes('b')).toEqual({ [j1]: 'Other album' })
+
+    expect(getAlbumNote('a')).toBe('')
+    setAlbumNote('a', 'Couple wants the haldi warm')
+    expect(getAlbumNote('a')).toBe('Couple wants the haldi warm')
+    setAlbumNote('a', '')
+    expect(getAlbumNote('a')).toBe('')
+    expect(() => setAlbumNote('zz', 'x')).toThrow()
+    deleteAlbum('b')
+    expect(getImageNotes('b')).toEqual({})
     closeDatabase()
   })
 })
