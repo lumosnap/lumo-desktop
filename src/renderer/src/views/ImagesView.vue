@@ -151,7 +151,11 @@ const tip = ref<{ left: number; top: number; names: string[] } | null>(null)
 const scrollEl = ref<HTMLElement | null>(null)
 const columns = ref(4)
 const galleryWidth = ref(0)
-const scrollMargin = ref(0)
+const galleryTop = ref(0) // the gallery's offset in the scroller
+const scrollPad = ref(0) // the scroller's top padding, where sticky things stop
+// Sets, tags and the selection bar stay pinned over the photos
+const headEl = ref<HTMLElement | null>(null)
+const headH = ref(0)
 const stackBursts = ref(true)
 
 // Selection
@@ -334,7 +338,7 @@ async function moveSet(set: AlbumSet, delta: number): Promise<void> {
     set.id,
     delta
   )
-  await setsCall(window.api.sets.reorder(albumId, order))
+  await setsCall(window.api.sets.reorder(albumId, [...order]))
 }
 
 const selectedIds = (): number[] => Array.from(selectedImageIds.value)
@@ -345,7 +349,7 @@ async function addSelectedTo(set: AlbumSet): Promise<void> {
   const ids = selectedIds()
   if (
     await setsCall(
-      window.api.sets.addImages(set.id, ids),
+      window.api.sets.addImages(set.id, [...ids]),
       `Added ${photos(ids.length)} to “${set.name}”`
     )
   )
@@ -356,7 +360,7 @@ function newSetFromSelection(): void {
   const ids = selectedIds()
   promptName('New set', '', async (name) => {
     const ok = await setsCall(
-      window.api.sets.create(albumId, name, ids),
+      window.api.sets.create(albumId, name, [...ids]),
       `Added ${photos(ids.length)} to “${name}”`
     )
     if (ok) clearSelection()
@@ -370,7 +374,7 @@ async function removeSelectedFromSet(): Promise<void> {
   const ids = selectedIds()
   if (
     await setsCall(
-      window.api.sets.removeImages(set.id, ids),
+      window.api.sets.removeImages(set.id, [...ids]),
       `Removed ${photos(ids.length)} from “${set.name}”`
     )
   )
@@ -469,7 +473,8 @@ async function loadTagConfig(): Promise<void> {
 
 async function editTag(op: 'add' | 'remove', ids: number[], slug: string): Promise<boolean> {
   try {
-    const r = await tagsApi[op](albumId, ids, slug)
+    // contextBridge can't clone Vue reactive proxies: always send a plain copy
+    const r = await tagsApi[op](albumId, [...ids], slug)
     if (!r.success) throw new Error(r.error)
   } catch (err) {
     toast(`Couldn't ${op} “${labelOf(slug)}”: ${err instanceof Error ? err.message : String(err)}`)
@@ -577,7 +582,10 @@ async function saveTagSet(): Promise<void> {
   savingTagSet.value = true
   try {
     const on = vocab.map((t) => t.slug).filter((s) => tagDraft.value.has(s))
-    tagConfig.value = await tagsApi.setAlbumConfig(albumId, on.length === vocab.length ? null : on)
+    tagConfig.value = await tagsApi.setAlbumConfig(
+      albumId,
+      on.length === vocab.length ? null : [...on]
+    )
     showTagSet.value = false
     toast('Album tags saved. AI suggestions update in a few seconds.')
   } catch (err) {
@@ -592,6 +600,15 @@ const grid = computed(() =>
 )
 const hasBursts = computed(() => images.value.some((img) => img.burstId != null))
 const HEADER_H = 44
+
+// scrollTop at which the bar pins
+const stuckAt = computed(() => galleryTop.value - scrollPad.value - headH.value)
+// The virtualizer sees the list start this much higher, so its "top" is the first row
+// visible under the pinned bar and moment label: scrollToIndex lands rows there, and the
+// sticky moment is the one those photos belong to
+const scrollMargin = computed(
+  () => stuckAt.value - (grid.value.headers.length ? HEADER_H + GRID_GAP : 0)
+)
 
 const tileH = (): number =>
   galleryWidth.value
@@ -638,11 +655,19 @@ function updateGridLayout(): void {
   scrollEl.value = el.closest('.main') as HTMLElement | null
   columns.value = columnsForWidth(el.clientWidth, window.innerWidth)
   galleryWidth.value = el.clientWidth
-  if (scrollEl.value)
-    scrollMargin.value =
-      el.getBoundingClientRect().top -
-      scrollEl.value.getBoundingClientRect().top +
-      scrollEl.value.scrollTop
+  const sc = scrollEl.value
+  // While the bar is pinned, the row under it stays there when the bar or a banner changes height
+  const pinned =
+    sc && galleryTop.value && sc.scrollTop > stuckAt.value
+      ? sc.scrollTop - scrollMargin.value
+      : null
+  headH.value = headEl.value?.offsetHeight ?? 0
+  if (sc) {
+    scrollPad.value = parseFloat(getComputedStyle(sc).paddingTop) || 0
+    galleryTop.value =
+      el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop
+    if (pinned !== null) sc.scrollTop = scrollMargin.value + pinned
+  }
   rowVirtualizer.value.measure()
 }
 
@@ -656,21 +681,25 @@ watch(
     bannerObserver.disconnect()
     if (el) {
       resizeObserver.observe(el)
+      // The selection bar and the tag row change its height, which moves the grid
+      if (headEl.value) resizeObserver.observe(headEl.value)
       updateGridLayout()
       if (scrollEl.value) bannerObserver.observe(scrollEl.value, { childList: true })
     }
   },
   { flush: 'post' }
 )
-// The selection bar is a little taller than the title bar, which moves the grid
-watch(isSelectionMode, () => nextTick(updateGridLayout))
-// So does the tag row appearing once photos are analysed
-watch(hasTags, () => nextTick(updateGridLayout))
+// A new set or filter starts from its first photo. The pinned bar stays put under the pointer.
+watch([activeSetId, activeTags, showFavoritesOnly, selectedClientName], () => {
+  const el = scrollEl.value
+  if (el && el.scrollTop > stuckAt.value) el.scrollTop = stuckAt.value
+})
 
 const currentHeader = computed(() => virtualRows.value.find((r) => r.sticky)?.v.index ?? null)
 
+// Its first photos land under the bar, with its label pinned above them
 function scrollToMoment(row: number): void {
-  rowVirtualizer.value.scrollToIndex(row, { align: 'start' })
+  rowVirtualizer.value.scrollToIndex(row + 1, { align: 'start' })
 }
 
 const favoritedPhotosCount = computed(() => images.value.filter((img) => img.isFavorite).length)
@@ -1315,46 +1344,9 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <section class="g-main" aria-label="Photos">
-        <div v-if="isSelectionMode" class="g-bar sel" role="toolbar" aria-label="Selection">
-          <button class="icon-btn sm" aria-label="Clear selection" @click="clearSelection">
-            <X />
-          </button>
-          <span class="t num">{{ nf(selectedImageIds.size) }} selected</span>
-          <button class="btn sm ghost" style="margin-left: auto" @click="selectAll">
-            Select all {{ nf(filteredImages.length) }}
-          </button>
-          <template v-if="activeSet">
-            <button v-if="selectedImageIds.size === 1" class="btn sm ghost" @click="useAsCover">
-              <ImageIcon />Use as cover
-            </button>
-            <button class="btn sm ghost" @click="removeSelectedFromSet">
-              <Minus />Remove from set
-            </button>
-          </template>
-          <button
-            class="btn sm ghost"
-            aria-haspopup="menu"
-            :aria-expanded="pop?.kind === 'add'"
-            @click="openPop({ kind: 'add' }, $event)"
-          >
-            <Plus />Add to set…
-          </button>
-          <button
-            v-if="tagConfig"
-            class="btn sm ghost"
-            aria-haspopup="dialog"
-            :aria-expanded="pop?.kind === 'tags'"
-            @click="openTagPicker(selectedIds(), $event)"
-          >
-            <Tag />Tags…
-          </button>
-          <button class="btn sm primary" :disabled="copying" @click="copySelectedImages">
-            <span v-if="copying" class="spin"></span><Copy v-else />Copy
-            {{ nf(selectedImageIds.size) }} to folder…
-          </button>
-        </div>
-        <div v-else class="g-bar">
+      <section class="g-main" aria-label="Photos" :style="{ '--head-h': `${headH}px` }">
+        <!-- The title scrolls away; the pressed set and tags still say what is shown -->
+        <div v-if="!isSelectionMode" class="g-bar">
           <span class="t">{{ barTitle }}</span>
           <span class="m num">{{ nf(filteredImages.length) }}</span>
           <button
@@ -1367,79 +1359,121 @@ onUnmounted(() => {
             <Layers />Stack bursts
           </button>
         </div>
+        <div ref="headEl" class="g-head">
+          <div class="g-head-in">
+            <div v-if="isSelectionMode" class="g-bar sel" role="toolbar" aria-label="Selection">
+              <button class="icon-btn sm" aria-label="Clear selection" @click="clearSelection">
+                <X />
+              </button>
+              <span class="t num">{{ nf(selectedImageIds.size) }} selected</span>
+              <button class="btn sm ghost" style="margin-left: auto" @click="selectAll">
+                Select all {{ nf(filteredImages.length) }}
+              </button>
+              <template v-if="activeSet">
+                <button v-if="selectedImageIds.size === 1" class="btn sm ghost" @click="useAsCover">
+                  <ImageIcon />Use as cover
+                </button>
+                <button class="btn sm ghost" @click="removeSelectedFromSet">
+                  <Minus />Remove from set
+                </button>
+              </template>
+              <button
+                class="btn sm ghost"
+                aria-haspopup="menu"
+                :aria-expanded="pop?.kind === 'add'"
+                @click="openPop({ kind: 'add' }, $event)"
+              >
+                <Plus />Add to set…
+              </button>
+              <button
+                v-if="tagConfig"
+                class="btn sm ghost"
+                aria-haspopup="dialog"
+                :aria-expanded="pop?.kind === 'tags'"
+                @click="openTagPicker(selectedIds(), $event)"
+              >
+                <Tag />Tags…
+              </button>
+              <button class="btn sm primary" :disabled="copying" @click="copySelectedImages">
+                <span v-if="copying" class="spin"></span><Copy v-else />Copy
+                {{ nf(selectedImageIds.size) }} to folder…
+              </button>
+            </div>
 
-        <div v-if="images.length" class="set-bar" role="toolbar" aria-label="Sets">
-          <button class="btn sm ghost" :aria-pressed="!activeSet" @click="viewSet(null)">
-            All photos <span class="n num">{{ nf(images.length) }}</span>
-          </button>
-          <template v-for="s in sets" :key="s.id">
-            <button
-              class="btn sm ghost"
-              :aria-pressed="activeSetId === s.id"
-              @click="viewSet(s.id)"
-              @contextmenu.prevent="openPop({ kind: 'set', set: s }, $event)"
-            >
-              {{ s.name }} <span class="n num">{{ nf(s.imageIds.length) }}</span>
-            </button>
-            <button
-              v-if="activeSetId === s.id"
-              class="icon-btn sm plain"
-              aria-haspopup="menu"
-              :aria-expanded="pop?.kind === 'set'"
-              :aria-label="`Options for ${s.name}`"
-              :title="`Options for ${s.name}`"
-              @click="openPop({ kind: 'set', set: s }, $event)"
-            >
-              <MoreHorizontal />
-            </button>
-          </template>
-          <button class="btn sm ghost" aria-haspopup="dialog" @click="newSet">
-            <Plus />New set
-          </button>
-        </div>
+            <div v-if="images.length" class="set-bar" role="toolbar" aria-label="Sets">
+              <button class="btn sm ghost" :aria-pressed="!activeSet" @click="viewSet(null)">
+                All photos <span class="n num">{{ nf(images.length) }}</span>
+              </button>
+              <template v-for="s in sets" :key="s.id">
+                <button
+                  class="btn sm ghost"
+                  :aria-pressed="activeSetId === s.id"
+                  @click="viewSet(s.id)"
+                  @contextmenu.prevent="openPop({ kind: 'set', set: s }, $event)"
+                >
+                  {{ s.name }} <span class="n num">{{ nf(s.imageIds.length) }}</span>
+                </button>
+                <button
+                  v-if="activeSetId === s.id"
+                  class="icon-btn sm plain"
+                  aria-haspopup="menu"
+                  :aria-expanded="pop?.kind === 'set'"
+                  :aria-label="`Options for ${s.name}`"
+                  :title="`Options for ${s.name}`"
+                  @click="openPop({ kind: 'set', set: s }, $event)"
+                >
+                  <MoreHorizontal />
+                </button>
+              </template>
+              <button class="btn sm ghost" aria-haspopup="dialog" @click="newSet">
+                <Plus />New set
+              </button>
+            </div>
 
-        <div v-if="hasTags" class="set-bar" role="toolbar" aria-label="Tags">
-          <!-- Stays put while the chips scroll under it -->
-          <div class="tag-lead">
-            <input
-              v-model="tagQuery"
-              class="input tag-search"
-              type="search"
-              placeholder="Find a tag"
-              aria-label="Find a tag"
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button
-              v-if="tagConfig"
-              class="icon-btn sm plain"
-              aria-haspopup="dialog"
-              aria-label="Album tags…"
-              title="Album tags…"
-              @click="openTagSet"
-            >
-              <SlidersHorizontal />
-            </button>
-            <button
-              v-if="activeTags.length || tagQuery"
-              class="icon-btn sm plain"
-              aria-label="Clear tag filters"
-              title="Clear tag filters"
-              @click="clearTags"
-            >
-              <X />
-            </button>
+            <div v-if="hasTags" class="set-bar" role="toolbar" aria-label="Tags">
+              <!-- Stays put while the chips scroll under it -->
+              <div class="tag-lead">
+                <input
+                  v-model="tagQuery"
+                  class="input tag-search"
+                  type="search"
+                  placeholder="Find a tag"
+                  aria-label="Find a tag"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button
+                  v-if="tagConfig"
+                  class="icon-btn sm plain"
+                  aria-haspopup="dialog"
+                  aria-label="Album tags…"
+                  title="Album tags…"
+                  @click="openTagSet"
+                >
+                  <SlidersHorizontal />
+                </button>
+                <button
+                  v-if="activeTags.length || tagQuery"
+                  class="icon-btn sm plain"
+                  aria-label="Clear tag filters"
+                  title="Clear tag filters"
+                  @click="clearTags"
+                >
+                  <X />
+                </button>
+              </div>
+              <button
+                v-for="[slug, n] in tagChips"
+                :key="slug"
+                class="btn sm ghost"
+                :aria-pressed="activeTags.includes(slug)"
+                @click="toggleTag(slug)"
+              >
+                {{ labelOf(slug) }} <span class="n num">{{ nf(n) }}</span>
+              </button>
+              <span v-if="tagQuery && !tagChips.length" class="n">No tags match</span>
+            </div>
           </div>
-          <button
-            v-for="[slug, n] in tagChips"
-            :key="slug"
-            class="btn sm ghost"
-            :aria-pressed="activeTags.includes(slug)"
-            @click="toggleTag(slug)"
-          >
-            {{ labelOf(slug) }} <span class="n num">{{ nf(n) }}</span>
-          </button>
-          <span v-if="tagQuery && !tagChips.length" class="n">No tags match</span>
         </div>
 
         <div v-if="gridLoading" class="photos" aria-busy="true">
@@ -1494,7 +1528,7 @@ onUnmounted(() => {
                       sticky ? undefined : { transform: `translateY(${v.start - scrollMargin}px)` }
                     "
                   >
-                    {{ row.label }}
+                    <span class="g-moment-t">{{ row.label }}</span>
                     <button
                       v-if="row.momentId != null && !activeSet && !showFavoritesOnly"
                       class="btn sm ghost g-make-set"
@@ -1818,9 +1852,35 @@ onUnmounted(() => {
   color: var(--ink-2);
   background: var(--card);
 }
+.g-moment-t {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .g-moment.sticky {
   position: sticky;
+  top: var(--head-h);
   z-index: 2;
+}
+/* updateGridLayout keeps the row under the pinned bar itself; the browser's anchoring would add to it */
+.g-main {
+  overflow-anchor: none;
+}
+/* Sets, tags and the selection bar: the controls stay in reach in a 10,000-photo album.
+   It never changes height on scroll, so nothing under it jumps. */
+.g-head {
+  position: sticky;
+  top: 0;
+  z-index: 6; /* over the rows, the moment label and the scrubber */
+  background: var(--card);
+  container-type: scroll-state;
+}
+/* Pinned, it also covers the scroller's top padding, so no photo shows above it */
+@container scroll-state(stuck: top) {
+  .g-head-in {
+    box-shadow: 0 -16px 0 var(--card);
+  }
 }
 .stack-toggle[aria-pressed='true'],
 .set-bar .btn[aria-pressed='true'] {
@@ -2006,13 +2066,14 @@ onUnmounted(() => {
 }
 .g-scrub {
   position: sticky;
-  top: 50vh;
+  /* centred in the room under the pinned bar, and never under it */
+  top: calc(50vh + var(--head-h) / 2 - 8px);
   transform: translateY(-50%);
   flex: none;
   z-index: 5;
   display: grid;
   gap: 2px;
-  max-height: 70vh;
+  max-height: calc(100vh - var(--head-h) - 64px);
   overflow-y: auto;
   padding: 4px;
   background: var(--card);

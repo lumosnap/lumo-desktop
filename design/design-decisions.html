@@ -174,6 +174,28 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-10-31-pinned">
+<h2>Session 2026-10-31 (2): the gallery controls stay in reach</h2>
+<p>Existing work, Minimal level, component scope: the top of the album gallery. Problem: in a 10,000-photo album the sets, the tag search and the tag chips scrolled away with the photos. On windows 960 px tall or less the side panel (album name, Share, Picks, Picked by) scrolled away too. Screens: 960 px (the app minimum) to 2560 px, desktop only.</p>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected default</th></tr>
+<tr><td>Pinned bar</td><td>The set row and the tag row pin to the top of the photo card. The selection bar pins with them while photos are selected</td><td>These are the controls a photographer uses deep in the album: change the set, find a tag, act on the selection</td><td class="rejected">Everything scrolls; or every bar pins</td></tr>
+<tr><td>Title row</td><td>"All photos 1,200" and Stack bursts scroll away</td><td>The pressed set chip and the tag chips already say what is shown. One row less over the photos</td><td class="rejected">A large title that shrinks into the bar</td></tr>
+<tr><td>No collapse animation</td><td>The pinned bar never changes height on scroll</td><td>A bar that shrinks moves the photos under the pointer. With no motion, reduced motion needs no other version</td><td class="rejected">Shrink on scroll</td></tr>
+<tr><td>Side panel</td><td>Always sticky. If it is taller than the window, it scrolls on its own</td><td>Album name, Share and the Picks filter stay in reach on a 13-inch laptop</td><td class="rejected">Sticky only when it fits (the old 960 px rule)</td></tr>
+<tr><td>Moment label</td><td>Pins directly under the bar, same card colour, no line between. One line, cut with an ellipsis</td><td>The bar and the label read as one control area. At narrow widths the label wrapped out of its 44 px row</td><td class="rejected">A hairline under each strip</td></tr>
+<tr><td>Strip above the bar</td><td>When pinned, the bar covers the window's 16 px top padding (<code>scroll-state(stuck: top)</code>)</td><td>Photos must not show in a gap above the controls</td><td class="rejected">A shadow under the bar</td></tr>
+<tr><td>Changing set or filter</td><td>The photos start again from the first one. The bar stays where it is</td><td>The chip that was clicked stays under the pointer; the old scroll position means nothing in the new set</td><td class="rejected">Keep the old scroll offset, or jump to the page top</td></tr>
+<tr><td>Bar height changes</td><td>When the selection bar or a banner appears, the row under the bar stays under the bar</td><td>The photo that was clicked to start the selection must not hide under the new bar</td><td class="rejected">The new bar covers 60 px of photos</td></tr>
+<tr><td>Scrubber</td><td>Centred in the room under the bar; never taller than that room</td><td>It must not cover the tag chips</td><td class="rejected">Centred in the window</td></tr>
+</table>
+<h3>Mechanics</h3>
+<p>The virtualizer gets a <code>scrollMargin</code> that is smaller by the bar, the moment label and one gap. So its "top" is the first row under the bar: <code>scrollToIndex</code> (scrubber, lightbox close) lands rows there, and the sticky moment is the one those photos belong to. The scrubber jumps to the first row of a moment, and its label pins above it.</p>
+<h3>Checks</h3>
+<p>Rendered the Vite page in headless Chromium with a mocked <code>window.api</code> (1,200 photos, 8 moments) at 960 × 800 and 1440 × 900, with and without a selection. Measured: bar at y 16, moment label right under it, first row 8 px below the label after a scrubber jump and after a tag change, the same row under the bar before and after the selection bar appears. <code>check.py</code>: 0 errors, 0 questions. Not done: a fresh-reviewer critique and the real Electron window.</p>
+</article>
+
 <article id="session-2026-10-29-ds">
 <h2>Session 2026-10-29 (2): design system from the references only</h2>
 <p>The requester asked for a new design system made only from the 4 reference images. This session does not use the repo code, the mock above or the old logo. The design system is the Artifact at <a href="https://claude.ai/artifact/7iKFX9n6Jn3kzeWroXD2Fg">claude.ai/artifact/7iKFX9n6Jn3kzeWroXD2Fg</a>: tokens, one stylesheet (<code>bundle.css</code>, classes start with <code>ls-</code>), and 24 components, each with a live preview and usage rules.</p>

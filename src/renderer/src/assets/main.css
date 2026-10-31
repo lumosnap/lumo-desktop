@@ -877,6 +877,11 @@ select.input {
   top: 0;
   display: grid;
   gap: 16px;
+  /* stays in reach on short windows; a long client list scrolls inside it */
+  max-height: calc(100vh - 32px);
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .back {
   display: inline-flex;
@@ -2216,12 +2221,6 @@ dialog[open] {
   }
 }
 
-/* the side panel only sticks when it fits the window */
-@media (max-height: 960px) {
-  .g-side {
-    position: static;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
