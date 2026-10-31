@@ -118,7 +118,7 @@ onMounted(() => {
       </button>
     </div>
     <span v-if="status === 'Processing'" class="chip proc">
-      <span class="spin brand" style="width: 12px; height: 12px; border-width: 1.5px"></span
+      <span class="spin brand now" style="width: 12px; height: 12px; border-width: 1.5px"></span
       >Processing
     </span>
     <div class="fname">

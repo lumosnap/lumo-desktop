@@ -174,6 +174,44 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-10-31-async">
+<h2>Session 2026-10-31 (6): every save says it is saving</h2>
+<p>Existing work, Minimal level, flow scope: the pending, failure and empty states of the async actions added on this branch (People, tags, sets, gallery reload). The look is kept. The photographer reported that saving a new name in the pick view gave no sign of work. Screens: 960 px to 2560 px, desktop only.</p>
+<ul>
+<li><b>For:</b> the photographer, often on venue Wi-Fi or on battery, naming people and sorting photos in short bursts.</li>
+<li><b>Job:</b> know that a click was taken, know when it failed, and get back to where they were.</li>
+<li><b>Rule:</b> quiet when fast, clear when slow. A save that ends in less than 300 ms shows nothing new. A slower one shows the app's own spinner on the control that was pressed.</li>
+</ul>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Every <code>.spin</code></td><td>Waits 300 ms before it shows, and takes no room until then (a <code>display</code> keyframe). <code>.spin.now</code> opts out (a photo tile that is still uploading)</td><td>One rule in <code>main.css</code> makes every spinner in the app quiet on fast saves. No timer code in each view</td><td class="rejected">A <code>useBusy</code> composable with a timer per action (more code in every view for the same result)</td></tr>
+<tr><td>Pressed button</td><td>Keeps full ink while busy (<code>aria-busy</code>); the others in the footer dim. A button that swaps its icon for the spinner keeps the icon until the spinner shows</td><td>The eye stays on the button that was pressed. No blink of an empty icon slot on a fast save</td><td class="rejected">The old look: the pressed button dimmed with the rest at once</td></tr>
+<tr><td>One save at a time</td><td>One <code>pending</code> key for the gallery view (<code>run</code>, <code>popRun</code>). Menus keep open on the item that saves, with the spinner where the check mark goes; the other items dim with <code>aria-disabled</code>. The menu closes when it worked and stays when it failed</td><td>A second click does nothing. Focus stays in the menu. A failed save leaves the menu there to try again</td><td class="rejected">Close the menu first, then save with no sign (the old way)</td></tr>
+<tr><td>Name field in the pick view</td><td>While saving, the field is read-only, not disabled. The spinner is on the option that was taken ("New person “Anjali”", a match, or "Not Anjali"), over the end of its label so a long name does not wrap. On failure the typed name stays, the focus stays, and the toast offers "Try again"</td><td>A disabled field loses focus, so Enter for the next name went nowhere. Read-only keeps the keyboard flow</td><td class="rejected">A disabled field (focus lost); a footer "Saving…" line (flashes on fast saves)</td></tr>
+<tr><td>Toasts over dialogs</td><td>The toast is a manual popover, placed inside the open modal dialog when there is one, and moved into a dialog that opens while it is up. Inside a dialog it sits above the footer</td><td>Before this, every error raised in a dialog (album tags, People on and off, remove, merge, pick view, check) was drawn under the dialog, and an open modal makes the rest of the page inert, so "Try again" could not be clicked</td><td class="rejected">A higher z-index (the top layer is above any z-index)</td></tr>
+<tr><td>Hide, show, reorder sets, tags</td><td>Change at once; on failure go back and say so, with "Try again". Tag edits use <code>retag()</code>, which keeps exactly the tags each photo had</td><td>These are small and frequent. Waiting for them feels slow, and the undo is exact</td><td class="rejected">Wait for the save (the old way for tags and reorder)</td></tr>
+<tr><td>Merge confirm</td><td>Stays open with the spinner on Merge until the merge is saved</td><td>It cannot be undone. The photographer sees it finish</td><td class="rejected">Close at once and merge with no sign (the old way)</td></tr>
+<tr><td>Reload photos</td><td>The photos stay; the reload icon turns; picks and scroll are kept; a failure is a toast with "Try again"</td><td>The old reload replaced the gallery with grey tiles, and a failure replaced it with the error page</td><td class="rejected">The full-page skeleton for a reload</td></tr>
+<tr><td>Pick view, nothing to pick</td><td>Says why, from the face search state: "Still looking for faces: 412 of 1,240 photos done. Photos show up here as faces are found." The view fills by itself when photos come in. A failed load says so, with "Try again"</td><td>Early on, an empty list is a wait, not an end. The old line, "Try again when more photos are done", sent the photographer away</td><td class="rejected">The old line; a progress bar in the dialog (the card under it already has one)</td></tr>
+<tr><td>A photo's faces loading</td><td>"Finding the faces in this photo…" with a spinner in the footer, after 300 ms</td><td>It said "No faces found in this photo" while it was still looking. The reviewer read a blank footer as "nothing happens"</td><td class="rejected">A blank footer (first try)</td></tr>
+<tr><td>Check ("Is this Anjali?")</td><td>A failed load says so in the dialog, with "Try again". While a batch saves, the faces cannot be flipped</td><td>The old way closed the dialog with a toast. Answers flipped during a save were not in what was sent</td><td class="rejected">Close and toast</td></tr>
+<tr><td>People card</td><td>The card shows its state only when the names have come too</td><td>It showed "Pick people from a photo" for a moment before the names arrived</td><td class="rejected">Two loads, two paints</td></tr>
+</table>
+<h3>Motion</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th></tr>
+<tr><td>Spinner appears</td><td>micro</td><td>after 300 ms, no fade. Reduced motion: the same wait, a slower turn (1.6 s)</td></tr>
+<tr><td>Reload icon</td><td>micro</td><td>turns after 300 ms. Reduced motion: a slower turn</td></tr>
+<tr><td>Optimistic change, roll back</td><td>none</td><td>instant both ways; the toast carries the news</td></tr>
+</table>
+<h3>States</h3>
+<p>Pending, failure and empty were checked for: consent on and off, pick view load, pick view empty while faces are found, a photo's faces loading, name save (fast, slow, failed, retried from the toast), lightbox face assign, use this face, client link, rename, merge, hide and show, remove, check load and save, album tags save, tag add and remove (picker and lightbox), set create, rename, delete, reorder, add photos, remove photos, cover, set from a moment, gallery first load (unchanged: grey tiles, error page with "Try again"), gallery refetch after analysis (unchanged: in place; now a failure keeps the grid), reload.</p>
+<h3>Checks</h3>
+<p>Fresh review, round 1, fixed: no sign while a photo's faces load; a toast from before a dialog stuck under it; the check's faces stayed bright while saving (now dim after 300 ms); the pick-view spinner was pale at the field edge (now on the option); the check's error state kept a dead Save and the Y/N hint (hidden). Kept: "Synced" stays during a reload (the folder state is unchanged by a reload); the merge title uses the first name as the earlier session decided; the mock's error text ("the server said no") is the mock's. Flagged, not changed: at 960 px the side panel content is wider than its 248 px column and is clipped (also in the earlier captures).</p>
+<p>Vitest: <code>retag</code> (add, remove, exact undo) and <code>pickEmptyText</code>. Rendered in headless Chromium with a mocked <code>window.api</code> that waits 800 to 1,800 ms and fails some calls, at 1280 and 960 wide; the spinner was measured hidden at 150 ms and shown at 500 ms. Captures: <code>/private/tmp/claude-501/-Users-darkwebplayer-Documents-Work-Jithin-Lumosnap-lumo-desktop/58ccef73-429b-4c65-a14f-3eecf6e6535f/scratchpad/people/v3/shots-1280/</code>. <code>check.py</code>: 0 errors. Kept on purpose: straight apostrophes ("Couldn't"), as in every other string in the app.</p>
+</article>
+
 <article id="session-2026-10-31-people-pick">
 <h2>Session 2026-10-31 (5): People, pick from a photo</h2>
 <p>Existing work, Revamp level, flow scope: the People card, a new "pick people from a photo" view, a new "Is this Anjali?" check, and the person menu. The look is kept. The flow changes: the app no longer shows a wall of faces with no names. The photographer names the 4 to 8 people who matter on one group photo, and the app finds their other faces. Screens: 960 px to 2560 px, desktop only.</p>

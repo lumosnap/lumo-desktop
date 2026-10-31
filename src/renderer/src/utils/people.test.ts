@@ -7,6 +7,7 @@ import {
   matchPeople,
   decisions,
   gridMove,
+  pickEmptyText,
   type Box
 } from './people'
 import { withTags } from './tags'
@@ -139,5 +140,17 @@ describe('decisions and gridMove', () => {
     expect(gridMove(8, 'ArrowDown', 4, 10)).toBe(8)
     expect(gridMove(0, 'ArrowLeft', 4, 10)).toBe(0)
     expect(gridMove(3, 'x', 4, 10)).toBe(3)
+  })
+})
+
+describe('pickEmptyText', () => {
+  it('says why there is nothing yet and what happens next', () => {
+    expect(pickEmptyText({ state: 'waiting', processed: 0, total: 0 })).toMatch(/starts when/)
+    expect(pickEmptyText({ state: 'running', processed: 1200, total: 4000 })).toContain(
+      '1,200 of 4,000 photos done'
+    )
+    expect(pickEmptyText({ state: 'paused', processed: 3, total: 9 })).toMatch(/paused/)
+    expect(pickEmptyText({ state: 'done', processed: 9, total: 9 })).toMatch(/No faces found/)
+    expect(pickEmptyText(null)).toMatch(/No faces found/)
   })
 })

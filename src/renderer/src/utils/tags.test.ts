@@ -13,7 +13,8 @@ import {
   listSome,
   pickerGroups,
   tagSavePlan,
-  sameSet
+  sameSet,
+  retag
 } from './tags'
 import { TAGS } from '../../../main/tags/vocabulary'
 
@@ -189,5 +190,38 @@ describe('tagSavePlan', () => {
   it('compares as sets', () => {
     expect(sameSet(['a', 'b'], ['b', 'a'])).toBe(true)
     expect(sameSet(['a'], ['a', 'b'])).toBe(false)
+  })
+})
+
+describe('retag', () => {
+  it('adds once, removes, and leaves other photos as the same objects', () => {
+    const add = retag(imgs, [1, 3], 'haldi', 'add')
+    expect(add.images.map((i) => i.tags)).toEqual([
+      ['bride', 'portrait', 'haldi'],
+      ['bride', 'haldi'],
+      ['groom', 'portrait', 'haldi'],
+      [],
+      undefined
+    ])
+    expect(add.images[1]).toBe(imgs[1])
+    expect(retag(imgs, [2, 5], 'haldi', 'remove').images.map((i) => i.tags)).toEqual([
+      imgs[0].tags,
+      ['bride'],
+      imgs[2].tags,
+      [],
+      []
+    ])
+  })
+
+  it('undo restores exactly what was there, on top of later changes to other photos', () => {
+    const { images, undo } = retag(imgs, [1, 5], 'haldi', 'add')
+    const later = images.map((i) => (i.id === 3 ? { ...i, tags: ['groom'] } : i))
+    expect(undo(later).map((i) => i.tags)).toEqual([
+      ['bride', 'haldi', 'portrait'],
+      ['bride', 'haldi'],
+      ['groom'],
+      [],
+      undefined
+    ])
   })
 })

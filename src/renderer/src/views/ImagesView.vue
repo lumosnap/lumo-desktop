@@ -59,6 +59,7 @@ import {
   withTags,
   searchTags,
   slugify,
+  retag,
   groupVocab,
   pickerGroups,
   listSome,
@@ -288,7 +289,9 @@ type Pop =
 const pop = ref<Pop | null>(null)
 const popStyle = ref<Record<string, string>>({})
 const popEl = ref<HTMLElement>()
-const popBusy = ref(false)
+// The one change being saved, by key ('name', 'face:p3', …): its control shows a spinner,
+// the rest wait, and a second click does nothing. ponytail: one at a time for the whole view.
+const pending = ref<string | false>(false)
 let popReturn: HTMLElement | null = null // focus goes back here on Esc or after an action
 
 async function openPop(p: Pop, e?: Event): Promise<void> {
@@ -327,15 +330,31 @@ function promptName(
   openPop({ kind: 'name', label, name, submit, placeholder }, e)
 }
 
+async function run(key: string, call: () => Promise<boolean>): Promise<boolean> {
+  if (pending.value) return false
+  pending.value = key
+  try {
+    return await call()
+  } finally {
+    pending.value = false
+  }
+}
+// A menu item that saves: the menu stays open with a spinner on it, and closes when it worked.
+// When it fails the menu is still there to try again.
+async function popRun(key: string, call: () => Promise<boolean>): Promise<void> {
+  const p = pop.value
+  if ((await run(key, call)) && pop.value === p) closePop(true)
+}
+const lockedFor = (key: string): boolean => !!pending.value && pending.value !== key
+const menuBusy = (key: string): Record<string, boolean | undefined> => ({
+  'aria-busy': pending.value === key || undefined,
+  'aria-disabled': lockedFor(key) || undefined
+})
+
 async function submitName(): Promise<void> {
   const p = pop.value
-  if (p?.kind !== 'name' || !p.name.trim() || popBusy.value) return
-  popBusy.value = true
-  try {
-    if (await p.submit(p.name.trim())) closePop()
-  } finally {
-    popBusy.value = false
-  }
+  if (p?.kind !== 'name' || !p.name.trim()) return
+  await popRun('name', () => p.submit(p.name.trim()))
 }
 
 function onDocPointer(e: PointerEvent): void {
@@ -363,29 +382,33 @@ function renameSet(set: AlbumSet): void {
   promptName('Rename set', set.name, (name) => setsCall(window.api.sets.rename(set.id, name)))
 }
 
+// Moves at once; put back if the save fails
 async function moveSet(set: AlbumSet, delta: number): Promise<void> {
   closePop()
+  const before = sets.value
   const order = moved(
-    sets.value.map((s) => s.id),
+    before.map((s) => s.id),
     set.id,
     delta
   )
-  await setsCall(window.api.sets.reorder(albumId, [...order]))
+  const byId = new Map(before.map((s) => [s.id, s]))
+  sets.value = order.flatMap((id) => byId.get(id) ?? [])
+  if (!(await setsCall(window.api.sets.reorder(albumId, [...order])))) sets.value = before
 }
 
 const selectedIds = (): number[] => Array.from(selectedImageIds.value)
 const photos = (n: number): string => `${nf(n)} ${n === 1 ? 'photo' : 'photos'}`
 
-async function addSelectedTo(set: AlbumSet): Promise<void> {
-  closePop()
+function addSelectedTo(set: AlbumSet): Promise<void> {
   const ids = selectedIds()
-  if (
-    await setsCall(
+  return popRun(`add:${set.id}`, async () => {
+    const ok = await setsCall(
       window.api.sets.addImages(set.id, [...ids]),
       `Added ${photos(ids.length)} to “${set.name}”`
     )
-  )
-    clearSelection()
+    if (ok) clearSelection()
+    return ok
+  })
 }
 
 function newSetFromSelection(): void {
@@ -404,25 +427,22 @@ async function removeSelectedFromSet(): Promise<void> {
   const set = activeSet.value
   if (!set) return
   const ids = selectedIds()
-  if (
-    await setsCall(
+  const ok = await run('set-remove', () =>
+    setsCall(
       window.api.sets.removeImages(set.id, [...ids]),
       `Removed ${photos(ids.length)} from “${set.name}”`
     )
   )
-    clearSelection()
+  if (ok) clearSelection()
 }
 
 async function useAsCover(): Promise<void> {
   const set = activeSet.value
   if (!set) return
-  if (
-    await setsCall(
-      window.api.sets.setCover(set.id, selectedIds()[0]),
-      `Cover for “${set.name}” set`
-    )
+  const ok = await run('set-cover', () =>
+    setsCall(window.api.sets.setCover(set.id, selectedIds()[0]), `Cover for “${set.name}” set`)
   )
-    clearSelection()
+  if (ok) clearSelection()
 }
 
 function makeSetFromMoment(row: Extract<Row<Image>, { kind: 'header' }>, e: Event): void {
@@ -504,22 +524,25 @@ async function loadTagConfig(): Promise<void> {
 }
 
 async function editTag(op: 'add' | 'remove', ids: number[], slug: string): Promise<boolean> {
+  // Show it now; main's refetch (albums.onAnalyzed) confirms it, a failure puts it back
+  const edit = retag(images.value, ids, slug, op)
+  images.value = edit.images
   try {
     // contextBridge can't clone Vue reactive proxies: always send a plain copy
     const r = await tagsApi[op](albumId, [...ids], slug)
     if (!r.success) throw new Error(r.error)
+    return true
   } catch (err) {
-    toast(`Couldn't ${op} “${labelOf(slug)}”: ${err instanceof Error ? err.message : String(err)}`)
+    images.value = edit.undo(images.value)
+    toast(
+      `Couldn't ${op} “${labelOf(slug)}”: ${err instanceof Error ? err.message : String(err)}`,
+      {
+        label: 'Try again',
+        run: () => editTag(op, [...ids], slug)
+      }
+    )
     return false
   }
-  // Show it now; main's refetch (albums.onAnalyzed) confirms it
-  const on = new Set(ids)
-  images.value = images.value.map((img) => {
-    if (!on.has(img.id)) return img
-    const rest = (img.tags ?? []).filter((t) => t !== slug)
-    return { ...img, tags: op === 'add' ? [...rest, slug] : rest }
-  })
-  return true
 }
 
 // Tag picker (popover): tags on the photos, the album's tag set by category, More tags, custom
@@ -557,10 +580,8 @@ function openTagPicker(ids: number[], e: Event): void {
 
 async function pickAdd(slug: string): Promise<void> {
   const p = pickPop.value
-  if (!p || popBusy.value) return
-  popBusy.value = true
-  const ok = await editTag('add', p.ids, slug)
-  popBusy.value = false
+  if (!p) return
+  const ok = await run('tags', () => editTag('add', p.ids, slug))
   if (!ok) return
   if (p.ids.length > 1) toast(`Tagged ${photos(p.ids.length)} “${labelOf(slug)}”`)
   // Stay open for the next tag
@@ -570,10 +591,8 @@ async function pickAdd(slug: string): Promise<void> {
 
 async function pickRemove(slug: string): Promise<void> {
   const p = pickPop.value
-  if (!p || popBusy.value) return
-  popBusy.value = true
-  const ok = await editTag('remove', p.ids, slug)
-  popBusy.value = false
+  if (!p) return
+  const ok = await run('tags', () => editTag('remove', p.ids, slug))
   if (ok && p.ids.length > 1) toast(`Removed “${labelOf(slug)}” from ${photos(p.ids.length)}`)
   // The row is gone; keep the keyboard in the picker
   popEl.value?.querySelector('input')?.focus()
@@ -688,13 +707,21 @@ function faceStyle(p: Person | undefined | null): Record<string, string> | undef
   }
 }
 
-async function peopleCall(call: () => Promise<unknown>, what: string): Promise<boolean> {
+// `retry` puts "Try again" on the toast, for changes whose control is gone by then
+async function peopleCall(
+  call: () => Promise<unknown>,
+  what: string,
+  retry?: () => void
+): Promise<boolean> {
   try {
     const r = (await call()) as { success?: boolean; error?: string } | undefined
     if (r && r.success === false) throw new Error(r.error)
     return true
   } catch (err) {
-    toast(`Couldn't ${what}: ${err instanceof Error ? err.message : String(err)}`)
+    toast(
+      `Couldn't ${what}: ${err instanceof Error ? err.message : String(err)}`,
+      retry && { label: 'Try again', run: retry }
+    )
     return false
   }
 }
@@ -702,8 +729,9 @@ async function peopleCall(call: () => Promise<unknown>, what: string): Promise<b
 async function loadPeople(): Promise<void> {
   if (!peopleApi) return
   try {
-    peopleCfg.value = await peopleApi.getConfig(albumId)
-    if (!peopleCfg.value.enabled) {
+    const cfg = await peopleApi.getConfig(albumId)
+    if (!cfg.enabled) {
+      peopleCfg.value = cfg
       people.value = []
       activePeople.value = []
       return
@@ -712,6 +740,8 @@ async function loadPeople(): Promise<void> {
       peopleApi.list(albumId),
       peopleApi.clientLinks(albumId)
     ])
+    // Config and names land together: the card never shows "Pick people" before the names
+    peopleCfg.value = cfg
     people.value = list
     clientLinks.value = links
     const ids = new Set(list.map((p) => p.id))
@@ -784,7 +814,7 @@ function renamePerson(p: Person, e?: Event): void {
       const same = people.value.find(
         (x) => x.id !== p.id && x.name.toLowerCase() === name.toLowerCase()
       )
-      if (same) return mergePerson(p, same).then(() => true)
+      if (same) return mergePerson(p, same)
       const ok = await peopleCall(() => peopleApi!.rename(albumId, p.id, name), 'save the name')
       if (ok) await afterPeopleEdit()
       return ok
@@ -794,25 +824,45 @@ function renamePerson(p: Person, e?: Event): void {
   )
 }
 
-async function mergePerson(from: Person, into: Person): Promise<void> {
-  closePop()
-  if (await peopleCall(() => peopleApi!.merge(albumId, into.id, [from.id]), 'merge')) {
-    activePeople.value = activePeople.value.map((id) => (id === from.id ? into.id : id))
-    if (lastPerson.value === from.id) lastPerson.value = into.id
-    toast(`Merged into ${personName(into)}`)
-    await afterPeopleEdit()
-  }
+async function mergePerson(from: Person, into: Person): Promise<boolean> {
+  if (!(await peopleCall(() => peopleApi!.merge(albumId, into.id, [from.id]), 'merge')))
+    return false
+  activePeople.value = activePeople.value.map((id) => (id === from.id ? into.id : id))
+  if (lastPerson.value === from.id) lastPerson.value = into.id
+  toast(`Merged into ${personName(into)}`)
+  await afterPeopleEdit()
+  return true
 }
 
-// Hidden: the photographer still sees and filters them; the client gallery does not show them
+// The confirm stays open with a spinner until the merge is saved
+async function confirmMerge(): Promise<void> {
+  const m = mergeAsk.value
+  if (!m || peopleBusy.value) return
+  peopleBusy.value = true
+  if (await mergePerson(m.from, m.into)) mergeAsk.value = null
+  peopleBusy.value = false
+}
+
+const setPersonHidden = (id: string, hidden: boolean): void => {
+  people.value = people.value.map((x) => (x.id === id ? { ...x, hidden } : x))
+}
+// Hidden: the photographer still sees and filters them; the client gallery does not show them.
+// The eye icon changes at once and goes back if the save fails.
 async function hidePerson(p: Person, hidden: boolean): Promise<void> {
   closePop()
-  if (!(await peopleCall(() => peopleApi!.setHidden(albumId, p.id, hidden), 'update'))) return
-  if (hidden)
-    toast(`${firstName(p.name)} is hidden from your client`, {
-      label: 'Undo',
-      run: () => hidePerson(p, false)
-    })
+  setPersonHidden(p.id, hidden)
+  const ok = await peopleCall(
+    () => peopleApi!.setHidden(albumId, p.id, hidden),
+    hidden ? `hide ${firstName(p.name)}` : `show ${firstName(p.name)}`,
+    () => hidePerson(p, hidden)
+  )
+  if (!ok) return setPersonHidden(p.id, !hidden)
+  toast(
+    hidden
+      ? `${firstName(p.name)} is hidden from your client`
+      : `${firstName(p.name)} shows in your client's gallery again`,
+    hidden ? { label: 'Undo', run: () => hidePerson(p, false) } : undefined
+  )
   await afterPeopleEdit()
 }
 
@@ -835,14 +885,16 @@ const mergeTargets = computed(() => {
 })
 
 // Client link: which named person a client is. Only the photographer sees it.
-async function linkClient(client: string, personId: string | null): Promise<void> {
-  closePop()
-  if (await peopleCall(() => peopleApi!.linkClient(albumId, client, personId), 'link')) {
+function linkClient(client: string, personId: string | null): Promise<void> {
+  return popRun(`link:${personId}`, async () => {
+    if (!(await peopleCall(() => peopleApi!.linkClient(albumId, client, personId), 'link')))
+      return false
     const next = { ...clientLinks.value }
     if (personId) next[client] = personId
     else delete next[client]
     clientLinks.value = next
-  }
+    return true
+  })
 }
 const linkedPerson = (client: string): Person | undefined =>
   personById.value.get(clientLinks.value[client] ?? '')
@@ -921,14 +973,17 @@ function newPersonForFace(): void {
   promptName('New person', '', (name) => assignFace({ newName: name }), undefined, 'Name')
 }
 
-async function useFaceAsCover(): Promise<void> {
+function useFaceAsCover(): Promise<void> {
   const p = pop.value
-  if (p?.kind !== 'face' || !p.face.personId) return
+  if (p?.kind !== 'face' || !p.face.personId) return Promise.resolve()
   const { personId, faceId, name } = p.face
-  closePop()
-  if (await peopleCall(() => peopleApi!.setCover(albumId, personId, faceId), 'set the face'))
+  return popRun('cover', async () => {
+    if (!(await peopleCall(() => peopleApi!.setCover(albumId, personId, faceId), 'set the face')))
+      return false
     toast(`${name ?? 'This person'} now shows this face`)
-  await afterPeopleEdit()
+    await afterPeopleEdit()
+    return true
+  })
 }
 
 const grid = computed(() =>
@@ -1111,13 +1166,36 @@ async function loadAlbumImages(): Promise<void> {
   }
 }
 
+// "Reload photos" once the grid is up: the photos stay on screen, scroll and picks are kept,
+// and a failure is a toast instead of the error page
+const reloading = ref(false)
+async function reloadPhotos(): Promise<void> {
+  if (reloading.value) return
+  reloading.value = true
+  try {
+    const a = await window.api.albums.get(albumId)
+    if (a.success) album.value = a.album
+    if (!(await refreshGrouping())) throw new Error('the album did not answer')
+    isFavoritesLoaded.value = false
+    await loadFavorites(selectedClientName.value || undefined)
+  } catch (err) {
+    toast(`Couldn't reload the photos: ${err instanceof Error ? err.message : String(err)}`, {
+      label: 'Try again',
+      run: reloadPhotos
+    })
+  } finally {
+    reloading.value = false
+  }
+}
+
 // Grouping changed in main: swap in the new fields in place, keeping picks and scroll position
 let offAnalyzed: (() => void) | null = null
 let offSetsChanged: (() => void) | null = null
 let offPeopleChanged: (() => void) | undefined
-async function refreshGrouping(): Promise<void> {
-  const result = await window.api.albums.getImages(albumId)
-  if (!result.success || !result.images) return
+// Quiet: runs on its own after analysis, so a failure keeps the grid as it is
+async function refreshGrouping(): Promise<boolean> {
+  const result = await window.api.albums.getImages(albumId).catch(() => null)
+  if (!result?.success || !result.images) return false
   const prev = new Map(images.value.map((img) => [img.id, img]))
   const top = scrollEl.value?.scrollTop
   images.value = result.images.map((img) => {
@@ -1135,6 +1213,7 @@ async function refreshGrouping(): Promise<void> {
   })
   await nextTick()
   if (scrollEl.value && top !== undefined) scrollEl.value.scrollTop = top
+  return true
 }
 
 // Fetch picks and merge who-picked, notes and comments into the images
@@ -1671,15 +1750,18 @@ onUnmounted(() => {
               class="btn primary"
               style="flex: 1"
               :disabled="!networkStore.isOnline || isGeneratingLink"
+              :aria-busy="isGeneratingLink"
               @click="generateShareLink"
             >
-              <span v-if="isGeneratingLink" class="spin"></span><Link v-else />Share with client
+              <span v-if="isGeneratingLink" class="spin"></span><Link />Share with client
             </button>
             <button
               class="icon-btn"
               aria-label="Reload photos"
               title="Reload photos"
-              @click="loadAlbumImages"
+              :aria-busy="reloading"
+              :disabled="reloading"
+              @click="reloadPhotos"
             >
               <RefreshCw />
             </button>
@@ -1892,11 +1974,22 @@ onUnmounted(() => {
                 Select all {{ nf(filteredImages.length) }}
               </button>
               <template v-if="activeSet">
-                <button v-if="selectedImageIds.size === 1" class="btn sm ghost" @click="useAsCover">
-                  <ImageIcon />Use as cover
+                <button
+                  v-if="selectedImageIds.size === 1"
+                  class="btn sm ghost"
+                  :disabled="!!pending"
+                  :aria-busy="pending === 'set-cover'"
+                  @click="useAsCover"
+                >
+                  <span v-if="pending === 'set-cover'" class="spin"></span><ImageIcon />Use as cover
                 </button>
-                <button class="btn sm ghost" @click="removeSelectedFromSet">
-                  <Minus />Remove from set
+                <button
+                  class="btn sm ghost"
+                  :disabled="!!pending"
+                  :aria-busy="pending === 'set-remove'"
+                  @click="removeSelectedFromSet"
+                >
+                  <span v-if="pending === 'set-remove'" class="spin"></span><Minus />Remove from set
                 </button>
               </template>
               <button
@@ -1916,8 +2009,13 @@ onUnmounted(() => {
               >
                 <Tag />Tags…
               </button>
-              <button class="btn sm primary" :disabled="copying" @click="copySelectedImages">
-                <span v-if="copying" class="spin"></span><Copy v-else />Copy
+              <button
+                class="btn sm primary"
+                :disabled="copying"
+                :aria-busy="copying"
+                @click="copySelectedImages"
+              >
+                <span v-if="copying" class="spin"></span><Copy />Copy
                 {{ nf(selectedImageIds.size) }} to folder…
               </button>
             </div>
@@ -2146,7 +2244,7 @@ onUnmounted(() => {
               spellcheck="false"
             />
           </form>
-          <div class="pick-list" :aria-busy="popBusy">
+          <div class="pick-list" :aria-busy="pending === 'tags'">
             <template v-if="pickPresent.length">
               <div class="pick-h">
                 {{ pop.ids.length === 1 ? 'On this photo' : 'On the selection' }}
@@ -2154,7 +2252,7 @@ onUnmounted(() => {
               <div v-for="[slug, n] in pickPresent" :key="slug" class="pick-row">
                 <button
                   v-if="pop.ids.length > 1"
-                  :disabled="n === pop.ids.length || popBusy"
+                  :disabled="n === pop.ids.length || !!pending"
                   :aria-label="`Add ${labelOf(slug)} to all ${photos(pop.ids.length)}`"
                   @click="pickAdd(slug)"
                 >
@@ -2164,7 +2262,7 @@ onUnmounted(() => {
                 <span v-else class="pick-t">{{ labelOf(slug) }}</span>
                 <button
                   class="icon-btn sm plain"
-                  :disabled="popBusy"
+                  :disabled="!!pending"
                   :aria-label="
                     `Remove ${labelOf(slug)}` + (pop.ids.length > 1 ? ` from ${photos(n)}` : '')
                   "
@@ -2181,13 +2279,13 @@ onUnmounted(() => {
               <button
                 v-for="t in g.tags"
                 :key="t.slug"
-                :disabled="popBusy"
+                :disabled="!!pending"
                 @click="pickAdd(t.slug)"
               >
                 {{ t.label }}
               </button>
             </template>
-            <button v-if="pickCustom" :disabled="popBusy" @click="pickAdd(pickCustom)">
+            <button v-if="pickCustom" :disabled="!!pending" @click="pickAdd(pickCustom)">
               <Plus />Add “{{ tagLabel(pickCustom) }}”
             </button>
             <p v-if="!pickGroups.length && !pickCustom && !pickPresent.length" class="pick-h">
@@ -2206,8 +2304,12 @@ onUnmounted(() => {
               autocomplete="off"
               :placeholder="pop.placeholder ?? 'Set name'"
             />
-            <button class="btn primary" :disabled="!pop.name.trim() || popBusy">
-              <span v-if="popBusy" class="spin"></span>Save
+            <button
+              class="btn primary"
+              :disabled="!pop.name.trim() || !!pending"
+              :aria-busy="pending === 'name'"
+            >
+              <span v-if="pending === 'name'" class="spin"></span>Save
             </button>
           </div>
         </form>
@@ -2256,19 +2358,35 @@ onUnmounted(() => {
             :key="p.id"
             role="menuitem"
             :aria-current="pop.face.personId === p.id || undefined"
-            @click="assignFace({ personId: p.id })"
+            v-bind="menuBusy(`face:${p.id}`)"
+            @click="popRun(`face:${p.id}`, () => assignFace({ personId: p.id }))"
           >
-            <span class="avatar face xs" :style="faceStyle(p)"></span>{{ p.name
-            }}<Check v-if="pop.face.personId === p.id" class="cur" />
+            <span class="avatar face xs" :style="faceStyle(p)"></span>{{ p.name }}
+            <span v-if="pending === `face:${p.id}`" class="spin"></span>
+            <Check v-else-if="pop.face.personId === p.id" class="cur" />
           </button>
-          <button role="menuitem" @click="newPersonForFace"><Plus />New person…</button>
+          <button role="menuitem" v-bind="menuBusy('new')" @click="!pending && newPersonForFace()">
+            <Plus />New person…
+          </button>
           <template v-if="pop.face.personId">
             <hr />
-            <button v-if="pop.face.name" role="menuitem" @click="useFaceAsCover">
+            <button
+              v-if="pop.face.name"
+              role="menuitem"
+              v-bind="menuBusy('cover')"
+              @click="useFaceAsCover"
+            >
               <ImageIcon />Use this face for {{ firstName(pop.face.name) }}
+              <span v-if="pending === 'cover'" class="spin"></span>
             </button>
-            <button role="menuitem" class="bad" @click="assignFace({ none: true })">
+            <button
+              role="menuitem"
+              class="bad"
+              v-bind="menuBusy('face:none')"
+              @click="popRun('face:none', () => assignFace({ none: true }))"
+            >
               <X />Not {{ pop.face.name ? firstName(pop.face.name) : 'this person' }}
+              <span v-if="pending === 'face:none'" class="spin"></span>
             </button>
           </template>
         </template>
@@ -2278,15 +2396,22 @@ onUnmounted(() => {
             v-for="p in people"
             :key="p.id"
             role="menuitem"
+            v-bind="menuBusy(`link:${p.id}`)"
             @click="linkClient(pop.client, p.id)"
           >
-            <span class="avatar face xs" :style="faceStyle(p)"></span>{{ p.name
-            }}<Check v-if="clientLinks[pop.client] === p.id" class="cur" />
+            <span class="avatar face xs" :style="faceStyle(p)"></span>{{ p.name }}
+            <span v-if="pending === `link:${p.id}`" class="spin"></span>
+            <Check v-else-if="clientLinks[pop.client] === p.id" class="cur" />
           </button>
           <template v-if="clientLinks[pop.client]">
             <hr />
-            <button role="menuitem" @click="linkClient(pop.client, null)">
+            <button
+              role="menuitem"
+              v-bind="menuBusy('link:null')"
+              @click="linkClient(pop.client, null)"
+            >
               <X />Not in the photos
+              <span v-if="pending === 'link:null'" class="spin"></span>
             </button>
           </template>
         </template>
@@ -2296,11 +2421,24 @@ onUnmounted(() => {
           </button>
         </template>
         <template v-else-if="pop.kind === 'add'">
-          <button v-for="s in sets" :key="s.id" role="menuitem" @click="addSelectedTo(s)">
-            {{ s.name }}<span class="n num">{{ nf(s.imageIds.length) }}</span>
+          <button
+            v-for="s in sets"
+            :key="s.id"
+            role="menuitem"
+            v-bind="menuBusy(`add:${s.id}`)"
+            @click="addSelectedTo(s)"
+          >
+            {{ s.name }}<span v-if="pending === `add:${s.id}`" class="spin"></span
+            ><span v-else class="n num">{{ nf(s.imageIds.length) }}</span>
           </button>
           <hr v-if="sets.length" />
-          <button role="menuitem" @click="newSetFromSelection"><Plus />New set…</button>
+          <button
+            role="menuitem"
+            v-bind="menuBusy('new')"
+            @click="!pending && newSetFromSelection()"
+          >
+            <Plus />New set…
+          </button>
         </template>
         <template v-else>
           <button role="menuitem" @click="renameSet(pop.set)"><Pencil />Rename…</button>
@@ -2339,7 +2477,13 @@ onUnmounted(() => {
         <button class="btn ghost" :disabled="deletingSet" @click="setToDelete = null">
           Cancel
         </button>
-        <button class="btn danger" :disabled="deletingSet" autofocus @click="confirmDeleteSet">
+        <button
+          class="btn danger"
+          :disabled="deletingSet"
+          :aria-busy="deletingSet"
+          autofocus
+          @click="confirmDeleteSet"
+        >
           <span v-if="deletingSet" class="spin"></span>Delete set
         </button>
       </template>
@@ -2406,7 +2550,12 @@ onUnmounted(() => {
         <button class="btn ghost" :disabled="savingTagSet" @click="showTagSet = false">
           Cancel
         </button>
-        <button class="btn primary" :disabled="savingTagSet" @click="saveTagSet">
+        <button
+          class="btn primary"
+          :disabled="savingTagSet"
+          :aria-busy="savingTagSet"
+          @click="saveTagSet"
+        >
           <span v-if="savingTagSet" class="spin"></span>Save
         </button>
       </template>
@@ -2433,7 +2582,13 @@ onUnmounted(() => {
         <button class="btn ghost" :disabled="peopleBusy" @click="showPeopleOn = false">
           Cancel
         </button>
-        <button class="btn primary" :disabled="peopleBusy" autofocus @click="turnPeopleOn">
+        <button
+          class="btn primary"
+          :disabled="peopleBusy"
+          :aria-busy="peopleBusy"
+          autofocus
+          @click="turnPeopleOn"
+        >
           <span v-if="peopleBusy" class="spin"></span>Turn on
         </button>
       </template>
@@ -2452,7 +2607,12 @@ onUnmounted(() => {
         <button class="btn ghost" :disabled="peopleBusy" autofocus @click="showPeopleOff = false">
           Cancel
         </button>
-        <button class="btn danger" :disabled="peopleBusy" @click="turnPeopleOff">
+        <button
+          class="btn danger"
+          :disabled="peopleBusy"
+          :aria-busy="peopleBusy"
+          @click="turnPeopleOff"
+        >
           <span v-if="peopleBusy" class="spin"></span>Turn off and delete
         </button>
       </template>
@@ -2471,7 +2631,12 @@ onUnmounted(() => {
         <button class="btn ghost" :disabled="peopleBusy" autofocus @click="personToRemove = null">
           Cancel
         </button>
-        <button class="btn danger" :disabled="peopleBusy" @click="removePerson">
+        <button
+          class="btn danger"
+          :disabled="peopleBusy"
+          :aria-busy="peopleBusy"
+          @click="removePerson"
+        >
           <span v-if="peopleBusy" class="spin"></span>Remove
         </button>
       </template>
@@ -2480,19 +2645,23 @@ onUnmounted(() => {
     <Modal
       :show="!!mergeAsk"
       :title="`Merge ${firstName(mergeAsk?.from.name ?? '')} into ${mergeAsk?.into.name ?? ''}?`"
-      @close="mergeAsk = null"
+      @close="!peopleBusy && (mergeAsk = null)"
     >
       <p>
         {{ mergeAsk?.from.name }}'s faces become {{ mergeAsk?.into.name }}'s, here and in your
         client's gallery. There is no undo.
       </p>
       <template #footer>
-        <button class="btn ghost" autofocus @click="mergeAsk = null">Cancel</button>
+        <button class="btn ghost" :disabled="peopleBusy" autofocus @click="mergeAsk = null">
+          Cancel
+        </button>
         <button
           class="btn primary"
-          @click="mergeAsk && (mergePerson(mergeAsk.from, mergeAsk.into), (mergeAsk = null))"
+          :disabled="peopleBusy"
+          :aria-busy="peopleBusy"
+          @click="confirmMerge"
         >
-          Merge
+          <span v-if="peopleBusy" class="spin"></span>Merge
         </button>
       </template>
     </Modal>
@@ -2505,6 +2674,7 @@ onUnmounted(() => {
       :photo="pickPhoto"
       :face-style="faceStyle"
       :last-viewed-id="lastViewedId"
+      :scan="peopleCfg"
       @changed="afterPeopleEdit"
       @close="showPick = false"
     />

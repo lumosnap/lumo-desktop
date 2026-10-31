@@ -153,8 +153,13 @@ onUnmounted(() => clearInterval(poll))
           <h1>Bookings</h1>
         </div>
         <div class="actions">
-          <button class="btn ghost" :disabled="link.loading.value" @click="openBookingLink">
-            <span v-if="link.loading.value" class="spin"></span><Link v-else />Booking link
+          <button
+            class="btn ghost"
+            :disabled="link.loading.value"
+            :aria-busy="link.loading.value"
+            @click="openBookingLink"
+          >
+            <span v-if="link.loading.value" class="spin"></span><Link />Booking link
           </button>
         </div>
       </header>

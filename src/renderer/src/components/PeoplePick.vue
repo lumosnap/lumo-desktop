@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // Pick people from a photo: choose a group photo, click a face, type a name, Enter, next face.
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { Check, Plus, X } from 'lucide-vue-next'
 import { toast } from '../composables/useToast'
 import {
   byPosition,
   matchPeople,
   nextToName,
+  pickEmptyText,
   type Face,
   type FaceTarget,
   type PeopleApi,
+  type PeopleConfig,
   type Person,
   type PickPhoto
 } from '../utils/people'
@@ -23,6 +25,8 @@ const props = defineProps<{
   faceStyle: (p: Person) => Record<string, string> | undefined
   /** The photo last open in the lightbox, offered first when it has faces */
   lastViewedId?: number | null
+  /** Face finding progress: says why there is nothing to pick yet */
+  scan?: PeopleConfig | null
 }>()
 const emit = defineEmits<{ close: []; changed: [] }>()
 
@@ -30,13 +34,16 @@ const dlg = ref<HTMLDialogElement>()
 const nameIn = ref<HTMLInputElement>()
 const doneBtn = ref<HTMLButtonElement>()
 const picks = ref<PickPhoto[] | null>(null) // null while loading
+const picksFailed = ref(false)
 const lastViewed = ref<PickPhoto | null>(null)
 const chosen = ref<PickPhoto | null>(null)
-const faces = ref<Face[]>([])
+const faces = ref<Face[] | null>([]) // null while the chosen photo's faces load
 const at = ref(-1) // the face being named
 const query = ref('')
 const hi = ref(-1) // highlighted option in the name list; -1: Enter skips the face
 const busy = ref(false)
+// Where the spinner goes while a name saves: the option that was taken, or "Not Anjali"
+const savingAt = ref<number | 'not' | null>(null)
 
 const firstName = (s: string): string => s.split(' ')[0]
 const facesWord = (n: number): string => `${n} ${n === 1 ? 'face' : 'faces'}`
@@ -50,8 +57,9 @@ const tiles = computed(() =>
     : (picks.value ?? [])
 )
 const big = computed(() => (chosen.value ? props.photo(chosen.value.imageId) : null))
-const face = computed(() => faces.value[at.value] ?? null)
-const named = computed(() => faces.value.filter((f) => f.source === 'ref').length)
+const face = computed(() => faces.value?.[at.value] ?? null)
+const named = computed(() => faces.value?.filter((f) => f.source === 'ref').length ?? 0)
+const emptyText = computed(() => pickEmptyText(props.scan ?? null))
 
 // The list under the name field: matching people, then "New person" when the name is new
 const match = computed(() => matchPeople(props.people, query.value))
@@ -60,20 +68,35 @@ const options = computed<Array<{ person: Person } | { newName: string }>>(() => 
   ...(query.value.trim() && !match.value.exact ? [{ newName: query.value.trim() }] : [])
 ])
 
-onMounted(async () => {
-  dlg.value?.showModal()
+async function loadPicks(quiet = false): Promise<void> {
+  if (!quiet) picks.value = null
+  picksFailed.value = false
   const [list, last] = await Promise.all([
-    props.api.pickPhotos(props.albumId, 6).catch(() => []),
+    props.api.pickPhotos(props.albumId, 6).catch(() => null),
     props.lastViewedId
       ? props.api.facesInImage(props.albumId, props.lastViewedId).catch(() => [])
       : Promise.resolve([] as Face[])
   ])
   if (last.length && props.lastViewedId && props.photo(props.lastViewedId))
     lastViewed.value = { imageId: props.lastViewedId, path: '', faceCount: last.length }
-  picks.value = list.filter((p) => props.photo(p.imageId))
+  picksFailed.value = !list && !lastViewed.value
+  picks.value = (list ?? []).filter((p) => props.photo(p.imageId))
   await nextTick()
-  dlg.value?.querySelector<HTMLElement>('.pp-tile')?.focus()
+  dlg.value?.querySelector<HTMLElement>('.pp-tile, .pp-empty .btn')?.focus()
+}
+
+onMounted(() => {
+  dlg.value?.showModal()
+  loadPicks()
 })
+
+// While faces are still being found, photos to pick appear here as they are ready
+watch(
+  () => props.scan?.processed,
+  () => {
+    if (picks.value && !tiles.value.length && !picksFailed.value && !chosen.value) loadPicks(true)
+  }
+)
 
 async function loadFaces(): Promise<void> {
   if (!chosen.value) return
@@ -84,17 +107,17 @@ async function loadFaces(): Promise<void> {
 
 async function choose(p: PickPhoto): Promise<void> {
   chosen.value = p
-  faces.value = []
+  faces.value = null
   at.value = -1
   await loadFaces()
-  openFace(nextToName(faces.value, -1))
+  openFace(nextToName(faces.value ?? [], -1))
 }
 
 async function openFace(i: number): Promise<void> {
   at.value = i
   query.value = ''
   // The app's guess is ready to accept with Enter
-  const guess = faces.value[i]?.personId
+  const guess = faces.value?.[i]?.personId
   hi.value = guess ? props.people.findIndex((p) => p.id === guess) : -1
   await nextTick()
   if (i < 0) doneBtn.value?.focus()
@@ -105,24 +128,38 @@ async function save(target: FaceTarget): Promise<void> {
   const f = face.value
   if (!f || busy.value) return
   busy.value = true
+  savingAt.value = 'none' in target ? 'not' : hi.value
   try {
-    const r = await props.api.assignFace(props.albumId, f.faceId, target)
+    // contextBridge can't clone Vue reactive proxies: send a plain copy
+    const r = await props.api.assignFace(props.albumId, f.faceId, { ...target })
     if (!r.success) throw new Error(r.error)
     emit('changed')
     await loadFaces()
-    const i = faces.value.findIndex((x) => x.faceId === f.faceId)
-    openFace(nextToName(faces.value, i))
+    const list = faces.value ?? []
+    openFace(
+      nextToName(
+        list,
+        list.findIndex((x) => x.faceId === f.faceId)
+      )
+    )
   } catch (err) {
-    toast(`Couldn't save the name: ${err instanceof Error ? err.message : String(err)}`)
+    // The field keeps the name and the focus: Enter, or Try again, saves it again
+    toast(`Couldn't save the name: ${err instanceof Error ? err.message : String(err)}`, {
+      label: 'Try again',
+      run: () => save(target)
+    })
+    nameIn.value?.focus()
   } finally {
     busy.value = false
+    savingAt.value = null
   }
 }
 
 function pick(o: (typeof options.value)[number] | undefined): void {
+  if (busy.value) return
   if (!o) {
     // Enter with no name: skip to the next face without one
-    const next = nextToName(faces.value, at.value)
+    const next = nextToName(faces.value ?? [], at.value)
     openFace(next === at.value ? -1 : next)
     return
   }
@@ -201,9 +238,11 @@ const label = (f: Face): string =>
       <div v-if="!picks" class="pp-grid" aria-busy="true">
         <div v-for="i in 6" :key="i" class="pp-tile skel"></div>
       </div>
-      <p v-else-if="!tiles.length" class="pp-empty">
-        No photos with faces yet. Try again when more photos are done.
-      </p>
+      <div v-else-if="picksFailed" class="pp-empty" role="alert">
+        <p>Couldn't load the photos to pick from.</p>
+        <button class="btn ghost" @click="loadPicks()">Try again</button>
+      </div>
+      <p v-else-if="!tiles.length" class="pp-empty" aria-live="polite">{{ emptyText }}</p>
       <div v-else class="pp-grid">
         <button
           v-for="(p, i) in tiles"
@@ -244,7 +283,13 @@ const label = (f: Face): string =>
             <span v-if="f.name && i !== at">{{ label(f) }}</span>
           </button>
 
-          <form v-if="face" class="pp-name" :style="fieldStyle" @submit.prevent="pick(options[hi])">
+          <form
+            v-if="face"
+            class="pp-name"
+            :style="fieldStyle"
+            :aria-busy="busy"
+            @submit.prevent="pick(options[hi])"
+          >
             <input
               ref="nameIn"
               v-model="query"
@@ -259,10 +304,11 @@ const label = (f: Face): string =>
               autocomplete="off"
               spellcheck="false"
               maxlength="120"
-              :disabled="busy"
+              :readonly="busy"
               @input="onInput"
               @keydown="onNameKey"
             />
+            <!-- Readonly, not disabled, while saving: the field keeps the focus for the next name -->
             <ul v-if="options.length" id="pp-opts" role="listbox" aria-label="People">
               <li
                 v-for="(o, i) in options"
@@ -271,7 +317,7 @@ const label = (f: Face): string =>
                 role="option"
                 :aria-selected="i === hi"
                 @pointerdown.prevent
-                @click="pick(o)"
+                @click="!busy && pick(o)"
                 @pointermove="hi = i"
               >
                 <template v-if="'person' in o">
@@ -282,6 +328,7 @@ const label = (f: Face): string =>
                   />
                 </template>
                 <template v-else><Plus />New person “{{ o.newName }}”</template>
+                <span v-if="savingAt === i" class="spin" aria-hidden="true"></span>
               </li>
             </ul>
             <button
@@ -292,19 +339,25 @@ const label = (f: Face): string =>
               @click="save({ none: true })"
             >
               Not {{ firstName(face.name) }}
+              <span v-if="savingAt === 'not'" class="spin" aria-hidden="true"></span>
             </button>
           </form>
         </div>
       </div>
       <div class="pp-f">
         <span class="num" aria-live="polite">
-          {{
-            faces.length
-              ? named === faces.length
-                ? 'Everyone here is named'
-                : `${named} of ${facesWord(faces.length)} named`
-              : 'No faces found in this photo'
-          }}
+          <span v-if="!faces" class="pp-finding"
+            ><span class="spin now"></span>Finding the faces in this photo…</span
+          >
+          <template v-else>
+            {{
+              faces.length
+                ? named === faces.length
+                  ? 'Everyone here is named'
+                  : `${named} of ${facesWord(faces.length)} named`
+                : 'No faces found in this photo. Pick another one.'
+            }}
+          </template>
         </span>
         <span class="keys" aria-hidden="true">
           <kbd>Enter</kbd> saves and goes to the next face · with no name, skips it
@@ -394,10 +447,14 @@ const label = (f: Face): string =>
   font-size: 12px;
 }
 .pp-empty {
+  max-width: 46ch;
   margin: 48px auto;
   text-align: center;
   color: var(--ink-2);
   font-size: 14px;
+}
+.pp-empty p {
+  margin: 0 0 16px;
 }
 
 /* The photo fills the stage at its own shape; face boxes are placed in % of it */
@@ -478,6 +535,34 @@ const label = (f: Face): string =>
 }
 .pp-name .input {
   width: 100%;
+}
+.pp-name li {
+  position: relative;
+}
+/* Over the end of the label, so a long name does not wrap while it saves */
+.pp-name li .spin {
+  position: absolute;
+  right: 10px;
+  box-shadow: 0 0 0 6px var(--inset);
+  background: var(--inset);
+}
+.pp-name .not {
+  display: flex;
+  align-items: center;
+}
+.pp-name .not .spin {
+  margin-left: auto;
+}
+/* Shows only when the faces take longer than 300 ms, with its spinner */
+.pp-finding {
+  /* the wrapper waits; the spinner inside is .now so it does not wait twice */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  animation: spin-wait 0.3s;
+}
+.pp-name[aria-busy='true'] li {
+  cursor: progress;
 }
 .pp-name ul {
   list-style: none;

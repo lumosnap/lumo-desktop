@@ -25,6 +25,7 @@ const BATCH = 24
 const dlg = ref<HTMLDialogElement>()
 const grid = ref<HTMLElement>()
 const faces = ref<ReviewFace[] | null>(null) // null while loading
+const loadFailed = ref(false)
 const no = ref(new Set<number>())
 const remaining = ref(props.person.reviewCount)
 const busy = ref(false)
@@ -37,12 +38,15 @@ const later = computed(() => Math.max(0, remaining.value - (faces.value?.length 
 
 async function load(): Promise<void> {
   faces.value = null
+  loadFailed.value = false
   no.value = new Set()
   try {
     faces.value = await props.api.reviewQueue(props.albumId, props.person.id, BATCH)
-  } catch (err) {
-    toast(`Couldn't load the faces: ${err instanceof Error ? err.message : String(err)}`)
-    emit('close')
+  } catch {
+    // Said in the dialog, with Try again; the answers already saved are kept
+    loadFailed.value = true
+    await nextTick()
+    dlg.value?.querySelector<HTMLElement>('.pr-err .btn')?.focus()
     return
   }
   if (!faces.value.length) return finish()
@@ -61,6 +65,7 @@ function finish(): void {
 }
 
 function set(id: number, isNo: boolean): void {
+  if (busy.value) return // the answers being saved stay as they were sent
   const next = new Set(no.value)
   if (isNo) next.add(id)
   else next.delete(id)
@@ -82,7 +87,11 @@ async function confirm(): Promise<void> {
     if (r.remaining > 0) await load()
     else finish()
   } catch (err) {
-    toast(`Couldn't save: ${err instanceof Error ? err.message : String(err)}`)
+    // The answers stay as they are; Save, or Try again, sends them again
+    toast(`Couldn't save: ${err instanceof Error ? err.message : String(err)}`, {
+      label: 'Try again',
+      run: confirm
+    })
   } finally {
     busy.value = false
   }
@@ -136,10 +145,21 @@ function crop(f: ReviewFace): Record<string, string> {
     </div>
 
     <div class="pr-b">
-      <div v-if="!faces" class="pr-grid" aria-busy="true">
+      <div v-if="loadFailed" class="pr-err" role="alert">
+        <p>Couldn't load {{ first }}'s faces.</p>
+        <button class="btn ghost" @click="load">Try again</button>
+      </div>
+      <div v-else-if="!faces" class="pr-grid" aria-busy="true">
         <div v-for="i in 12" :key="i" class="pr-face skel"></div>
       </div>
-      <div v-else ref="grid" class="pr-grid" role="group" :aria-label="`Is this ${first}?`">
+      <div
+        v-else
+        ref="grid"
+        class="pr-grid"
+        role="group"
+        :aria-label="`Is this ${first}?`"
+        :aria-busy="busy"
+      >
         <button
           v-for="(f, i) in faces"
           :key="f.faceId"
@@ -163,10 +183,17 @@ function crop(f: ReviewFace): Record<string, string> {
           <template v-if="later"> · {{ later }} more after these</template>
         </template>
       </span>
-      <span class="keys" aria-hidden="true"><kbd>Y</kbd> yes <kbd>N</kbd> no</span>
-      <button class="btn primary" :disabled="busy || !faces?.length" @click="confirm">
-        <span v-if="busy" class="spin"></span>{{ saveLabel }}
-      </button>
+      <template v-if="!loadFailed">
+        <span class="keys" aria-hidden="true"><kbd>Y</kbd> yes <kbd>N</kbd> no</span>
+        <button
+          class="btn primary"
+          :disabled="busy || !faces?.length"
+          :aria-busy="busy"
+          @click="confirm"
+        >
+          <span v-if="busy" class="spin"></span>{{ saveLabel }}
+        </button>
+      </template>
     </div>
   </dialog>
 </template>
@@ -210,6 +237,23 @@ function crop(f: ReviewFace): Record<string, string> {
 .pr-b {
   overflow: auto;
   padding: 4px 24px 8px;
+}
+.pr-err {
+  padding: 40px 0 32px;
+  text-align: center;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.pr-err p {
+  margin: 0 0 16px;
+}
+.pr-grid[aria-busy='true'] .pr-face {
+  cursor: progress;
+}
+/* The answers being sent dim, only once the save is slow enough to notice */
+.pr-grid[aria-busy='true'] {
+  opacity: 0.6;
+  transition: opacity 0.2s 0.3s;
 }
 .pr-grid {
   display: grid;

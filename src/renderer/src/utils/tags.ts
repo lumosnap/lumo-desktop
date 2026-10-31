@@ -57,6 +57,31 @@ export function tagCountsFor<T extends Tagged & { id: number }>(
   return tagCounts(images.filter((img) => ids.has(img.id)))
 }
 
+/**
+ * Adds or removes `slug` on the photos in `ids`, shown at once before the save returns.
+ * `undo` puts back exactly the tags those photos had, for when the save fails.
+ */
+export function retag<T extends Tagged & { id: number }>(
+  images: T[],
+  ids: readonly number[],
+  slug: string,
+  op: 'add' | 'remove'
+): { images: T[]; undo: (now: T[]) => T[] } {
+  const on = new Set(ids)
+  const before = new Map<number, T['tags']>()
+  const next = images.map((img) => {
+    if (!on.has(img.id)) return img
+    before.set(img.id, img.tags)
+    const rest = (img.tags ?? []).filter((t) => t !== slug)
+    return { ...img, tags: op === 'add' ? [...rest, slug] : rest }
+  })
+  return {
+    images: next,
+    undo: (now) =>
+      now.map((img) => (before.has(img.id) ? { ...img, tags: before.get(img.id) } : img))
+  }
+}
+
 /** A typed tag name -> slug: lowercase, spaces to "-", other characters dropped, at most 40. */
 export function slugify(text: string): string {
   const s = text

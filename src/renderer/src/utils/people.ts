@@ -171,3 +171,22 @@ export function gridMove(i: number, key: string, cols: number, n: number): numbe
   const j = i + step
   return j < 0 || j >= n ? i : j
 }
+
+/**
+ * Why the pick view has no photos to offer yet, and what happens next.
+ * Faces are found photo by photo, so an empty list early on is a wait, not an end.
+ */
+export function pickEmptyText(
+  scan: Pick<PeopleConfig, 'state' | 'processed' | 'total'> | null
+): string {
+  switch (scan?.state) {
+    case 'waiting':
+      return 'Face finding starts when the photos are in. Photos to pick from show up here then.'
+    case 'running':
+      return `Still looking for faces: ${scan.processed.toLocaleString()} of ${scan.total.toLocaleString()} photos done. Photos show up here as faces are found.`
+    case 'paused':
+      return 'Face finding is paused until your Mac is plugged in or cooler. It goes on by itself.'
+    default:
+      return 'No faces found in this album. Group photos and portraits work best.'
+  }
+}
