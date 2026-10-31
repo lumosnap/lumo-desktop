@@ -27,6 +27,7 @@ export interface Album {
   sets_need_push?: number // migration 4: >0 = sets changed locally since the last full push
   tag_set?: string | null // migration 6: JSON array of enabled AI tag slugs; null = all
   tags_scored?: string | null // migration 6: scoring key the AI tags were last computed with
+  event_type?: string | null // migration 7: picks the AI tag pack; null = wedding
 }
 
 export interface AlbumSet {
@@ -194,6 +195,10 @@ const migrations: Array<(database: Database.Database) => void> = [
         PRIMARY KEY (image_id, tag)
       );
     `)
+  },
+  // 7: album event type (AI tag pack); NULL = wedding for albums created before it
+  (database) => {
+    database.exec('ALTER TABLE albums ADD COLUMN event_type TEXT')
   }
 ]
 
@@ -354,8 +359,8 @@ export function createAlbum(album: Omit<Album, 'createdAt'>): Album {
   const fullAlbum = { ...album, createdAt }
 
   const stmt = db.prepare(`
-    INSERT INTO albums (id, title, eventDate, startTime, endTime, localFolderPath, sourceFolderPath, albumType, totalImages, lastSyncedAt, needsSync, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO albums (id, title, eventDate, startTime, endTime, localFolderPath, sourceFolderPath, albumType, totalImages, lastSyncedAt, needsSync, createdAt, event_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   stmt.run(
@@ -370,7 +375,8 @@ export function createAlbum(album: Omit<Album, 'createdAt'>): Album {
     fullAlbum.totalImages,
     fullAlbum.lastSyncedAt,
     fullAlbum.needsSync,
-    fullAlbum.createdAt
+    fullAlbum.createdAt,
+    fullAlbum.event_type ?? null
   )
 
   return fullAlbum
@@ -875,6 +881,13 @@ export function setAlbumTagSet(albumId: string, enabled: string[] | null): void 
   conn()
     .prepare('UPDATE albums SET tag_set = ? WHERE id = ?')
     .run(enabled ? JSON.stringify(enabled) : null, albumId)
+}
+
+/** Change an album's event type; its tag set goes back to the new type's pack. */
+export function setAlbumEventType(albumId: string, eventType: string): void {
+  conn()
+    .prepare('UPDATE albums SET event_type = ?, tag_set = NULL WHERE id = ?')
+    .run(eventType, albumId)
 }
 
 /**

@@ -13,7 +13,7 @@ import { TAGS, type TagCategory } from './vocabulary'
 
 export const TAG_MODEL = vectors.model
 /** Bump whenever selection changes: albums scored with an older version are re-scored. */
-export const TAG_SCORING_VERSION = 2
+export const TAG_SCORING_VERSION = 3
 
 // ponytail: hand-tuned on one 15-photo Kerala album + ~400 bench photos (in logits).
 // Retune against a labelled album if tags feel noisy or sparse.
@@ -53,7 +53,11 @@ export const STRICT_TAGS = new Set([
   'sacred-fire',
   'church-wedding',
   'getting-ready',
-  'sadya'
+  'sadya',
+  // Event packs: fired on any group photo / any cake / any dim stage in the bench
+  'team-photo',
+  'cake-cutting',
+  'backstage'
 ])
 const STRICT_FLOOR = 1.5
 const STRICT_MARGIN = 4

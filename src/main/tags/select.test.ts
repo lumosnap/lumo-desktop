@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { selectAlbumTags, tagLogits, effectiveTags, MAX_TAGS } from './select'
-import { TAGS } from './vocabulary'
+import { TAGS, TAG_PACKS, EVENT_TYPE_LABELS } from './vocabulary'
 import vectors from './tag-vectors.json'
 import prior from './tag-prior.json'
 
@@ -76,6 +76,17 @@ describe('tag assets', () => {
     expect(Object.keys(prior.logits)).toEqual(slugs)
     expect(prior.model).toBe(vectors.model)
     expect(new Set(slugs).size).toBe(TAGS.length)
+  })
+
+  it('every pack only names vocabulary slugs; wedding is the original 60, general is all', () => {
+    const slugs = TAGS.map((t) => t.slug)
+    expect(Object.keys(TAG_PACKS)).toEqual(Object.keys(EVENT_TYPE_LABELS))
+    for (const pack of Object.values(TAG_PACKS)) {
+      expect(pack.filter((s) => !slugs.includes(s))).toEqual([])
+      expect(new Set(pack).size).toBe(pack.length)
+    }
+    expect(TAG_PACKS.wedding).toEqual(slugs.slice(0, 60))
+    expect(TAG_PACKS.general).toEqual(slugs)
   })
 
   it('a prompt vector used as the image embedding scores its own tag highest', () => {

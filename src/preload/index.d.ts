@@ -96,6 +96,7 @@ declare global {
           eventDate: string | null
           sourceFolderPath: string
           albumType?: 'watch_folder' | 'standalone'
+          eventType?: string // an EventType id; default 'wedding'
         }) => Promise<{ success: true; album: Album } | { success: false; error: string }>
         list: () => Promise<any>
         get: (
@@ -148,8 +149,10 @@ declare global {
       }
       tags: {
         getAlbumConfig: (albumId: string) => Promise<TagConfig>
-        // Re-scores the album's AI tags from stored embeddings; null = whole vocabulary
+        // Re-scores the album's AI tags from stored embeddings; null = the event type's pack
         setAlbumConfig: (albumId: string, enabled: string[] | null) => Promise<TagConfig>
+        // Clears the tag set back to the new event type's pack and re-scores
+        setEventType: (albumId: string, eventType: string) => Promise<TagConfig>
         // Manual per-photo overrides (any slug matching /^[a-z0-9-]{1,40}$/); survive re-scoring
         add: (
           albumId: string,

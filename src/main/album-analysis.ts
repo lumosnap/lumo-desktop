@@ -29,6 +29,7 @@ import {
 } from './database'
 import { embedBatch, stopEmbedder, BATCH_SIZE } from './ml/embedder'
 import { TAG_MODEL, TAG_SCORING_VERSION, selectAlbumTags, tagLogits } from './tags/select'
+import { TAG_PACKS, eventTypeOf } from './tags/vocabulary'
 import { uploadPipeline } from './pipeline'
 import { albumsApi } from './api-client'
 import { groupImages } from './grouping'
@@ -317,13 +318,15 @@ export function rescoreAlbum(albumId: string, { force = false } = {}): Promise<n
     const album = getAlbum(albumId)
     if (!album) return
     const rows = getAlbumEmbeddings(albumId, TAG_MODEL)
-    const enabled = getAlbumTagSet(albumId)
-    const key = `${TAG_SCORING_VERSION}:${TAG_MODEL}:${rows.length}:${rows.reduce((s, r) => s + r.imageId, 0)}:${enabled?.join() ?? '*'}`
+    const tagSet = getAlbumTagSet(albumId)
+    const eventType = eventTypeOf(album.event_type)
+    const enabled = tagSet ?? TAG_PACKS[eventType]
+    const key = `${TAG_SCORING_VERSION}:${TAG_MODEL}:${rows.length}:${rows.reduce((s, r) => s + r.imageId, 0)}:${tagSet?.join() ?? eventType}`
     if (!force && album.tags_scored === key) return
     // ponytail: O(album) on the main thread, ~1s per 5k photos; move to the embedder process if it janks
     const tags = selectAlbumTags(
       rows.map((r) => tagLogits(r.vec)),
-      enabled && new Set(enabled)
+      new Set(enabled)
     )
     changed = saveImageTags(rows.map((r, i) => ({ imageId: r.imageId, tags: tags[i] })))
     setAlbumTagsScored(albumId, key)

@@ -18,6 +18,7 @@ import {
   getAlbumTags,
   getAlbumTagSet,
   setAlbumTagSet,
+  setAlbumEventType,
   setTagOverride,
   deleteImages,
   updateAlbum,
@@ -41,7 +42,16 @@ import {
   rescoreAlbum,
   scheduleTagsPush
 } from '../album-analysis'
-import { TAGS, tagLabel, type TagCategory } from '../tags/vocabulary'
+import {
+  TAGS,
+  TAG_PACKS,
+  EVENT_TYPE_LABELS,
+  eventTypeOf,
+  isEventType,
+  tagLabel,
+  type EventType,
+  type TagCategory
+} from '../tags/vocabulary'
 import { TAG_SLUG } from '../tags/select'
 import { watcherService } from '../watcher'
 import { createLogger, getErrorMessage } from '../logger'
@@ -49,8 +59,11 @@ import { createLogger, getErrorMessage } from '../logger'
 const logger = createLogger('IPC:Album')
 
 export interface TagConfig {
-  enabled: string[] | null // null = whole vocabulary
-  vocabulary: Array<{ slug: string; label: string; category: TagCategory }>
+  eventType: EventType
+  eventTypes: Array<{ id: EventType; label: string }>
+  enabled: string[] | null // null = the event type's pack
+  vocabulary: Array<{ slug: string; label: string; category: TagCategory }> // every event type's tags
+  pack: string[] // default tags of the current event type
 }
 
 export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
@@ -65,9 +78,12 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         endTime: string | null
         sourceFolderPath: string
         albumType?: 'watch_folder' | 'standalone'
+        eventType?: unknown
       }
     ) => {
       try {
+        const eventType = data.eventType ?? 'wedding'
+        if (!isEventType(eventType)) throw new Error('Invalid event type')
         const storageLocation = getStorageLocation()
         if (!storageLocation) {
           throw new Error('Storage location not configured')
@@ -97,7 +113,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           totalImages: 0,
           lastSyncedAt: null,
           needsSync: 0,
-          isOrphaned: 0
+          isOrphaned: 0,
+          event_type: eventType
         })
 
         // Scan source folder for images
@@ -539,10 +556,20 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
     label: tagLabel(t.slug),
     category: t.category
   }))
-  const tagConfig = (albumId: string): TagConfig => ({
-    enabled: getAlbumTagSet(albumId),
-    vocabulary
-  })
+  const eventTypes = Object.entries(EVENT_TYPE_LABELS).map(([id, label]) => ({
+    id: id as EventType,
+    label
+  }))
+  const tagConfig = (albumId: string): TagConfig => {
+    const eventType = eventTypeOf(getAlbum(albumId)?.event_type)
+    return {
+      eventType,
+      eventTypes,
+      enabled: getAlbumTagSet(albumId),
+      vocabulary,
+      pack: TAG_PACKS[eventType]
+    }
+  }
   ipcMain.handle('tags:getAlbumConfig', (_event, albumId: string) => tagConfig(albumId))
   ipcMain.handle('tags:setAlbumConfig', async (_event, albumId: string, enabled: unknown) => {
     if (!getAlbum(albumId)) throw new Error('Album not found')
@@ -552,6 +579,14 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       Array.isArray(enabled) ? [...new Set(enabled.filter((s) => known.has(s)))] : null
     )
     await rescoreAlbum(albumId) // tag set is part of the scoring key, so this always recomputes
+    scheduleTagsPush(albumId)
+    return tagConfig(albumId)
+  })
+  ipcMain.handle('tags:setEventType', async (_event, albumId: string, eventType: unknown) => {
+    if (!getAlbum(albumId)) throw new Error('Album not found')
+    if (!isEventType(eventType)) throw new Error('Invalid event type')
+    setAlbumEventType(albumId, eventType) // also resets the tag set to the pack
+    await rescoreAlbum(albumId)
     scheduleTagsPush(albumId)
     return tagConfig(albumId)
   })

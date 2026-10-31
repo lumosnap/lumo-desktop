@@ -23,6 +23,7 @@ import {
   setTagOverride,
   getAlbumTagSet,
   setAlbumTagSet,
+  setAlbumEventType,
   getAlbumTags,
   getImagesMissingEmbedding,
   getEmbeddedImageIds,
@@ -51,7 +52,7 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(6)
+    expect(db.pragma('user_version', { simple: true })).toBe(7)
     expect(cols('albums')).toEqual(
       expect.arrayContaining(['startTime', 'endTime', 'isOrphaned', 'albumType'])
     )
@@ -77,6 +78,7 @@ describe.skipIf(!loadable)('runMigrations', () => {
     expect(cols('image_tags')).toEqual(['image_id', 'tag', 'score'])
     expect(cols('albums')).toEqual(expect.arrayContaining(['tag_set', 'tags_scored']))
     expect(cols('image_tag_overrides')).toEqual(['image_id', 'tag', 'action'])
+    expect(cols('albums')).toContain('event_type')
     db.close()
   })
 })
@@ -206,6 +208,12 @@ describe.skipIf(!loadable)('ai tags', () => {
     expect(getAlbumTagSet('a')).toEqual(['bride', 'groom'])
     setAlbumTagSet('a', null)
     expect(getAlbumTagSet('a')).toBeNull()
+
+    expect(getAlbum('a')!.event_type).toBeNull() // pre-event-type albums: wedding
+    setAlbumTagSet('a', ['bride'])
+    setAlbumEventType('a', 'birthday')
+    expect(getAlbum('a')!.event_type).toBe('birthday')
+    expect(getAlbumTagSet('a')).toBeNull() // back to the pack default
 
     deleteImages([i1])
     expect(getAlbumTags('a')).toEqual(new Map([[i2, ['my-tag']]]))

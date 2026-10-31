@@ -17,7 +17,8 @@ const t = (slug: string, category: TagCategory, ...prompts: string[]): TagDef =>
   prompts
 })
 
-export const TAGS: TagDef[] = [
+/** The original wedding vocabulary; order fixes tag-vectors.json, append new tags to EXTRA_TAGS. */
+const WEDDING_TAGS: TagDef[] = [
   // events
   t(
     'getting-ready',
@@ -444,6 +445,353 @@ export const TAGS: TagDef[] = [
     'a photo of a church building'
   )
 ]
+
+/** Non-wedding event tags (birthday, corporate, baby, concert). */
+const EXTRA_TAGS: TagDef[] = [
+  // birthday & party
+  t(
+    'birthday',
+    'events',
+    'a photo of a birthday party',
+    'a photo of a birthday celebration with a cake and decorations',
+    'a photo of a person celebrating their birthday'
+  ),
+  t(
+    'party',
+    'events',
+    'a photo of a party',
+    'a photo of people celebrating at a party',
+    'a photo of a festive house party'
+  ),
+  t(
+    'cake-cutting',
+    'moments',
+    'a photo of someone cutting a birthday cake',
+    'a photo of a cake cutting moment with a knife',
+    'a photo of people gathered around as a cake is cut'
+  ),
+  t(
+    'candles',
+    'things',
+    'a photo of birthday candles on a cake',
+    'a photo of someone blowing out candles',
+    'a photo of lit candles'
+  ),
+  t(
+    'balloons',
+    'things',
+    'a photo of balloons',
+    'a photo of a room decorated with colorful balloons',
+    'a photo of a balloon arch'
+  ),
+  t(
+    'gifts',
+    'things',
+    'a photo of gift boxes',
+    'a photo of wrapped presents',
+    'a photo of someone opening a gift'
+  ),
+  t(
+    'games',
+    'moments',
+    'a photo of people playing party games',
+    'a photo of children playing a game at a party',
+    'a photo of a fun group activity'
+  ),
+
+  // corporate
+  t(
+    'conference',
+    'events',
+    'a photo of a business conference',
+    'a photo of a conference hall with rows of attendees',
+    'a photo of a corporate event'
+  ),
+  t(
+    'workshop',
+    'events',
+    'a photo of a workshop',
+    'a photo of people working together at tables in a training session',
+    'a photo of a hands-on class with a trainer'
+  ),
+  t(
+    'panel-discussion',
+    'events',
+    'a photo of a panel discussion',
+    'a photo of several speakers seated on a stage with microphones',
+    'a photo of a panel of experts at a conference'
+  ),
+  t(
+    'speaker',
+    'people',
+    'a photo of a speaker on stage',
+    'a photo of a person speaking at a conference',
+    'a photo of a keynote speaker with a microphone'
+  ),
+  t(
+    'audience',
+    'people',
+    'a photo of an audience',
+    'a photo of an audience seated and listening',
+    'a photo of people in a crowd watching a stage'
+  ),
+  t(
+    'presentation',
+    'moments',
+    'a photo of a presentation',
+    'a photo of a person presenting slides on a screen',
+    'a photo of a business presentation'
+  ),
+  t(
+    'networking',
+    'moments',
+    'a photo of people networking at an event',
+    'a photo of professionals talking and shaking hands',
+    'a photo of business people chatting with drinks'
+  ),
+  t(
+    'award',
+    'moments',
+    'a photo of an award ceremony',
+    'a photo of a person receiving an award or trophy on stage',
+    'a photo of someone holding a trophy'
+  ),
+  t(
+    'team-photo',
+    'shots',
+    'a team photo of colleagues',
+    'a photo of a group of coworkers posing together',
+    'a corporate team photo'
+  ),
+  t(
+    'headshot',
+    'shots',
+    'a professional headshot',
+    'a corporate headshot of a person in business attire',
+    'a headshot portrait on a plain background'
+  ),
+  t(
+    'booth',
+    'things',
+    'a photo of an exhibition booth',
+    'a photo of a trade show stand',
+    'a photo of a company booth at an expo'
+  ),
+  t(
+    'signage',
+    'things',
+    'a photo of event signage',
+    'a photo of a banner with a company logo',
+    'a photo of a sign or standee at an event'
+  ),
+
+  // baby
+  t(
+    'baby-shower',
+    'events',
+    'a photo of a baby shower',
+    'a photo of a pregnant woman at her baby shower',
+    'a photo of baby shower decorations'
+  ),
+  t(
+    'naming-ceremony',
+    'events',
+    'a photo of a baby naming ceremony',
+    'a photo of a family ceremony for a newborn baby',
+    'a photo of a baby being blessed at a ceremony'
+  ),
+  t('baby', 'people', 'a photo of a baby', 'a photo of a newborn baby', 'a photo of an infant'),
+  t(
+    'mother',
+    'people',
+    'a photo of a mother holding her baby',
+    'a photo of a pregnant woman',
+    'a photo of a mother and child'
+  ),
+  t(
+    'cradle',
+    'things',
+    'a photo of a cradle',
+    'a photo of a decorated baby cradle',
+    'a photo of a baby in a crib'
+  ),
+
+  // concert & stage show
+  t(
+    'concert',
+    'events',
+    'a photo of a concert',
+    'a photo of a live music concert',
+    'a photo of a music show on a big stage'
+  ),
+  t(
+    'performer',
+    'people',
+    'a photo of a performer on stage',
+    'a photo of an artist performing live',
+    'a photo of an entertainer in front of an audience'
+  ),
+  t(
+    'singer',
+    'people',
+    'a photo of a singer',
+    'a photo of a singer with a microphone on stage',
+    'a photo of a vocalist singing'
+  ),
+  t(
+    'musician',
+    'people',
+    'a photo of a musician playing an instrument',
+    'a photo of a guitarist',
+    'a photo of a drummer'
+  ),
+  t(
+    'crowd',
+    'people',
+    'a photo of a crowd',
+    'a photo of a cheering crowd at a concert',
+    'a photo of a packed crowd with raised hands'
+  ),
+  t(
+    'stage-lights',
+    'things',
+    'a photo of stage lights',
+    'a photo of colorful spotlights and beams at a concert',
+    'a photo of a stage lit with lasers and smoke'
+  ),
+  t(
+    'backstage',
+    'settings',
+    'a photo taken backstage',
+    'a photo of performers getting ready backstage',
+    'a photo behind the scenes of a show'
+  )
+]
+
+export const TAGS: TagDef[] = [...WEDDING_TAGS, ...EXTRA_TAGS]
+
+export type EventType = 'wedding' | 'birthday' | 'corporate' | 'baby' | 'concert' | 'general'
+
+export const EVENT_TYPE_LABELS: Record<EventType, string> = {
+  wedding: 'Wedding',
+  birthday: 'Birthday & party',
+  corporate: 'Corporate',
+  baby: 'Baby shower & naming',
+  concert: 'Concert & stage show',
+  general: 'Something else'
+}
+
+/** AI tag candidates per event type, used when an album has no explicit tag set. */
+export const TAG_PACKS: Record<EventType, string[]> = {
+  wedding: WEDDING_TAGS.map((t) => t.slug),
+  birthday: [
+    'birthday',
+    'cake-cutting',
+    'cake',
+    'candles',
+    'balloons',
+    'gifts',
+    'games',
+    'party',
+    'decor',
+    'kids',
+    'family',
+    'friends',
+    'guests',
+    'group-photo',
+    'portrait',
+    'candid',
+    'close-up',
+    'details',
+    'dance',
+    'laughing',
+    'hugging',
+    'food',
+    'drinks',
+    'stage',
+    'venue',
+    'outdoor',
+    'indoor',
+    'night'
+  ],
+  corporate: [
+    'conference',
+    'presentation',
+    'speaker',
+    'audience',
+    'panel-discussion',
+    'networking',
+    'award',
+    'team-photo',
+    'headshot',
+    'booth',
+    'workshop',
+    'signage',
+    'venue',
+    'stage',
+    'group-photo',
+    'portrait',
+    'candid',
+    'close-up',
+    'food',
+    'drinks',
+    'indoor',
+    'outdoor',
+    'night',
+    'decor'
+  ],
+  baby: [
+    'baby-shower',
+    'naming-ceremony',
+    'baby',
+    'mother',
+    'cradle',
+    'gifts',
+    'family',
+    'elders',
+    'kids',
+    'rituals',
+    'decor',
+    'cake',
+    'food',
+    'flowers',
+    'portrait',
+    'candid',
+    'close-up',
+    'details',
+    'laughing',
+    'hugging',
+    'indoor',
+    'outdoor'
+  ],
+  concert: [
+    'concert',
+    'performer',
+    'singer',
+    'musician',
+    'crowd',
+    'stage',
+    'stage-lights',
+    'backstage',
+    'dance',
+    'performance',
+    'audience',
+    'night',
+    'silhouette',
+    'black-and-white',
+    'candid',
+    'close-up',
+    'portrait'
+  ],
+  general: TAGS.map((t) => t.slug)
+}
+
+export const isEventType = (x: unknown): x is EventType =>
+  typeof x === 'string' && Object.hasOwn(TAG_PACKS, x)
+
+/** An album's event type; NULL (albums from before event types) = wedding. */
+export const eventTypeOf = (x: string | null | undefined): EventType =>
+  isEventType(x) ? x : 'wedding'
 
 const LABELS: Record<string, string> = {
   'black-and-white': 'Black & white',

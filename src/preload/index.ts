@@ -74,6 +74,7 @@ const api = {
       eventDate: string | null
       sourceFolderPath: string
       albumType?: 'watch_folder' | 'standalone'
+      eventType?: string // an EventType id; default 'wedding'
     }): Promise<{ success: true; album: Album } | { success: false; error: string }> =>
       ipcRenderer.invoke('album:create', data),
     list: (): Promise<any> => ipcRenderer.invoke('album:list'),
@@ -155,6 +156,9 @@ const api = {
     // Re-scores the album's AI tags from stored embeddings
     setAlbumConfig: (albumId: string, enabled: string[] | null): Promise<TagConfig> =>
       ipcRenderer.invoke('tags:setAlbumConfig', albumId, enabled),
+    // Clears the tag set back to the new event type's pack and re-scores
+    setEventType: (albumId: string, eventType: string): Promise<TagConfig> =>
+      ipcRenderer.invoke('tags:setEventType', albumId, eventType),
     add: (
       albumId: string,
       imageIds: number[],
