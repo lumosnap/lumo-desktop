@@ -47,7 +47,9 @@ import {
   getImageNotes,
   setImageNote,
   getAlbumNote,
-  setAlbumNote
+  setAlbumNote,
+  getImageDone,
+  setImageDone
 } from './database'
 
 // better-sqlite3 is rebuilt for Electron's ABI by postinstall; skip under plain Node if it won't load
@@ -71,11 +73,12 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(12)
+    expect(db.pragma('user_version', { simple: true })).toBe(13)
     expect(cols('albums')).toContain('private_note')
     expect(cols('albums')).toContain('vectors_hash')
     expect(cols('albums')).toContain('vectors_ids')
     expect(cols('image_notes')).toEqual(['image_id', 'body', 'updated_at'])
+    expect(cols('image_done')).toEqual(['image_id', 'done_at'])
     expect(cols('albums')).toEqual(
       expect.arrayContaining(['startTime', 'endTime', 'isOrphaned', 'albumType'])
     )
@@ -534,6 +537,32 @@ describe.skipIf(!loadable)('private notes', () => {
     expect(() => setAlbumNote('zz', 'x')).toThrow()
     deleteAlbum('b')
     expect(getImageNotes('b')).toEqual({})
+    closeDatabase()
+  })
+})
+
+describe.skipIf(!loadable)('done marks', () => {
+  it('marks and unmarks in bulk, stays in its album and cascades', () => {
+    initDatabase(':memory:')
+    album('a')
+    album('b')
+    const [i1, i2, i3] = mk('a', 3)
+    const [j1] = mk('b', 1)
+    const at = setImageDone('a', [i1, i2], true)
+    expect(getImageDone('a')).toEqual({ [i1]: at, [i2]: at })
+    setImageDone('a', [i1], true) // again: still done, time moves on
+    expect(Object.keys(getImageDone('a'))).toHaveLength(2)
+    setImageDone('a', [i2, i3], false) // i3 was never done: no error
+    expect(Object.keys(getImageDone('a'))).toEqual([String(i1)])
+    // a photo from another album rolls back the whole batch
+    expect(() => setImageDone('a', [i3, j1], true)).toThrow()
+    expect(getImageDone('a')[i3]).toBeUndefined()
+    expect(getImageDone('b')).toEqual({})
+    deleteImages([i1])
+    expect(getImageDone('a')).toEqual({})
+    setImageDone('b', [j1], true)
+    deleteAlbum('b')
+    expect(getImageDone('b')).toEqual({})
     closeDatabase()
   })
 })

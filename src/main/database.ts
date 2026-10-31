@@ -280,6 +280,15 @@ const migrations: Array<(database: Database.Database) => void> = [
   // 12: server ids in the uploaded vectors file; the gallery ignores ids no longer in the album
   (database) => {
     database.exec('ALTER TABLE albums ADD COLUMN vectors_ids TEXT')
+  },
+  // 13: photos the photographer marked done (their note or the client's is handled). Local only.
+  (database) => {
+    database.exec(`
+      CREATE TABLE image_done (
+        image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+        done_at INTEGER NOT NULL
+      );
+    `)
   }
 ]
 
@@ -1495,6 +1504,35 @@ export function getAlbumNote(albumId: string): string {
     | { private_note: string | null }
     | undefined
   return row?.private_note ?? ''
+}
+
+/** When each photo in the album was marked done, by local image id. */
+export function getImageDone(albumId: string): Record<number, number> {
+  const rows = conn()
+    .prepare(
+      'SELECT d.image_id, d.done_at FROM image_done d JOIN images i ON i.id = d.image_id WHERE i.albumId = ?'
+    )
+    .all(albumId) as Array<{ image_id: number; done_at: number }>
+  return Object.fromEntries(rows.map((r) => [r.image_id, r.done_at]))
+}
+
+/** Marks photos done (now) or not done. Every photo must be in the album. Returns done_at. */
+export function setImageDone(albumId: string, imageIds: number[], done: boolean): number {
+  const d = conn()
+  const at = Date.now()
+  const inAlbum = d.prepare('SELECT 1 FROM images WHERE id = ? AND albumId = ?')
+  const mark = d.prepare(
+    'INSERT INTO image_done (image_id, done_at) VALUES (?, ?) ON CONFLICT(image_id) DO UPDATE SET done_at = excluded.done_at'
+  )
+  const clear = d.prepare('DELETE FROM image_done WHERE image_id = ?')
+  d.transaction(() => {
+    for (const id of imageIds) {
+      if (!inAlbum.get(id, albumId)) throw new Error('Photo not found in this album')
+      if (done) mark.run(id, at)
+      else clear.run(id)
+    }
+  })()
+  return at
 }
 
 export function setAlbumNote(albumId: string, body: string): void {

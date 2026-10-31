@@ -34,7 +34,9 @@ import {
   getImageNotes,
   setImageNote,
   getAlbumNote,
-  setAlbumNote
+  setAlbumNote,
+  getImageDone,
+  setImageDone
 } from '../database'
 import { albumsApi } from '../api-client'
 import { uploadPipeline } from '../pipeline'
@@ -564,11 +566,17 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
   const noteBody = (v: unknown): string => (typeof v === 'string' ? v.slice(0, 5000) : '')
   handleIpc('notes:get', logger, (_event, albumId: string) => ({
     notes: getImageNotes(String(albumId)),
-    albumNote: getAlbumNote(String(albumId))
+    albumNote: getAlbumNote(String(albumId)),
+    done: getImageDone(String(albumId))
   }))
   handleIpc('notes:set', logger, (_event, albumId: string, imageId: unknown, body: unknown) => {
     if (!Number.isInteger(imageId)) throw new Error('Photo id is required')
     setImageNote(String(albumId), imageId as number, noteBody(body))
+  })
+  handleIpc('notes:setDone', logger, (_event, albumId: string, ids: unknown, done: unknown) => {
+    if (!Array.isArray(ids) || !ids.length || !ids.every(Number.isInteger))
+      throw new Error('Photo ids are required')
+    return { doneAt: setImageDone(String(albumId), ids as number[], done === true) }
   })
   handleIpc('notes:setAlbum', logger, (_event, albumId: string, body: unknown) => {
     setAlbumNote(String(albumId), noteBody(body))

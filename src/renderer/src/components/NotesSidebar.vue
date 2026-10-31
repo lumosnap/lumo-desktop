@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
-import { X } from 'lucide-vue-next'
+import { X, Check } from 'lucide-vue-next'
 import PrivateNote from './PrivateNote.vue'
 
 interface Comment {
@@ -21,11 +21,22 @@ const props = defineProps<{
   image: Image | null
   note: string
   saveNote: (imageId: number, body: string) => Promise<boolean>
+  state: 'open' | 'done' | null // null: no note yet, nothing to mark
+  doneAt?: number
+  busy: boolean
+  locked: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
+  toggleDone: []
 }>()
+
+const doneDate = computed(() =>
+  props.doneAt
+    ? new Date(props.doneAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+    : ''
+)
 
 const closeBtn = ref<HTMLButtonElement>()
 // Bound to the photo's id now: the note still saves to it after the panel closes
@@ -103,9 +114,24 @@ function formatDate(dateString: string): string {
         </template>
         <p v-else class="none">No notes from your client. They add them from their link.</p>
       </div>
-      <footer v-if="filteredComments.length" class="num">
-        {{ filteredComments.length }} note{{ filteredComments.length > 1 ? 's' : '' }} from your
-        client
+      <!-- Done closes the loop on this photo's notes; D does the same from the keyboard -->
+      <footer v-if="state" class="done-row">
+        <span v-if="state === 'done'" class="num"><Check class="ok" />Done {{ doneDate }}</span>
+        <span v-else-if="filteredComments.length" class="num">
+          {{ filteredComments.length }} note{{ filteredComments.length > 1 ? 's' : '' }} from your
+          client
+        </span>
+        <button
+          class="btn sm"
+          :class="state === 'done' ? 'ghost' : 'primary'"
+          :disabled="locked"
+          :aria-busy="busy"
+          aria-keyshortcuts="D"
+          @click="emit('toggleDone')"
+        >
+          <span v-if="busy" class="spin"></span>{{ state === 'done' ? 'Reopen' : 'Mark done'
+          }}<kbd>D</kbd>
+        </button>
       </footer>
     </aside>
   </Teleport>
@@ -126,5 +152,29 @@ function formatDate(dateString: string): string {
   padding: 0 8px;
   font-size: 13px;
   color: var(--ink-2);
+}
+.done-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.done-row > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.done-row .ok {
+  width: 16px;
+  height: 16px;
+  color: var(--ok);
+}
+.done-row .btn {
+  margin-left: auto;
+}
+.done-row kbd {
+  margin-left: 4px;
+  font: inherit;
+  font-size: 11px;
+  opacity: 0.6;
 }
 </style>

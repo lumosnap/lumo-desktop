@@ -29,6 +29,7 @@ const props = defineProps<{
   thumb: string
   selected: boolean
   myNote?: string // the photographer's private note
+  noteState?: 'open' | 'done' | null // set when it has a note, yours or the client's
 }>()
 const emit = defineEmits<{
   open: [e: MouseEvent]
@@ -62,7 +63,7 @@ onMounted(() => {
       :aria-label="
         image.originalFilename +
         (image.favoritedBy?.length ? ', picked by ' + image.favoritedBy.join(', ') : '') +
-        (myNote ? ', has your note' : '') +
+        (noteState ? `, notes ${noteState === 'done' ? 'done' : 'to do'}` : '') +
         (burst ? `, burst of ${burst.length}` : '')
       "
       style="
@@ -102,16 +103,6 @@ onMounted(() => {
       <span v-if="burst" class="chip" :title="`Burst of ${burst.length}`">
         <Layers />{{ burst.length }}
       </span>
-      <!-- The photographer's own note: an outline mark, apart from the client's filled ones -->
-      <button
-        v-if="myNote"
-        class="chip mine"
-        :aria-label="`Your note: ${myNote}`"
-        :title="`Your note: ${myNote}`"
-        @click.stop="emit('notes')"
-      >
-        <NotebookPen />
-      </button>
       <span
         v-if="image.favoritedBy?.length"
         class="chip fav"
@@ -124,13 +115,27 @@ onMounted(() => {
       >
         <Heart />{{ image.favoritedBy.length }}
       </span>
+      <!-- Every note on the photo in one chip: ink while there is work to do, plain once done -->
       <button
-        v-if="(image.notesCount || 0) > 0"
-        class="chip"
-        :aria-label="`${image.notesCount} client notes`"
+        v-if="noteState"
+        class="chip note"
+        :class="noteState"
+        :aria-label="
+          [
+            myNote && `Your note: ${myNote}`,
+            image.notesCount && `${image.notesCount} from your client`,
+            noteState === 'done' ? 'Done' : 'To do'
+          ]
+            .filter(Boolean)
+            .join('. ')
+        "
+        :title="myNote ? `Your note: ${myNote}` : undefined"
         @click.stop="emit('notes')"
       >
-        <MessageSquare />{{ image.notesCount }}
+        <Check v-if="noteState === 'done'" class="ok" /><NotebookPen v-if="myNote" /><template
+          v-if="image.notesCount"
+          ><MessageSquare />{{ image.notesCount }}</template
+        >
       </button>
     </div>
     <span v-if="status === 'Processing'" class="chip proc">
@@ -140,7 +145,8 @@ onMounted(() => {
     <div class="fname">
       <span class="fn">
         {{ image.originalFilename }}
-        <span v-if="image.tags?.length" class="tg">{{
+        <span v-if="myNote" class="tg">Your note: {{ myNote }}</span>
+        <span v-else-if="image.tags?.length" class="tg">{{
           image.tags.slice(0, 4).map(tagLabel).join(' · ')
         }}</span>
       </span>

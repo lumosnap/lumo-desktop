@@ -1115,10 +1115,17 @@ select.input {
   fill: var(--ink);
   stroke: var(--ink);
 }
-/* The photographer's own note: an outline pen, apart from the client's notes and hearts */
-.chip.mine {
-  padding: 0 6px;
-  color: var(--ink-2);
+/* A note to act on: the one dark chip on the tile, so it reads on any photo and apart from hearts.
+   Once done it goes back to a plain chip with a tick. */
+.chip.note.open {
+  background: oklch(21% 0.01 255 / 0.88);
+  color: white;
+}
+.chip.note.done {
+  color: var(--ink-3);
+}
+.chip.note .ok {
+  color: var(--ok);
 }
 .ph .fname {
   position: absolute;

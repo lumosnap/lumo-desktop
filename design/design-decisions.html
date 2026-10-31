@@ -174,6 +174,75 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-11-01-done">
+<h2>Session 2026-11-01 (9): see the notes, and mark them done</h2>
+<p>Existing work, Revamp level, component scope inside the album view: how a note on a photo shows, and a done state per photo. The look is kept. Screens: 960 px to 2560 px, desktop only (Electron).</p>
+<ul>
+<li><b>For:</b> the photographer, after delivery, working through what the client asked for and their own to-dos between edits.</li>
+<li><b>Job:</b> see which photos carry a note (theirs or the client's), work through them, and mark each one done.</li>
+<li><b>Moment:</b> an editing session; the same few actions many times, often from the keyboard in the photo view.</li>
+<li><b>Why the pen was missed:</b> it was the same white pill as the hearts and the client-note chip, a 16 px grey glyph that reads as "edit", with no words; in the photo view only a 7 px pale dot on the Notes button; "Note for yourself" was 13 px in the faintest ink. Nothing said "there is something here for you to do".</li>
+<li><b>Direction (kept):</b> a work sheet beside the prints. A note is a tab on the print until the work is done; then the tab gets a tick and goes quiet. Open work is the one dark mark on a tile; done work goes back to the plain chip.</li>
+<li><b>Signature moment:</b> marking done in the photo view: press D, the note label dims and gets a tick, go to the next photo.</li>
+<li><b>Words:</b> "To do" and "Done", "Mark done", "Reopen". Not "resolved" or "complete": the photographer's word for finished edits is "done".</li>
+</ul>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Tile note chip</td><td>One chip for all notes on a photo: pen if yours, speech bubble with count if the client's. Open: ink fill, white marks (the only dark chip on a tile). Done: the plain white chip, a green tick first, marks in the faint ink. A photo with no note shows nothing</td><td>Open work must read on any photo and apart from the hearts. Done stays visible but steps back, so the grid shows progress</td><td class="rejected">The outline pen beside a separate client-note chip (missed); a coloured dot (colour alone)</td></tr>
+<tr><td>Tile hover</td><td>The hover bar shows "Your note: …" under the filename, in place of the tags</td><td>The note in words at the moment the photographer looks at the photo; tags are on the photo view too</td><td class="rejected">A native title tooltip only (slow, easy to miss)</td></tr>
+<tr><td>Photo view label</td><td>A pill in the top bar: the first line of your note, or "1 note from your client"; white on a light glass while to do, dimmed with a tick and "· Done" once done. Pressing it opens the notes</td><td>Says what the note is, not only that one exists. Replaces the 7 px dot</td><td class="rejected">The dot on the Notes button</td></tr>
+<tr><td>Mark done</td><td>The notes panel footer: "Mark done D" (primary) or "Done 1 Nov" with "Reopen D" (ghost). Only when the photo has a note. Key D in the photo view and the panel, not while typing</td><td>The footer is where the reading ends. One key keeps the photographer in the flow</td><td class="rejected">A checkbox on each tile (one more control on every photo)</td></tr>
+<tr><td>A client note after done</td><td>Opens the photo again</td><td>It asks for something new. Your own edits do not reopen it: you were there</td><td class="rejected">Done stays done (a new request would hide)</td></tr>
+<tr><td>Filter</td><td>"To do N" and "Done N" toggles in the photo bar, where "Your notes" was. They count over the view so far (set, picks, people) and compose with tags. The bar title adds "· notes to do" or "· notes done"</td><td>The work list the photographer asked for. One place for notes, no new chrome</td><td class="rejected">Keeping "Your notes" and adding two more toggles</td></tr>
+<tr><td>Bulk</td><td>Selection bar: "Mark N done", only when the selection has photos to do. Toast "N photos marked done" with Undo</td><td>Cheap, and undo is better than a confirm</td><td class="rejected">A confirm dialog</td></tr>
+<tr><td>Album note</td><td>"Add a note for yourself" in the second ink, not the faintest</td><td>It says what it does, and the first-sight contrast is higher. Still one line</td><td class="rejected">An always-open text area</td></tr>
+<tr><td>Storage</td><td>Migration 13: <code>image_done(image_id PK, done_at)</code>, cascade on photo delete; this computer only</td><td>Done also applies to photos with only client notes, which have no row in <code>image_notes</code></td><td class="rejected">A column on <code>image_notes</code></td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th></tr>
+<tr><td>Mark done / reopen (panel, key, bulk)</td><td>micro</td><td>the button shows the shared spinner after 300 ms; the chip and the label change when the save is back</td></tr>
+<tr><td>Filter To do / Done</td><td>none</td><td>instant; the grid goes to its top as other filters do</td></tr>
+<tr><td>Save failed</td><td>micro</td><td>toast "Couldn't mark it done: …" with Try again; the state stays as it was</td></tr>
+</table>
+<h3>Copy, in reading order</h3>
+<p>Tile: "Your note: …"; chip label "Your note: …. 1 from your client. To do". Photo bar: "To do 2", "Done 2", titles "Photos with a note you haven't marked done", "Photos whose notes you marked done". Bar title "All photos · notes to do". Photo view: "Retouch the stray hair on the left", "1 note from your client · Done". Panel footer: "1 note from your client", "Mark done D", "Done 1 Nov", "Reopen D". Selection: "Mark 2 done", toast "2 photos marked done · Undo". Errors: "Couldn't mark it done: …", "Couldn't reopen it: …" with Try again. Empty: "Nothing left to do here / Every note in this view is marked done." and "Nothing marked done here / Open a photo's notes and press Mark done, or press D in the photo view." Side panel: "Add a note for yourself".</p>
+<h3>States</h3>
+<p>No note (nothing shown), to do, done, reopened by a new client note, save pending, save failed, both filters empty, bulk pending, bulk undone. Offline: done is on this computer, so it works offline.</p>
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>Here</th></tr>
+<tr><td>Offline</td><td>Done and private notes are on this computer: they work offline. Client notes show as last loaded</td></tr>
+<tr><td>Signed out, no access, not found, crash, first launch</td><td>Not applicable: this is inside an album the gallery already loaded; nothing here calls the server</td></tr>
+</table>
+<h3>Removed</h3>
+<p>The separate outline-pen chip, the separate client-note chip, the 7 px dot on the lightbox Notes button and the "Your notes" toggle. Each is covered by the one note chip, the photo-view label or the To do / Done filters.</p>
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Photo tile</td><td>PhotoTile.vue, main.css</td><td>this session</td><td>Heart chip with tip; client-note chip opens notes; pen opens notes</td><td>Hearts unchanged. The two note chips are one; it still opens the notes</td></tr>
+<tr><td>Notes panel</td><td>NotesSidebar.vue</td><td>this session</td><td>Your note, client notes, Esc and arrows held</td><td>Same, plus the footer with Mark done</td></tr>
+<tr><td>Photo bar and filters</td><td>ImagesView.vue</td><td>this session</td><td>"Your notes" toggle</td><td>Replaced by To do / Done, which cover notes of both kinds</td></tr>
+<tr><td>Lightbox</td><td>ImagesView.vue</td><td>this session</td><td>Picked by, Notes button with a dot</td><td>Picked by unchanged; the dot is replaced by the note label</td></tr>
+</table>
+<h3>Mechanics</h3>
+<p>Unchanged: scoped styles in the view, PhotoSwipe chrome in its unscoped block, tile chips in <code>main.css</code>. Calls to main get plain arrays, never Vue proxies.</p>
+<h3>Look notes</h3>
+<p>Seen at 1280 and 960. "Handled it?" beside Mark done repeated the button; replaced by the client-note count. The photo-view label sits on the top edge of the photo, so it needs its own ground; see Critique caught. At 960 px the selection bar was already wider than its column before this session (Copy to folder scrolls out of view); flagged, not changed here.</p>
+<h3>Critique caught</h3>
+<table>
+<tr><th>Finding</th><th>Outcome</th></tr>
+<tr><td>Photo-view label unreadable over a bright photo (white on 12 % white; done at about 2:1)</td><td>Fixed: both states on the tile's ink glass; done is 75 % white with the tick. Recaptured on the bright photo (06)</td></tr>
+<tr><td>To do / Done had no visible pressed state</td><td>Fixed: the pressed style of the sets and Stack bursts</td></tr>
+<tr><td>"Mark N done" last in a bar that scrolls sideways; off screen at 960</td><td>Fixed: right after "Select all"</td></tr>
+<tr><td>Raw error text in the toast ("the server said no") for a local save</td><td>Fixed: "Couldn't mark it done on this computer" with Try again; the error goes to the console</td></tr>
+<tr><td>"Done 2" alone could read as a confirm button</td><td>Kept: with the pressed style and the "To do" beside it, the pair reads as filters; the group is labelled "Notes" for screen readers</td></tr>
+</table>
+<h3>Checks</h3>
+<p>Vitest: note state and filter (<code>utils/notes.test.ts</code>); migration 13 and done marks (<code>database.test.ts</code>, under Electron as Node). <code>check.py</code>: 0 errors; the three ASKs are app-wide and kept as in session 6. Captures: <code>/private/tmp/claude-501/-Users-darkwebplayer-Documents-Work-Jithin-Lumosnap-lumo-desktop/58ccef73-429b-4c65-a14f-3eecf6e6535f/scratchpad/done/shots-1280/</code> and <code>/private/tmp/claude-501/-Users-darkwebplayer-Documents-Work-Jithin-Lumosnap-lumo-desktop/58ccef73-429b-4c65-a14f-3eecf6e6535f/scratchpad/done/shots-960/</code>.</p>
+</article>
+
 <article id="session-2026-11-01-lists-removed">
 <h2>Session 2026-11-01 (8): client selection lists removed</h2>
 <p>Decision by the user: clients only give feedback, hearts and notes. The photographer builds each printed album themselves with the existing select and "Copy to folder". So the lists side of session 7 is gone: the "Albums for your client" editor, "Client selection" under Picks, per-client progress, reopen, "Picked by everyone", list filters, the list counts on tiles and in the lightbox, and the "Hearted by" heading (back to "Picked by"). The lists IPC, API calls and both lists modules are deleted. Kept from session 7: private notes on photos and on the album (migration 10), autosave, the "Your notes" filter and the tile and lightbox markers. Session 7 below stays as the record of what was tried.</p>

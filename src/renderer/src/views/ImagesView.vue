@@ -38,6 +38,7 @@ import {
   Image as ImageIcon
 } from 'lucide-vue-next'
 import PrivateNote from '../components/PrivateNote.vue'
+import { noteState, withNoteState, type NoteFilter } from '../utils/notes'
 import PhotoTile from '../components/PhotoTile.vue'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import type PhotoSwipe from 'photoswipe'
@@ -149,9 +150,11 @@ const clientNames = ref<string[]>([])
 const selectedClientName = ref<string>('')
 const isFavoritesLoaded = ref(false)
 const isLoadingFavorites = ref(false)
-// The photographer's private notes by photo, and the filter to photos that have one
+// The photographer's private notes by photo, when each photo was marked done, and the
+// filter to noted photos still to do (open) or done
 const privateNotes = ref<Record<number, string>>({})
-const notesOnly = ref(false)
+const doneAt = ref<Record<number, number>>({})
+const noteFilter = ref<NoteFilter>(null)
 
 // Share link
 const showShareModal = ref(false)
@@ -484,12 +487,25 @@ async function confirmDeleteSet(): Promise<void> {
 // Capture-time order when the album has moments, else upload order
 const orderedImages = computed(() => orderForGrouping(images.value))
 // Set, picks, then people: the scope tag chips count over
-const scopedImages = computed(() => {
+const peopleScoped = computed(() => {
   const inView = inSet(orderedImages.value, activeSet.value?.imageIds ?? null)
   const picked = showFavoritesOnly.value ? inView.filter((img) => img.isFavorite) : inView
-  const noted = notesOnly.value ? picked.filter((img) => privateNotes.value[img.id]) : picked
-  return withPeople(noted, activePeople.value)
+  return withPeople(picked, activePeople.value)
 })
+// Notes to do / done, over the view so far: the counts match what the filter shows
+const stateOf = (img: Image): ReturnType<typeof noteState> =>
+  noteState(img, privateNotes.value[img.id], doneAt.value[img.id])
+const noteCounts = computed(() => {
+  const n = { open: 0, done: 0 }
+  for (const img of peopleScoped.value) {
+    const st = stateOf(img)
+    if (st) n[st]++
+  }
+  return n
+})
+const scopedImages = computed(() =>
+  withNoteState(peopleScoped.value, noteFilter.value, privateNotes.value, doneAt.value)
+)
 const filteredImages = computed(() => withTags(scopedImages.value, activeTags.value))
 
 // Tag filter: chips for the most frequent tags in scope, all of them while searching
@@ -1095,7 +1111,7 @@ watch(
 )
 // A new set or filter starts from its first photo. The pinned bar stays put under the pointer.
 watch(
-  [activeSetId, activeTags, showFavoritesOnly, selectedClientName, activePeople, notesOnly],
+  [activeSetId, activeTags, showFavoritesOnly, selectedClientName, activePeople, noteFilter],
   () => {
     const el = scrollEl.value
     if (el && el.scrollTop > stuckAt.value) el.scrollTop = stuckAt.value
@@ -1137,7 +1153,11 @@ const barTitle = computed(() => {
   const withPeopleTitle = activePeople.value.length
     ? `${head} · with ${peopleNames(activePeople.value)}`
     : head
-  return notesOnly.value ? `${withPeopleTitle} · with your note` : withPeopleTitle
+  return noteFilter.value === 'open'
+    ? `${withPeopleTitle} · notes to do`
+    : noteFilter.value === 'done'
+      ? `${withPeopleTitle} · notes done`
+      : withPeopleTitle
 })
 
 const formattedEventDate = computed(() => {
@@ -1343,13 +1363,13 @@ const errText = (err: unknown): string => (err instanceof Error ? err.message : 
 const albumNote = ref('')
 const notesLoaded = ref(false)
 const showAlbumNote = ref(false)
-const notedCount = computed(() => images.value.filter((img) => privateNotes.value[img.id]).length)
 async function loadNotes(): Promise<void> {
   try {
     const r = await window.api.notes.get(albumId)
     if (!r.success) throw new Error(r.error)
     privateNotes.value = r.notes
     albumNote.value = r.albumNote
+    doneAt.value = r.done
     notesLoaded.value = true
   } catch (err) {
     toast(`Couldn't load your notes: ${errText(err)}`, { label: 'Try again', run: loadNotes })
@@ -1364,6 +1384,42 @@ async function saveImageNote(imageId: number, body: string): Promise<boolean> {
   privateNotes.value = next
   return true
 }
+// Done: the note on a photo is handled. One key for the list, so a second press can't race it.
+async function setDone(ids: number[], done: boolean): Promise<boolean> {
+  return run(ids.length === 1 ? `done:${ids[0]}` : 'done-bulk', async () => {
+    try {
+      // contextBridge can't clone Vue proxies: send a plain array
+      const r = await window.api.notes.setDone(albumId, [...ids], done)
+      if (!r.success) throw new Error(r.error)
+      const next = { ...doneAt.value }
+      for (const id of ids) {
+        if (done) next[id] = r.doneAt
+        else delete next[id]
+      }
+      doneAt.value = next
+      return true
+    } catch (err) {
+      // Stored on this computer only: the raw error (SQLite) helps no one; it goes to the log
+      console.error('notes:setDone', errText(err))
+      toast(`Couldn't ${done ? 'mark it done' : 'reopen it'} on this computer`, {
+        label: 'Try again',
+        run: () => void setDone(ids, done)
+      })
+      return false
+    }
+  })
+}
+const toggleDone = (img: Image): Promise<boolean> => setDone([img.id], stateOf(img) !== 'done')
+// Selected photos with a note still to do: the selection bar offers to mark them done
+const selectedOpen = computed(() =>
+  images.value.filter((img) => selectedImageIds.value.has(img.id) && stateOf(img) === 'open')
+)
+async function markSelectedDone(): Promise<void> {
+  const ids = selectedOpen.value.map((img) => img.id)
+  if (!(await setDone(ids, true))) return
+  toast(`${photos(ids.length)} marked done`, { label: 'Undo', run: () => void setDone(ids, false) })
+}
+
 async function saveAlbumNote(body: string): Promise<boolean> {
   const r = await window.api.notes.setAlbum(albumId, body)
   if (r.success) albumNote.value = body
@@ -1495,14 +1551,39 @@ function slideImage(pswp: PhotoSwipe): Image | undefined {
 }
 
 let lbTagsEl: HTMLElement | null = null
-// The lightbox's notes button carries a dot while the photo has your note
-let lbNotesBtn: HTMLElement | null = null
-function markLbNote(): void {
+// The lightbox bar names the photo's note (the start of yours, or the client's count) and
+// whether it is done; pressing it opens the notes
+let lbNoteEl: HTMLElement | null = null
+function renderLbNote(): void {
+  const el = lbNoteEl
   const pswp = lightbox?.pswp
   const img = pswp && slideImage(pswp)
-  lbNotesBtn?.classList.toggle('has-note', !!(img && privateNotes.value[img.id]))
+  const st = img ? stateOf(img) : null
+  if (!el) return
+  el.hidden = !st
+  if (!img || !st) return
+  const mine = privateNotes.value[img.id]?.trim().split('\n')[0]
+  const n = img.notesCount || 0
+  const text = mine || `${n} note${n === 1 ? '' : 's'} from your client`
+  el.classList.toggle('done', st === 'done')
+  el.innerHTML = ICON(
+    st === 'done'
+      ? '<path d="M20 6 9 17l-5-5"/>'
+      : mine
+        ? '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>'
+        : '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
+  )
+  const t = document.createElement('span')
+  t.className = 't'
+  t.textContent = text
+  el.append(t)
+  if (st === 'done') el.append(' · Done')
+  el.setAttribute(
+    'aria-label',
+    `${mine ? `Your note: ${privateNotes.value[img.id]}` : text}. ${st === 'done' ? 'Done' : 'To do'}. Open notes`
+  )
 }
-watch(() => privateNotes.value, markLbNote)
+watch([privateNotes, doneAt, images], renderLbNote)
 // PhotoSwipe traps focus in its root, so popovers move in there while it's open
 const lbRoot = ref<HTMLElement | null>(null)
 
@@ -1639,6 +1720,24 @@ function initLightbox(): void {
       }
     })
 
+    // The note, in words, before who picked it
+    ui.registerElement({
+      name: 'lb-note',
+      order: 7.9,
+      appendTo: 'bar',
+      tagName: 'button',
+      onInit: (el, pswp) => {
+        lbNoteEl = el
+        el.setAttribute('type', 'button')
+        el.className += ' status'
+        el.onclick = () => {
+          const image = slideImage(pswp)
+          if (image) openNotesSidebar(image)
+        }
+        pswp.on('change', renderLbNote)
+      }
+    })
+
     // Notes button opens the notes panel
     ui.registerElement({
       name: 'notes-button',
@@ -1647,10 +1746,6 @@ function initLightbox(): void {
       tagName: 'button',
       title: 'Notes',
       ariaLabel: 'Notes',
-      onInit: (el, pswp) => {
-        lbNotesBtn = el
-        pswp.on('change', markLbNote)
-      },
       html: ICON('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
       onClick: (_event, _el, pswp) => {
         const image = slideImage(pswp)
@@ -1680,7 +1775,7 @@ function initLightbox(): void {
     lbRoot.value = null
     lbTagsEl = null
     lbFacesBtn = null
-    lbNotesBtn = null
+    lbNoteEl = null
   })
 
   lightbox.init()
@@ -1703,6 +1798,28 @@ function onKeydown(e: KeyboardEvent): void {
     e.stopImmediatePropagation()
     if (e.key === 'Escape') closePop(true)
     return
+  }
+  // D: done / not done for the photo shown (not while typing a note)
+  const t = e.target as HTMLElement
+  if (
+    e.key.toLowerCase() === 'd' &&
+    !e.metaKey &&
+    !e.ctrlKey &&
+    !e.altKey &&
+    !t.closest?.('input, textarea, [contenteditable]')
+  ) {
+    const pswp = lightbox?.pswp
+    const img = showNotesSidebar.value
+      ? currentNotesImage.value
+      : lbRoot.value && pswp
+        ? slideImage(pswp)
+        : null
+    if (img && stateOf(img)) {
+      e.stopImmediatePropagation()
+      e.preventDefault()
+      void toggleDone(images.value.find((i) => i.id === img.id) ?? img)
+      return
+    }
   }
   if (!showNotesSidebar.value) return
   if (!['Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'z'].includes(e.key)) return
@@ -1843,7 +1960,7 @@ onUnmounted(() => {
             :save="saveAlbumNote"
           />
           <button v-else-if="notesLoaded" class="link album-note-add" @click="showAlbumNote = true">
-            <NotebookPen />Note for yourself
+            <NotebookPen />Add a note for yourself
           </button>
         </div>
 
@@ -2033,15 +2150,30 @@ onUnmounted(() => {
           <span class="t">{{ barTitle }}</span>
           <span class="m num">{{ nf(filteredImages.length) }}</span>
           <span class="g-bar-r">
-            <button
-              v-if="notedCount || notesOnly"
-              class="btn sm ghost"
-              :aria-pressed="notesOnly"
-              title="Photos with your note"
-              @click="notesOnly = !notesOnly"
+            <!-- Photos with a note, yours or the client's: still to do, or done -->
+            <span
+              v-if="noteCounts.open || noteCounts.done || noteFilter"
+              class="note-seg"
+              role="group"
+              aria-label="Notes"
             >
-              <NotebookPen />Your notes <span class="n num">{{ nf(notedCount) }}</span>
-            </button>
+              <button
+                class="btn sm ghost"
+                :aria-pressed="noteFilter === 'open'"
+                title="Photos with a note you haven't marked done"
+                @click="noteFilter = noteFilter === 'open' ? null : 'open'"
+              >
+                <NotebookPen />To do <span class="n num">{{ nf(noteCounts.open) }}</span>
+              </button>
+              <button
+                class="btn sm ghost"
+                :aria-pressed="noteFilter === 'done'"
+                title="Photos whose notes you marked done"
+                @click="noteFilter = noteFilter === 'done' ? null : 'done'"
+              >
+                <Check />Done <span class="n num">{{ nf(noteCounts.done) }}</span>
+              </button>
+            </span>
             <button
               v-if="hasBursts"
               class="btn sm ghost stack-toggle"
@@ -2061,6 +2193,16 @@ onUnmounted(() => {
               <span class="t num">{{ nf(selectedImageIds.size) }} selected</span>
               <button class="btn sm ghost" style="margin-left: auto" @click="selectAll">
                 Select all {{ nf(filteredImages.length) }}
+              </button>
+              <button
+                v-if="selectedOpen.length"
+                class="btn sm ghost"
+                :disabled="lockedFor('done-bulk')"
+                :aria-busy="pending === 'done-bulk'"
+                @click="markSelectedDone"
+              >
+                <span v-if="pending === 'done-bulk'" class="spin"></span><Check />Mark
+                {{ nf(selectedOpen.length) }} done
               </button>
               <template v-if="activeSet">
                 <button
@@ -2202,10 +2344,16 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div v-else-if="filteredImages.length === 0 && notesOnly" class="empty">
-          <h2>No photos with your note here</h2>
-          <p>Write one from a photo's notes. Only you see them.</p>
-          <button class="btn ghost" @click="notesOnly = false">Show all</button>
+        <div v-else-if="filteredImages.length === 0 && noteFilter === 'open'" class="empty">
+          <h2>Nothing left to do here</h2>
+          <p>Every note in this view is marked done.</p>
+          <button class="btn ghost" @click="noteFilter = null">Show all</button>
+        </div>
+
+        <div v-else-if="filteredImages.length === 0 && noteFilter === 'done'" class="empty">
+          <h2>Nothing marked done here</h2>
+          <p>Open a photo's notes and press Mark done, or press D in the photo view.</p>
+          <button class="btn ghost" @click="noteFilter = null">Show all</button>
         </div>
 
         <div v-else-if="filteredImages.length === 0 && activeTags.length" class="empty">
@@ -2279,6 +2427,7 @@ onUnmounted(() => {
                       :thumb="`file://${getThumbnailPath(tile.image.localFilePath)}`"
                       :selected="isTileSelected(tile)"
                       :my-note="privateNotes[tile.image.id]"
+                      :note-state="stateOf(tile.image)"
                       @open="handleImageClick($event, tile)"
                       @toggle="toggleTile(tile)"
                       @tip="showTip"
@@ -2793,6 +2942,11 @@ onUnmounted(() => {
       :image="currentNotesImage"
       :note="(currentNotesImage && privateNotes[currentNotesImage.id]) || ''"
       :save-note="saveImageNote"
+      :state="currentNotesImage && stateOf(currentNotesImage)"
+      :done-at="currentNotesImage ? doneAt[currentNotesImage.id] : undefined"
+      :busy="!!currentNotesImage && pending === `done:${currentNotesImage.id}`"
+      :locked="!!currentNotesImage && lockedFor(`done:${currentNotesImage.id}`)"
+      @toggle-done="currentNotesImage && toggleDone(currentNotesImage)"
       @close="closeNotesSidebar"
     />
 
@@ -2872,6 +3026,7 @@ onUnmounted(() => {
   }
 }
 .stack-toggle[aria-pressed='true'],
+.note-seg .btn[aria-pressed='true'],
 .set-bar .btn[aria-pressed='true'] {
   background: var(--brand-wash);
   border-color: var(--brand-soft);
@@ -3325,14 +3480,15 @@ onUnmounted(() => {
   gap: 6px;
   margin-top: 14px;
   font-size: 13px;
-  color: var(--ink-3);
+  color: var(--ink-2);
   font-weight: 400;
 }
 .album-note-add svg {
   width: 14px;
   height: 14px;
 }
-.g-bar-r {
+.g-bar-r,
+.note-seg {
   margin-left: auto;
   display: flex;
   gap: 4px;
@@ -3373,19 +3529,42 @@ onUnmounted(() => {
   color: oklch(80% 0 0);
   margin-right: 8px;
 }
-/* The notes button carries a dot while the photo has your private note */
-.pswp__button--notes-button.has-note {
-  position: relative;
+/* The note in words: white while there is something to do, dimmed once done */
+.pswp__lb-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  height: 32px;
+  margin-right: 12px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 99px;
+  background: oklch(21% 0.01 255 / 0.88);
+  color: white;
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
 }
-.pswp__button--notes-button.has-note::after {
-  content: '';
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: oklch(85% 0.06 255);
+.pswp__lb-note:hover {
+  background: oklch(30% 0.01 255 / 0.92);
+}
+.pswp__lb-note .t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pswp__lb-note.done {
+  color: oklch(100% 0 0 / 0.75);
+}
+.pswp__lb-note svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.pswp__lb-note[hidden] {
+  display: none;
 }
 .pswp__lb-picked[hidden] {
   display: none;

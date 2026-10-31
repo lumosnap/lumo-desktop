@@ -10,7 +10,12 @@ import type { TagConfig } from '../main/ipc/albums'
 import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
 
 type NotesResult =
-  | { success: true; notes: Record<number, string>; albumNote: string }
+  | {
+      success: true
+      notes: Record<number, string>
+      albumNote: string
+      done: Record<number, number>
+    }
   | { success: false; error: string }
 
 type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
@@ -237,6 +242,12 @@ const api = {
     get: (albumId: string): Promise<NotesResult> => ipcRenderer.invoke('notes:get', albumId),
     set: (albumId: string, imageId: number, body: string): Promise<Result> =>
       ipcRenderer.invoke('notes:set', albumId, imageId, body),
+    setDone: (
+      albumId: string,
+      imageIds: number[],
+      done: boolean
+    ): Promise<{ success: true; doneAt: number } | { success: false; error: string }> =>
+      ipcRenderer.invoke('notes:setDone', albumId, imageIds, done),
     setAlbum: (albumId: string, body: string): Promise<Result> =>
       ipcRenderer.invoke('notes:setAlbum', albumId, body)
   },
