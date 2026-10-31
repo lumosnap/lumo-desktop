@@ -416,7 +416,8 @@ svg.lucide {
   gap: 8px;
   align-items: center;
 }
-.seg button[aria-pressed='true'] {
+.seg button[aria-pressed='true'],
+.seg button[aria-selected='true'] {
   background: var(--card);
   color: var(--ink);
   box-shadow: var(--lift);
@@ -1031,7 +1032,7 @@ select.input {
 }
 .ph {
   position: relative;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: 4 / 5;
   border-radius: 10px;
   overflow: hidden;
   background: var(--inset);
@@ -1126,6 +1127,16 @@ select.input {
 }
 .chip.note .ok {
   color: var(--ok);
+}
+/* Your note sits bottom right; the hover name bar keeps clear of it */
+.ph .chip.mine {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 1;
+}
+.ph:has(.chip.mine) .fname {
+  padding-right: 64px;
 }
 .ph .fname {
   position: absolute;
@@ -2308,8 +2319,10 @@ dialog .toast {
   .app {
     grid-template-columns: 214px 1fr;
   }
+  /* 256, not 248: "Share with client" and its reload button need 207px inside the card's
+     padding; narrower, every card in the column overflowed and clipped its counts */
   .gallery {
-    grid-template-columns: 248px 1fr;
+    grid-template-columns: 256px 1fr;
   }
   .photos {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

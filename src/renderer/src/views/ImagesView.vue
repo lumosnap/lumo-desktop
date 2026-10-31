@@ -166,6 +166,7 @@ const showShareNext = ref(false)
 // Notes panel
 const showNotesSidebar = ref(false)
 const currentNotesImage = ref<Image | null>(null)
+const notesTab = ref<'client' | 'mine'>('client')
 let notesReturnFocus: HTMLElement | null = null
 
 // Lightbox: slides come from this array, since tiles may be virtualized away
@@ -503,6 +504,15 @@ const noteCounts = computed(() => {
   }
   return n
 })
+const noteRows = [
+  {
+    state: 'open',
+    label: 'To do',
+    icon: NotebookPen,
+    title: "Photos with a note you haven't marked done"
+  },
+  { state: 'done', label: 'Done', icon: Check, title: 'Photos whose notes you marked done' }
+] as const
 const scopedImages = computed(() =>
   withNoteState(peopleScoped.value, noteFilter.value, privateNotes.value, doneAt.value)
 )
@@ -1030,10 +1040,12 @@ const scrollMargin = computed(
   () => stuckAt.value - (grid.value.headers.length ? HEADER_H + GRID_GAP : 0)
 )
 
+// Portrait 4:5 tiles, like the client gallery: vertical photos keep their faces, and the
+// photographer sees the crop their client sees
 const tileH = (): number =>
   galleryWidth.value
-    ? (((galleryWidth.value - GRID_GAP * (columns.value - 1)) / columns.value) * 2) / 3
-    : 160
+    ? (((galleryWidth.value - GRID_GAP * (columns.value - 1)) / columns.value) * 5) / 4
+    : 240
 
 // The moment header at or above the first visible row stays rendered so it can stick.
 // Set inside rangeExtractor, read by virtualRows after the virtualizer notifies.
@@ -1153,11 +1165,7 @@ const barTitle = computed(() => {
   const withPeopleTitle = activePeople.value.length
     ? `${head} · with ${peopleNames(activePeople.value)}`
     : head
-  return noteFilter.value === 'open'
-    ? `${withPeopleTitle} · notes to do`
-    : noteFilter.value === 'done'
-      ? `${withPeopleTitle} · notes done`
-      : withPeopleTitle
+  return withPeopleTitle
 })
 
 const formattedEventDate = computed(() => {
@@ -1362,10 +1370,20 @@ const errText = (err: unknown): string => (err instanceof Error ? err.message : 
 // Private notes: the photographer's own, on this computer only
 const albumNote = ref('')
 const notesLoaded = ref(false)
-watch(showNotesSidebar, (open) => {
-  if (lightbox?.pswp) lightbox.pswp.options.trapFocus = !open
-})
 const showAlbumNote = ref(false)
+const notesError = ref(false)
+// Anything to show in the notes card; else it stays one line
+const hasNotes = computed(
+  () =>
+    !!albumNote.value ||
+    showAlbumNote.value ||
+    !!noteFilter.value ||
+    noteCounts.value.open + noteCounts.value.done > 0
+)
+function retryNotes(): void {
+  notesError.value = false
+  void loadNotes()
+}
 async function loadNotes(): Promise<void> {
   try {
     const r = await window.api.notes.get(albumId)
@@ -1374,7 +1392,9 @@ async function loadNotes(): Promise<void> {
     albumNote.value = r.albumNote
     doneAt.value = r.done
     notesLoaded.value = true
+    notesError.value = false
   } catch (err) {
+    notesError.value = !notesLoaded.value
     toast(`Couldn't load your notes: ${errText(err)}`, { label: 'Try again', run: loadNotes })
   }
 }
@@ -1498,8 +1518,9 @@ async function showAlbumFolder(): Promise<void> {
   if (!result.success) toast(`Couldn't open the folder: ${result.error}`)
 }
 
-function openNotesSidebar(image: Image): void {
+function openNotesSidebar(image: Image, tab: 'client' | 'mine' = 'client'): void {
   notesReturnFocus = document.activeElement as HTMLElement | null
+  notesTab.value = tab
   currentNotesImage.value = image
   showNotesSidebar.value = true
 }
@@ -1733,9 +1754,11 @@ function initLightbox(): void {
         lbNoteEl = el
         el.setAttribute('type', 'button')
         el.className += ' status'
+        // Opens on the tab the label names: your note if it shows yours, else the client's
         el.onclick = () => {
           const image = slideImage(pswp)
-          if (image) openNotesSidebar(image)
+          if (image)
+            openNotesSidebar(image, privateNotes.value[image.id]?.trim() ? 'mine' : 'client')
         }
         pswp.on('change', renderLbNote)
       }
@@ -1774,14 +1797,11 @@ function initLightbox(): void {
   lightbox.on('close', scrollToCurrent)
   lightbox.on('afterInit', () => {
     lbRoot.value = lightbox?.pswp?.element ?? null
-    // The notes panel sits outside the lightbox: PhotoSwipe's focus trap would pull focus back
-    // out of its text box, so the photographer couldn't type a note
-    if (lightbox?.pswp) lightbox.pswp.options.trapFocus = !showNotesSidebar.value
   })
-  // Typing in a field (the note box) must not move, zoom or close the lightbox
+  // Typing in a field, or keys in the notes panel (its tabs), must not move, zoom or close the lightbox
   lightbox.on('keydown', (e) => {
     const t = e.originalEvent.target as HTMLElement | null
-    if (t?.closest?.('input, textarea, [contenteditable]')) e.preventDefault()
+    if (t?.closest?.('input, textarea, [contenteditable], .notes')) e.preventDefault()
   })
   lightbox.on('destroy', () => {
     if (lbRoot.value) closePop()
@@ -1836,6 +1856,8 @@ function onKeydown(e: KeyboardEvent): void {
   }
   if (!showNotesSidebar.value) return
   if (!['Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'z'].includes(e.key)) return
+  // Keys inside the panel are its own (tabs, the caret); the lightbox filter below holds them
+  if (e.key !== 'Escape' && t.closest?.('.notes')) return
   e.stopImmediatePropagation()
   if (e.key === 'Escape') closeNotesSidebar()
 }
@@ -1962,19 +1984,6 @@ onUnmounted(() => {
               <RefreshCw />
             </button>
           </div>
-          <!-- The photographer's own note on the shoot; only they see it -->
-          <PrivateNote
-            v-if="notesLoaded && (albumNote || showAlbumNote)"
-            class="album-note"
-            :value="albumNote"
-            label="Your note on this album"
-            placeholder="Venue, the couple's wishes, what's left to edit…"
-            :autofocus="showAlbumNote && !albumNote"
-            :save="saveAlbumNote"
-          />
-          <button v-else-if="notesLoaded" class="link album-note-add" @click="showAlbumNote = true">
-            <NotebookPen />Add a note for yourself
-          </button>
         </div>
 
         <div class="card" :style="clientNames.length ? 'padding-bottom:8px' : ''">
@@ -2155,6 +2164,64 @@ onUnmounted(() => {
             </div>
           </template>
         </div>
+
+        <!-- Notes: the photographer's own, and the photos whose notes are still to do. One quiet
+             line until there is something in it. -->
+        <div v-if="notesError" class="card notes-card quiet" role="status">
+          <span class="notes-line bad">Couldn't load your notes.</span>
+          <button class="link" @click="retryNotes">Try again</button>
+        </div>
+        <div v-else-if="!notesLoaded" class="card notes-card quiet" aria-busy="true">
+          <span class="notes-line"><span class="spin"></span>Notes</span>
+        </div>
+        <div v-else-if="!hasNotes" class="card notes-card quiet">
+          <button class="link notes-add" @click="showAlbumNote = true">
+            <NotebookPen />Add a note for yourself
+          </button>
+        </div>
+        <div v-else class="card notes-card">
+          <div class="faces-h">Notes</div>
+          <!-- Photos with a note, yours or the client's: still to do, or done -->
+          <div v-if="noteCounts.open || noteCounts.done || noteFilter" class="people note-rows">
+            <div
+              v-for="r in noteRows"
+              :key="r.state"
+              class="person-row"
+              :class="{ on: noteFilter === r.state }"
+            >
+              <button
+                class="person"
+                :aria-pressed="noteFilter === r.state"
+                :title="r.title"
+                @click="noteFilter = noteFilter === r.state ? null : r.state"
+              >
+                <span class="avatar"><component :is="r.icon" /></span>{{ r.label }}
+                <span class="n num">{{ nf(noteCounts[r.state]) }}</span>
+              </button>
+              <button
+                v-if="noteFilter === r.state"
+                class="icon-btn sm plain link-face"
+                :aria-label="`Show all photos, not only ${r.label.toLowerCase()}`"
+                title="Show all"
+                @click="noteFilter = null"
+              >
+                <X />
+              </button>
+            </div>
+          </div>
+          <PrivateNote
+            v-if="albumNote || showAlbumNote"
+            class="album-note"
+            :value="albumNote"
+            label="On this album"
+            placeholder="Venue, the couple's wishes, what's left to edit…"
+            :autofocus="showAlbumNote && !albumNote"
+            :save="saveAlbumNote"
+          />
+          <button v-else class="link notes-add" @click="showAlbumNote = true">
+            <NotebookPen />Add a note for yourself
+          </button>
+        </div>
       </div>
 
       <section class="g-main" aria-label="Photos" :style="{ '--head-h': `${headH}px` }">
@@ -2162,31 +2229,17 @@ onUnmounted(() => {
         <div v-if="!isSelectionMode" class="g-bar">
           <span class="t">{{ barTitle }}</span>
           <span class="m num">{{ nf(filteredImages.length) }}</span>
+          <!-- The notes filter, said where the photos are, and undone in one click -->
+          <button
+            v-if="noteFilter"
+            class="btn sm ghost f-on"
+            :aria-label="`Notes ${noteFilter === 'open' ? 'to do' : 'done'}: show all photos`"
+            @click="noteFilter = null"
+          >
+            <component :is="noteFilter === 'open' ? NotebookPen : Check" />Notes
+            {{ noteFilter === 'open' ? 'to do' : 'done' }}<X class="x" />
+          </button>
           <span class="g-bar-r">
-            <!-- Photos with a note, yours or the client's: still to do, or done -->
-            <span
-              v-if="noteCounts.open || noteCounts.done || noteFilter"
-              class="note-seg"
-              role="group"
-              aria-label="Notes"
-            >
-              <button
-                class="btn sm ghost"
-                :aria-pressed="noteFilter === 'open'"
-                title="Photos with a note you haven't marked done"
-                @click="noteFilter = noteFilter === 'open' ? null : 'open'"
-              >
-                <NotebookPen />To do <span class="n num">{{ nf(noteCounts.open) }}</span>
-              </button>
-              <button
-                class="btn sm ghost"
-                :aria-pressed="noteFilter === 'done'"
-                title="Photos whose notes you marked done"
-                @click="noteFilter = noteFilter === 'done' ? null : 'done'"
-              >
-                <Check />Done <span class="n num">{{ nf(noteCounts.done) }}</span>
-              </button>
-            </span>
             <button
               v-if="hasBursts"
               class="btn sm ghost stack-toggle"
@@ -2445,7 +2498,7 @@ onUnmounted(() => {
                       @toggle="toggleTile(tile)"
                       @tip="showTip"
                       @untip="tip = null"
-                      @notes="openNotesSidebar(tile.image)"
+                      @notes="(tab) => openNotesSidebar(tile.image, tab)"
                       @reveal="showOriginalInFolder(tile.image)"
                     />
                   </div>
@@ -2959,6 +3012,7 @@ onUnmounted(() => {
       :done-at="currentNotesImage ? doneAt[currentNotesImage.id] : undefined"
       :busy="!!currentNotesImage && pending === `done:${currentNotesImage.id}`"
       :locked="!!currentNotesImage && lockedFor(`done:${currentNotesImage.id}`)"
+      :open-on="notesTab"
       @toggle-done="currentNotesImage && toggleDone(currentNotesImage)"
       @close="closeNotesSidebar"
     />
@@ -3039,7 +3093,6 @@ onUnmounted(() => {
   }
 }
 .stack-toggle[aria-pressed='true'],
-.note-seg .btn[aria-pressed='true'],
 .set-bar .btn[aria-pressed='true'] {
   background: var(--brand-wash);
   border-color: var(--brand-soft);
@@ -3484,24 +3537,89 @@ onUnmounted(() => {
   color: var(--ink-2);
 }
 
-.album-note {
-  margin-top: 16px;
+/* Notes: a single quiet line while empty, so it never competes with People or the photos */
+.notes-card {
+  padding: 16px 24px 20px;
 }
-.album-note-add {
+.notes-card.quiet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 24px;
+}
+.notes-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.notes-line .spin {
+  width: 12px;
+  height: 12px;
+}
+.notes-line.bad {
+  color: var(--bad);
+}
+.notes-card.quiet .link {
+  font-size: 13px;
+}
+.album-note {
+  margin-top: 4px;
+}
+.notes-add {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: 14px;
+  margin-top: 4px;
   font-size: 13px;
   color: var(--ink-2);
   font-weight: 400;
 }
-.album-note-add svg {
+.notes-card.quiet .notes-add {
+  margin: 0;
+}
+.notes-add svg {
   width: 14px;
   height: 14px;
 }
-.g-bar-r,
-.note-seg {
+/* The work list first: it is what the photographer opens this card for; the album note is
+   reference. Rows run edge to edge like Picked by. */
+.note-rows {
+  margin: 4px -24px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.note-rows .person-row:last-child {
+  border-radius: 0;
+}
+.note-rows .avatar svg {
+  width: 16px;
+  height: 16px;
+}
+/* Selected reads as selected: the wash, the brand ink, and an × to undo it */
+.note-rows .person-row.on .person {
+  color: var(--brand);
+  font-weight: 500;
+}
+.note-rows .person-row.on .avatar {
+  background: var(--brand);
+  color: var(--card);
+}
+.note-rows .person-row.on .link-face {
+  opacity: 1;
+  color: var(--brand);
+}
+.g-bar .f-on {
+  background: var(--brand-wash);
+  border-color: var(--brand-soft);
+  color: var(--brand);
+}
+.g-bar .f-on .x {
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+}
+.g-bar-r {
   margin-left: auto;
   display: flex;
   gap: 4px;

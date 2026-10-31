@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onBeforeUnmount, onMounted, useId } from 'vue'
-import { Lock, Check } from 'lucide-vue-next'
+import { Check, EyeOff } from 'lucide-vue-next'
 import { useAutosave } from '../composables/useAutosave'
 import { toast } from '../composables/useToast'
 
@@ -54,7 +54,7 @@ defineExpose({ flush })
 
 <template>
   <div class="pnote" :class="status">
-    <label :for="id" class="pnote-l"><Lock />{{ label }}</label>
+    <label :for="id" class="pnote-l">{{ label }}</label>
     <textarea
       :id="id"
       ref="el"
@@ -63,16 +63,17 @@ defineExpose({ flush })
       rows="2"
       maxlength="5000"
       :placeholder="placeholder"
+      :aria-describedby="`${id}-s`"
       @input="onInput"
       @blur="flush"
     ></textarea>
-    <div class="pnote-s" aria-live="polite">
+    <div :id="`${id}-s`" class="pnote-s" aria-live="polite">
       <template v-if="status === 'saving'"><span class="spin"></span></template>
-      <template v-else-if="status === 'saved'"><Check />Saved on this computer</template>
+      <template v-else-if="status === 'saved'"><Check />Saved. Only you see this.</template>
       <template v-else-if="status === 'error'">
         Couldn't save. <button class="link" @click="flush">Try again</button>
       </template>
-      <template v-else>Only you see this</template>
+      <template v-else><EyeOff />Only you see this. Not your client.</template>
     </div>
   </div>
 </template>
@@ -95,7 +96,11 @@ defineExpose({ flush })
   height: 14px;
 }
 /* A writing surface, not a form field: no fixed height, reads like the note it is */
+/* Card-white with a drawn edge, so it reads as a place to write, not a greyed-out field */
 .pnote textarea {
+  cursor: text;
+  background-color: var(--card);
+  border-color: var(--line-2);
   height: auto;
   min-height: 64px;
   padding: 10px 14px;
@@ -110,6 +115,16 @@ defineExpose({ flush })
   gap: 6px;
   min-height: 18px;
   font-size: 12px;
+  color: var(--ink-3);
+}
+.pnote textarea:hover {
+  border-color: var(--ink-3);
+}
+/* Scoped rules outrank .input:focus, so the focus edge is restated here */
+.pnote textarea:focus {
+  border-color: var(--brand);
+}
+.pnote textarea::placeholder {
   color: var(--ink-3);
 }
 .pnote-s .spin {

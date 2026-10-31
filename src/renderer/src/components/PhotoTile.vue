@@ -36,7 +36,7 @@ const emit = defineEmits<{
   toggle: []
   tip: [e: Event, names: string[]]
   untip: []
-  notes: []
+  notes: [tab: 'client' | 'mine']
   reveal: []
 }>()
 
@@ -115,29 +115,28 @@ onMounted(() => {
       >
         <Heart />{{ image.favoritedBy.length }}
       </span>
-      <!-- Every note on the photo in one chip: ink while there is work to do, plain once done -->
+      <!-- The client's notes come first: top right with the hearts. Ink while to do, plain once done -->
       <button
-        v-if="noteState"
+        v-if="noteState && image.notesCount"
         class="chip note"
         :class="noteState"
-        :aria-label="
-          [
-            myNote && `Your note: ${myNote}`,
-            image.notesCount && `${image.notesCount} from your client`,
-            noteState === 'done' ? 'Done' : 'To do'
-          ]
-            .filter(Boolean)
-            .join('. ')
-        "
-        :title="myNote ? `Your note: ${myNote}` : undefined"
-        @click.stop="emit('notes')"
+        :aria-label="`${image.notesCount} from your client. ${noteState === 'done' ? 'Done' : 'To do'}`"
+        @click.stop="emit('notes', 'client')"
       >
-        <Check v-if="noteState === 'done'" class="ok" /><NotebookPen v-if="myNote" /><template
-          v-if="image.notesCount"
-          ><MessageSquare />{{ image.notesCount }}</template
-        >
+        <Check v-if="noteState === 'done'" class="ok" /><MessageSquare />{{ image.notesCount }}
       </button>
     </div>
+    <!-- Your own note: bottom right, apart from the client's. On hover it rises above the name. -->
+    <button
+      v-if="noteState && myNote"
+      class="chip note mine"
+      :class="noteState"
+      :aria-label="`Your note: ${myNote}. ${noteState === 'done' ? 'Done' : 'To do'}`"
+      :title="`Your note: ${myNote}`"
+      @click.stop="emit('notes', 'mine')"
+    >
+      <Check v-if="noteState === 'done'" class="ok" /><NotebookPen />
+    </button>
     <span v-if="status === 'Processing'" class="chip proc">
       <span class="spin brand now" style="width: 12px; height: 12px; border-width: 1.5px"></span
       >Processing

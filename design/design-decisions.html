@@ -174,6 +174,59 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-11-01-notes-card">
+<h2>Session 2026-11-01 (10): notes get their own card; the notes panel gets tabs</h2>
+<p>Existing work, Revamp level, component scope: the album side panel, the photo bar and the private note box. The look is kept. Screens: 960 px to 2560 px, desktop only (Electron). User feedback: the To do / Done buttons got in the way at the top right of the grid, did not look selected, and needed a second click to undo; the lock on "Your note" made the box look locked.</p>
+<ul>
+<li><b>For:</b> the photographer, working through notes between edits.</li>
+<li><b>Job:</b> see what is still to do, show only those photos, get back to all photos in one click, and keep a note on the shoot.</li>
+<li><b>Direction (kept):</b> a work sheet beside the prints. Notes now sit in the side panel with the other "what to show" controls (Picks, Picked by, People), not in the photo bar.</li>
+</ul>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Notes card</td><td>Its own card under People. With no notes at all it is one quiet line: "Add a note for yourself". Else a "Notes" label, then the To do / Done rows, then the album note</td><td>Calm when empty. The work list comes first because it is what the photographer opens the card for; the album note is reference</td><td class="rejected">The album note in the album card (it competed with Share); the filters in the photo bar</td></tr>
+<tr><td>To do / Done rows</td><td>The rows of "Picked by": icon disc, word, count. A row shows only when its count is above zero or it is the active filter</td><td>The side panel already has one way to say "show only these"; reuse it, so selected looks the same everywhere</td><td class="rejected">A segmented control (it has no "none selected" state)</td></tr>
+<tr><td>Selected</td><td>Brand wash on the row, brand ink and weight 500 on the word, the disc filled brand with a white icon, and an × at the row end</td><td>The ghost button with a wash was too faint to read as on. The × gives the one-click reset in place</td><td class="rejected">Click the same button again as the only way out</td></tr>
+<tr><td>Photo bar</td><td>When a notes filter is on, a chip "Notes to do ×" (or "Notes done ×") sits after the count; one click shows all. The title no longer adds "· notes to do"</td><td>The state is said where the photos are, and undone there too</td><td class="rejected">Text in the title only (no way to undo it there)</td></tr>
+<tr><td>Private note label</td><td>No lock. The label is plain ("Your note", "On this album"). The line under the box: eye-off icon and "Only you see this. Not your client."; after a save "Saved. Only you see this."</td><td>A lock reads as "locked, not editable". The promise is about who sees it, so say that. The saved line keeps the promise in view</td><td class="rejected">The lock icon; "Saved on this computer" alone (it hid the privacy line for good)</td></tr>
+<tr><td>Note box</td><td>Card white with a drawn edge (line-2), darker edge on hover, brand edge and wash ring on focus, text cursor</td><td>The grey inset box with no edge looked like a disabled field</td><td class="rejected">The shared grey input look</td></tr>
+<tr><td>Notes panel tabs</td><td>Two tabs on the app's segmented control: "Client N" (the default) and "Your notes" with a brand dot when there is a note. ARIA tabs: arrows, Home and End move and open; one tab stop. The note tab stays mounted, so a half-typed note survives a tab switch. A tile's own-note chip and the photo-view label for your note open on "Your notes"</td><td>The client's words come first; the count and the dot keep the other tab from being missed</td><td class="rejected">One long list with both (the user found them mixed)</td></tr>
+<tr><td>Done</td><td>A switch "Done" at the top of "Your notes", above the note; green track when on, "Marked 1 Nov" or "Press D" at the right; disabled with "Nothing to mark yet" when the photo has no note. The footer button is gone. D and "Mark N done" are unchanged</td><td>"Mark done" at the foot read like a save button. A switch says a state that is on or off</td><td class="rejected">The footer button; a checkbox (reads as a form field)</td></tr>
+<tr><td>Tile chips</td><td>The client-note chip stays top right with the hearts and the burst badge. Your own note is a separate chip at the bottom right; the hover name bar keeps 64 px clear for it. Both keep ink for to do and the tick for done</td><td>The client's notes take precedence. Bottom right is free: Processing and Failed sit bottom left</td><td class="rejected">One combined chip top right</td></tr>
+<tr><td>Side column at 960 to 1180 px</td><td>256 px, not 248</td><td>The Share row needs 207 px inside the card padding; at 248 every card overflowed and clipped its counts and the new ×</td><td class="rejected">Shrinking the Share button</td></tr>
+</table>
+<h3>States</h3>
+<p>Loading: the card shows "Notes" with the small spinner. Error: "Couldn't load your notes." with Try again in the card (the toast stays too). No notes: one line. Notes, filter on To do, filter on Done, editing, saving, saved, save failed (unchanged).</p>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th></tr>
+<tr><td>Filter on / off (row, ×, chip)</td><td>none</td><td>instant, as other filters</td></tr>
+<tr><td>Card grows from one line</td><td>none</td><td>instant; the side panel scrolls if it gets long</td></tr>
+</table>
+<h3>Copy, in reading order</h3>
+<p>Card: "Add a note for yourself"; "Notes"; "To do 2", "Done 2"; × "Show all photos, not only to do"; "On this album"; placeholder "Venue, the couple's wishes, what's left to edit…"; "Only you see this. Not your client."; "Saved. Only you see this."; "Couldn't load your notes. Try again". Photo bar: "Notes to do ×", "Notes done ×".</p>
+<h3>Behaviour against the baseline</h3>
+<p>Kept: autosave and its states, D in the photo view and the panel, "Mark N done" with Undo, tile note chips, the photo-view note label, client notes in the panel, To do / Done composed with sets, Picks, people and tags, both empty states with Show all. Fixed on the way: the notes panel in the photo view could not keep focus. PhotoSwipe adds its focus trap on the document when it opens, and changing <code>trapFocus</code> later does nothing, so typing went to the photo view (a "d" marked the photo done). The panel now stops <code>focusin</code> from reaching the document; the two dead <code>trapFocus</code> toggles are removed. Proved headless: typed text lands in the box, "d" does not toggle done, Esc closes only the panel. With tabs, keys inside the panel go to the panel (the lightbox ignores them), so the arrow keys move between tabs and the photo stays put (checked: still 1 / 241).</p>
+<h3>Critique caught</h3>
+<table>
+<tr><th>Finding</th><th>Outcome</th></tr>
+<tr><td>"Saved on this computer" replaced the privacy line for good</td><td>Fixed: "Saved. Only you see this."</td></tr>
+<tr><td>Album note pushed To do / Done below the fold at 1280</td><td>Fixed: rows first, note after</td></tr>
+<tr><td>Loading said "Your notes", a different name</td><td>Fixed: "Notes"</td></tr>
+<tr><td>A redundant "Show all" link in the card header beside the ×</td><td>Removed (found in the first look)</td></tr>
+<tr><td>Selected row runs edge to edge</td><td>Kept: Picked by rows do the same; one row style in the panel</td></tr>
+<tr><td>To do uses the pen, like "Add a note"</td><td>Kept: the pen is the open-note mark on the tiles; the row and the chip match</td></tr>
+<tr><td>"All photos 2" while the "All photos" set chip is on</td><td>Kept: tags filter the same way; the notes chip beside the count says why it is 2</td></tr>
+<tr><td>"Add a note for yourself" has no input look</td><td>Kept: the brief asks for one quiet line while empty</td></tr>
+<tr><td>Photo-view scrim light at 960; the photo top edge meets the counter</td><td>Flagged, not changed: PhotoSwipe chrome, out of this scope</td></tr>
+</table>
+<h3>Also in this commit</h3>
+<p>Photo tiles are 4:5 like the client gallery (<code>.ph</code> aspect ratio and <code>tileH</code>), a change by the coordinator. Seen at 1280 and 960: the chips sit well and the rows do not overlap.</p>
+<h3>Checks</h3>
+<p>Typecheck, Vitest and the build pass. Captures: <code>/private/tmp/claude-501/-Users-darkwebplayer-Documents-Work-Jithin-Lumosnap-lumo-desktop/58ccef73-429b-4c65-a14f-3eecf6e6535f/scratchpad/notescard/shots-1280/</code> and <code>/private/tmp/claude-501/-Users-darkwebplayer-Documents-Work-Jithin-Lumosnap-lumo-desktop/58ccef73-429b-4c65-a14f-3eecf6e6535f/scratchpad/notescard/shots-960/</code>.</p>
+</article>
+
 <article id="session-2026-11-01-done">
 <h2>Session 2026-11-01 (9): see the notes, and mark them done</h2>
 <p>Existing work, Revamp level, component scope inside the album view: how a note on a photo shows, and a done state per photo. The look is kept. Screens: 960 px to 2560 px, desktop only (Electron).</p>
