@@ -25,6 +25,8 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  Tag,
+  SlidersHorizontal,
   Image as ImageIcon
 } from 'lucide-vue-next'
 import PhotoTile from '../components/PhotoTile.vue'
@@ -45,7 +47,19 @@ import {
   type Row,
   type Tile
 } from '../utils/grid'
-import { tagLabel, tagCounts, withTags, searchTags } from '../utils/tags'
+import {
+  tagLabel,
+  tagCounts,
+  tagCountsFor,
+  withTags,
+  searchTags,
+  slugify,
+  groupVocab,
+  PRESETS,
+  presetSlugs,
+  type AlbumTagConfig,
+  type VocabTag
+} from '../utils/tags'
 
 const route = useRoute()
 const networkStore = useNetworkStore()
@@ -236,15 +250,18 @@ type Pop =
   | { kind: 'set'; set: AlbumSet }
   | { kind: 'add' }
   | { kind: 'name'; label: string; name: string; submit: (name: string) => Promise<boolean> }
+  | { kind: 'tags'; ids: number[]; query: string }
 const pop = ref<Pop | null>(null)
 const popStyle = ref<Record<string, string>>({})
 const popEl = ref<HTMLElement>()
 const popBusy = ref(false)
+let popReturn: HTMLElement | null = null // focus goes back here on Esc or after an action
 
 async function openPop(p: Pop, e?: Event): Promise<void> {
   if (e) {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    const up = r.bottom + 240 > innerHeight
+    popReturn = e.currentTarget as HTMLElement
+    const r = popReturn.getBoundingClientRect()
+    const up = r.bottom + (p.kind === 'tags' ? 420 : 240) > innerHeight
     popStyle.value = {
       left: `${Math.max(8, Math.min(r.left, innerWidth - 288))}px`,
       ...(up ? { bottom: `${innerHeight - r.top + 6}px` } : { top: `${r.bottom + 6}px` })
@@ -255,8 +272,13 @@ async function openPop(p: Pop, e?: Event): Promise<void> {
   ;(popEl.value?.querySelector('input') ?? popEl.value?.querySelector('button'))?.focus()
 }
 
-function closePop(): void {
+function closePop(restoreFocus = false): void {
   pop.value = null
+  if (restoreFocus && popReturn?.isConnected) popReturn.focus()
+}
+// Scrolling the page closes a popover; scrolling inside one (the tag list) doesn't
+function onDocScroll(e: Event): void {
+  if (!(e.target as Element).closest?.('.menu')) closePop()
 }
 
 // Without an event the prompt takes the place of the popover that's open
@@ -285,7 +307,7 @@ function onDocPointer(e: PointerEvent): void {
   if (pop.value && !t.closest?.('.menu, [aria-haspopup]')) closePop()
 }
 function onDocKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') closePop()
+  if (e.key === 'Escape' && pop.value) closePop(true)
 }
 
 function newSet(e: Event): void {
@@ -409,7 +431,9 @@ const filteredImages = computed(() => withTags(scopedImages.value, activeTags.va
 // Tag filter: chips for the most frequent tags in scope, all of them while searching
 const activeTags = ref<string[]>([])
 const tagQuery = ref('')
-const hasTags = computed(() => images.value.some((img) => img.tags?.length))
+const hasTags = computed(
+  () => images.value.some((img) => img.tags?.length) || !!tagConfig.value?.enabled
+)
 const tagChips = computed(() => {
   const counts = tagCounts(scopedImages.value)
   const shown = tagQuery.value ? searchTags(counts, tagQuery.value) : counts.slice(0, 10)
@@ -427,6 +451,140 @@ function toggleTag(slug: string): void {
 function clearTags(): void {
   activeTags.value = []
   tagQuery.value = ''
+}
+
+// Album tag set and manual tags
+const tagsApi = window.api.tags
+const tagConfig = ref<AlbumTagConfig | null>(null)
+const vocabBySlug = computed(() => new Map(tagConfig.value?.vocabulary.map((t) => [t.slug, t])))
+const labelOf = (slug: string): string => vocabBySlug.value.get(slug)?.label ?? tagLabel(slug)
+
+async function loadTagConfig(): Promise<void> {
+  try {
+    tagConfig.value = await tagsApi.getAlbumConfig(albumId)
+  } catch {
+    // no tag set: the picker and album tags button stay hidden
+  }
+}
+
+async function editTag(op: 'add' | 'remove', ids: number[], slug: string): Promise<boolean> {
+  try {
+    const r = await tagsApi[op](albumId, ids, slug)
+    if (!r.success) throw new Error(r.error)
+  } catch (err) {
+    toast(`Couldn't ${op} “${labelOf(slug)}”: ${err instanceof Error ? err.message : String(err)}`)
+    return false
+  }
+  // Show it now; main's refetch (albums.onAnalyzed) confirms it
+  const on = new Set(ids)
+  images.value = images.value.map((img) => {
+    if (!on.has(img.id)) return img
+    const rest = (img.tags ?? []).filter((t) => t !== slug)
+    return { ...img, tags: op === 'add' ? [...rest, slug] : rest }
+  })
+  return true
+}
+
+// Tag picker (popover): tags on the photos, then the album's tag set by category, then custom
+const pickPop = computed(() => (pop.value?.kind === 'tags' ? pop.value : null))
+const pickPresent = computed(() => {
+  const p = pickPop.value
+  return p ? searchTags(tagCountsFor(images.value, new Set(p.ids)), p.query) : []
+})
+const pickGroups = computed(() => {
+  const p = pickPop.value
+  const c = tagConfig.value
+  if (!p || !c) return []
+  const present = new Set(tagCountsFor(images.value, new Set(p.ids)).map(([t]) => t))
+  const vocab = c.enabled ? c.vocabulary.filter((t) => c.enabled!.includes(t.slug)) : c.vocabulary
+  const groups = groupVocab(
+    vocab.filter((t) => !present.has(t.slug)),
+    p.query
+  )
+  // Custom tags already used in this album
+  const custom = searchTags(tagCounts(images.value), p.query)
+    .filter(([t]) => !vocabBySlug.value.has(t) && !present.has(t))
+    .map(([slug]) => ({ slug, label: tagLabel(slug), category: 'custom' }))
+  return custom.length ? [...groups, { category: 'custom', label: 'Custom', tags: custom }] : groups
+})
+const pickCustom = computed(() => {
+  const p = pickPop.value
+  const slug = p ? slugify(p.query) : ''
+  if (!slug || pickPresent.value.some(([t]) => t === slug)) return ''
+  return pickGroups.value.some((g) => g.tags.some((t) => t.slug === slug)) ? '' : slug
+})
+
+function openTagPicker(ids: number[], e: Event): void {
+  openPop({ kind: 'tags', ids, query: '' }, e)
+}
+
+async function pickAdd(slug: string): Promise<void> {
+  const p = pickPop.value
+  if (!p || popBusy.value) return
+  popBusy.value = true
+  const ok = await editTag('add', p.ids, slug)
+  popBusy.value = false
+  if (!ok) return
+  if (p.ids.length > 1) toast(`Tagged ${photos(p.ids.length)} “${labelOf(slug)}”`)
+  closePop(true)
+}
+
+async function pickRemove(slug: string): Promise<void> {
+  const p = pickPop.value
+  if (!p || popBusy.value) return
+  popBusy.value = true
+  const ok = await editTag('remove', p.ids, slug)
+  popBusy.value = false
+  if (ok && p.ids.length > 1) toast(`Removed “${labelOf(slug)}” from ${photos(p.ids.length)}`)
+  // The row is gone; keep the keyboard in the picker
+  popEl.value?.querySelector('input')?.focus()
+}
+
+// Album tag set dialog
+const showTagSet = ref(false)
+const tagDraft = ref(new Set<string>())
+const savingTagSet = ref(false)
+const tagSetGroups = computed(() => groupVocab(tagConfig.value?.vocabulary ?? []))
+
+function openTagSet(): void {
+  const c = tagConfig.value
+  if (!c) return
+  tagDraft.value = new Set(c.enabled ?? c.vocabulary.map((t) => t.slug))
+  showTagSet.value = true
+}
+function toggleDraft(slug: string): void {
+  const next = new Set(tagDraft.value)
+  if (!next.delete(slug)) next.add(slug)
+  tagDraft.value = next
+}
+function setDraftGroup(tags: VocabTag[], on: boolean): void {
+  const next = new Set(tagDraft.value)
+  for (const t of tags) {
+    if (on) next.add(t.slug)
+    else next.delete(t.slug)
+  }
+  tagDraft.value = next
+}
+const presetOn = (exclude: string[]): string[] =>
+  presetSlugs(exclude, tagConfig.value?.vocabulary ?? [])
+const isPreset = (exclude: string[]): boolean => {
+  const on = presetOn(exclude)
+  return on.length === tagDraft.value.size && on.every((s) => tagDraft.value.has(s))
+}
+async function saveTagSet(): Promise<void> {
+  const vocab = tagConfig.value?.vocabulary
+  if (!vocab || savingTagSet.value) return
+  savingTagSet.value = true
+  try {
+    const on = vocab.map((t) => t.slug).filter((s) => tagDraft.value.has(s))
+    tagConfig.value = await tagsApi.setAlbumConfig(albumId, on.length === vocab.length ? null : on)
+    showTagSet.value = false
+    toast('Album tags saved. AI suggestions update in a few seconds.')
+  } catch (err) {
+    toast(`Couldn't save album tags: ${err instanceof Error ? err.message : String(err)}`)
+  } finally {
+    savingTagSet.value = false
+  }
 }
 
 const grid = computed(() =>
@@ -836,6 +994,45 @@ function slideImage(pswp: PhotoSwipe): Image | undefined {
   return images.value.find((img) => img.id === id) ?? lbItems[pswp.currIndex]
 }
 
+let lbTagsEl: HTMLElement | null = null
+// PhotoSwipe traps focus in its root, so popovers move in there while it's open
+const lbRoot = ref<HTMLElement | null>(null)
+
+function renderLbTags(): void {
+  const el = lbTagsEl
+  const pswp = lightbox?.pswp
+  if (!el || !pswp) return
+  const img = slideImage(pswp)
+  const hadFocus = el.contains(document.activeElement)
+  el.replaceChildren()
+  el.hidden = !img
+  if (!img) return
+  for (const slug of img.tags ?? []) {
+    const chip = document.createElement('span')
+    chip.className = 'lb-tag'
+    chip.textContent = labelOf(slug)
+    const x = document.createElement('button')
+    x.type = 'button'
+    x.setAttribute('aria-label', `Remove tag ${labelOf(slug)}`)
+    x.title = 'Remove tag'
+    x.innerHTML = ICON('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>')
+    x.onclick = () => editTag('remove', [img.id], slug)
+    if (tagConfig.value) chip.append(x)
+    el.append(chip)
+  }
+  if (!tagConfig.value) return
+  const add = document.createElement('button')
+  add.type = 'button'
+  add.className = 'lb-tag add'
+  add.setAttribute('aria-haspopup', 'dialog')
+  add.innerHTML = ICON('<path d="M5 12h14"/><path d="M12 5v14"/>')
+  add.append('Tag')
+  add.onclick = (e) => openTagPicker([img.id], e)
+  el.append(add)
+  if (hadFocus) add.focus()
+}
+watch([images, tagConfig], renderLbTags)
+
 function initLightbox(): void {
   if (lightbox) {
     lightbox.destroy()
@@ -895,17 +1092,16 @@ function initLightbox(): void {
       }
     })
 
-    // AI tags, a quiet line along the bottom
+    // Tags along the bottom: × removes one, "Tag" opens the picker
     ui.registerElement({
       name: 'lb-tags',
       order: 10,
       appendTo: 'root',
       onInit: (el, pswp) => {
-        pswp.on('change', () => {
-          const tags = slideImage(pswp)?.tags || []
-          el.hidden = tags.length === 0
-          el.textContent = tags.map(tagLabel).join(' · ')
-        })
+        lbTagsEl = el
+        el.setAttribute('role', 'group')
+        el.setAttribute('aria-label', 'Tags')
+        pswp.on('change', renderLbTags)
       }
     })
 
@@ -940,6 +1136,12 @@ function initLightbox(): void {
   }
   lightbox.on('change', scrollToCurrent)
   lightbox.on('close', scrollToCurrent)
+  lightbox.on('afterInit', () => (lbRoot.value = lightbox?.pswp?.element ?? null))
+  lightbox.on('destroy', () => {
+    if (lbRoot.value) closePop()
+    lbRoot.value = null
+    lbTagsEl = null
+  })
 
   lightbox.init()
 }
@@ -956,6 +1158,12 @@ function showTip(e: Event, names: string[]): void {
 // Capture phase, ahead of PhotoSwipe's own keys: while the notes panel is open,
 // Esc closes the panel only and the lightbox underneath doesn't move
 function onKeydown(e: KeyboardEvent): void {
+  // A popover over the lightbox keeps the keys (typing, Esc) from moving or closing it
+  if (pop.value && lbRoot.value) {
+    e.stopImmediatePropagation()
+    if (e.key === 'Escape') closePop(true)
+    return
+  }
   if (!showNotesSidebar.value) return
   if (!['Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'z'].includes(e.key)) return
   e.stopImmediatePropagation()
@@ -979,12 +1187,13 @@ onMounted(() => {
     if (id === albumId && !loading.value) refreshGrouping()
   })
   loadSets()
+  loadTagConfig()
   offSetsChanged = window.api.sets.onSetsChanged((id) => {
     if (id === albumId) loadSets()
   })
   document.addEventListener('pointerdown', onDocPointer)
   document.addEventListener('keydown', onDocKey)
-  document.addEventListener('scroll', closePop, true)
+  document.addEventListener('scroll', onDocScroll, true)
 })
 
 onUnmounted(() => {
@@ -996,7 +1205,7 @@ onUnmounted(() => {
   offSetsChanged?.()
   document.removeEventListener('pointerdown', onDocPointer)
   document.removeEventListener('keydown', onDocKey)
-  document.removeEventListener('scroll', closePop, true)
+  document.removeEventListener('scroll', onDocScroll, true)
   if (lightbox) {
     lightbox.destroy()
     lightbox = null
@@ -1131,6 +1340,15 @@ onUnmounted(() => {
           >
             <Plus />Add to set…
           </button>
+          <button
+            v-if="tagConfig"
+            class="btn sm ghost"
+            aria-haspopup="dialog"
+            :aria-expanded="pop?.kind === 'tags'"
+            @click="openTagPicker(selectedIds(), $event)"
+          >
+            <Tag />Tags…
+          </button>
           <button class="btn sm primary" :disabled="copying" @click="copySelectedImages">
             <span v-if="copying" class="spin"></span><Copy v-else />Copy
             {{ nf(selectedImageIds.size) }} to folder…
@@ -1181,15 +1399,37 @@ onUnmounted(() => {
         </div>
 
         <div v-if="hasTags" class="set-bar" role="toolbar" aria-label="Tags">
-          <input
-            v-model="tagQuery"
-            class="input tag-search"
-            type="search"
-            placeholder="Find a tag"
-            aria-label="Find a tag"
-            autocomplete="off"
-            spellcheck="false"
-          />
+          <!-- Stays put while the chips scroll under it -->
+          <div class="tag-lead">
+            <input
+              v-model="tagQuery"
+              class="input tag-search"
+              type="search"
+              placeholder="Find a tag"
+              aria-label="Find a tag"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button
+              v-if="tagConfig"
+              class="icon-btn sm plain"
+              aria-haspopup="dialog"
+              aria-label="Album tags…"
+              title="Album tags…"
+              @click="openTagSet"
+            >
+              <SlidersHorizontal />
+            </button>
+            <button
+              v-if="activeTags.length || tagQuery"
+              class="icon-btn sm plain"
+              aria-label="Clear tag filters"
+              title="Clear tag filters"
+              @click="clearTags"
+            >
+              <X />
+            </button>
+          </div>
           <button
             v-for="[slug, n] in tagChips"
             :key="slug"
@@ -1197,18 +1437,9 @@ onUnmounted(() => {
             :aria-pressed="activeTags.includes(slug)"
             @click="toggleTag(slug)"
           >
-            {{ tagLabel(slug) }} <span class="n num">{{ nf(n) }}</span>
+            {{ labelOf(slug) }} <span class="n num">{{ nf(n) }}</span>
           </button>
           <span v-if="tagQuery && !tagChips.length" class="n">No tags match</span>
-          <button
-            v-if="activeTags.length || tagQuery"
-            class="icon-btn sm plain"
-            aria-label="Clear tag filters"
-            title="Clear tag filters"
-            @click="clearTags"
-          >
-            <X />
-          </button>
         </div>
 
         <div v-if="gridLoading" class="photos" aria-busy="true">
@@ -1325,16 +1556,84 @@ onUnmounted(() => {
       </div>
     </Teleport>
 
-    <Teleport to="body">
+    <Teleport :to="lbRoot ?? 'body'">
       <div
         v-if="pop"
         ref="popEl"
         class="menu"
-        :role="pop.kind === 'name' ? 'dialog' : 'menu'"
-        :aria-label="pop.kind === 'name' ? pop.label : undefined"
+        :class="{ 'tag-pick': pop.kind === 'tags' }"
+        :role="pop.kind === 'name' || pop.kind === 'tags' ? 'dialog' : 'menu'"
+        :aria-label="
+          pop.kind === 'name'
+            ? pop.label
+            : pop.kind === 'tags'
+              ? `Tags for ${photos(pop.ids.length)}`
+              : undefined
+        "
         :style="popStyle"
       >
-        <form v-if="pop.kind === 'name'" class="set-name" @submit.prevent="submitName">
+        <template v-if="pop.kind === 'tags'">
+          <form class="pick-find" @submit.prevent="pickCustom && pickAdd(pickCustom)">
+            <input
+              v-model="pop.query"
+              class="input"
+              type="search"
+              placeholder="Find or add a tag"
+              aria-label="Find or add a tag"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </form>
+          <div class="pick-list" :aria-busy="popBusy">
+            <template v-if="pickPresent.length">
+              <div class="pick-h">
+                {{ pop.ids.length === 1 ? 'On this photo' : 'On the selection' }}
+              </div>
+              <div v-for="[slug, n] in pickPresent" :key="slug" class="pick-row">
+                <button
+                  v-if="pop.ids.length > 1"
+                  :disabled="n === pop.ids.length || popBusy"
+                  :aria-label="`Add ${labelOf(slug)} to all ${photos(pop.ids.length)}`"
+                  @click="pickAdd(slug)"
+                >
+                  {{ labelOf(slug)
+                  }}<span class="n num">{{ nf(n) }} of {{ nf(pop.ids.length) }}</span>
+                </button>
+                <span v-else class="pick-t">{{ labelOf(slug) }}</span>
+                <button
+                  class="icon-btn sm plain"
+                  :disabled="popBusy"
+                  :aria-label="
+                    `Remove ${labelOf(slug)}` + (pop.ids.length > 1 ? ` from ${photos(n)}` : '')
+                  "
+                  :title="pop.ids.length > 1 ? `Remove from ${photos(n)}` : 'Remove'"
+                  @click="pickRemove(slug)"
+                >
+                  <X />
+                </button>
+              </div>
+              <hr />
+            </template>
+            <template v-for="g in pickGroups" :key="g.category">
+              <div class="pick-h">{{ g.label }}</div>
+              <button
+                v-for="t in g.tags"
+                :key="t.slug"
+                :disabled="popBusy"
+                @click="pickAdd(t.slug)"
+              >
+                {{ t.label }}
+              </button>
+            </template>
+            <button v-if="pickCustom" :disabled="popBusy" @click="pickAdd(pickCustom)">
+              <Plus />Add “{{ tagLabel(pickCustom) }}”
+            </button>
+            <p v-if="!pickGroups.length && !pickCustom && !pickPresent.length" class="pick-h">
+              Type a name to add your own tag
+            </p>
+          </div>
+        </template>
+        <form v-else-if="pop.kind === 'name'" class="set-name" @submit.prevent="submitName">
           <label for="set-name-in">{{ pop.label }}</label>
           <div class="input-row">
             <input
@@ -1396,6 +1695,74 @@ onUnmounted(() => {
         </button>
         <button class="btn danger" :disabled="deletingSet" autofocus @click="confirmDeleteSet">
           <span v-if="deletingSet" class="spin"></span>Delete set
+        </button>
+      </template>
+    </Modal>
+
+    <Modal
+      :show="showTagSet"
+      title="Album tags"
+      sub="The tags AI suggests for this album"
+      wide
+      @close="!savingTagSet && (showTagSet = false)"
+    >
+      <div class="tag-presets" role="group" aria-label="Start from">
+        <button
+          v-for="(p, i) in PRESETS"
+          :key="p.name"
+          class="btn sm ghost"
+          :aria-pressed="isPreset(p.exclude)"
+          :autofocus="i === 0"
+          @click="tagDraft = new Set(presetOn(p.exclude))"
+        >
+          {{ p.name }}
+        </button>
+      </div>
+      <div class="tag-cats">
+        <fieldset v-for="g in tagSetGroups" :key="g.category">
+          <legend>
+            {{ g.label }}
+            <span class="n num"
+              >{{ g.tags.filter((t) => tagDraft.has(t.slug)).length }} of {{ g.tags.length }}</span
+            >
+          </legend>
+          <span class="tag-cat-ctl">
+            <button
+              class="link"
+              :aria-label="`Select all ${g.label}`"
+              @click="setDraftGroup(g.tags, true)"
+            >
+              All
+            </button>
+            <button
+              class="link"
+              :aria-label="`Select no ${g.label}`"
+              @click="setDraftGroup(g.tags, false)"
+            >
+              None
+            </button>
+          </span>
+          <div class="tag-checks">
+            <label v-for="t in g.tags" :key="t.slug" class="check-row">
+              <input
+                type="checkbox"
+                :checked="tagDraft.has(t.slug)"
+                @change="toggleDraft(t.slug)"
+              />
+              {{ t.label }}
+            </label>
+          </div>
+        </fieldset>
+      </div>
+      <p class="tag-note">
+        Tags you add by hand stay put. AI suggestions update in a few seconds after you save.
+      </p>
+      <template #footer>
+        <button class="btn ghost" :disabled="savingTagSet" @click="showTagSet = false">
+          Cancel
+        </button>
+        <button class="btn primary" :disabled="savingTagSet" @click="saveTagSet">
+          <span v-if="savingTagSet" class="spin"></span>Save
         </button>
       </template>
     </Modal>
@@ -1476,6 +1843,119 @@ onUnmounted(() => {
   width: 160px;
   height: 32px;
   padding: 0 12px;
+  font-size: 13px;
+}
+.tag-lead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 4px;
+  background: var(--card);
+  box-shadow: -12px 0 0 var(--card); /* covers the bar's left padding as chips scroll by */
+}
+@media (max-width: 1180px) {
+  .tag-search {
+    width: 128px;
+  }
+}
+/* Narrow windows: the selection bar scrolls sideways like the set bar */
+.g-bar.sel {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.g-bar.sel > * {
+  flex: none;
+}
+.tag-pick {
+  width: 288px;
+  padding: 8px 8px 4px;
+}
+.pick-find input {
+  height: 36px;
+  font-size: 13px;
+}
+.pick-list {
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+  margin-top: 4px;
+}
+.pick-h {
+  margin: 8px 12px 4px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.pick-row {
+  display: flex;
+  align-items: center;
+}
+.pick-row .pick-t {
+  flex: 1;
+  padding: 0 12px;
+}
+.pick-row .icon-btn {
+  flex: none;
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+.tag-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tag-presets .btn[aria-pressed='true'] {
+  background: var(--brand-wash);
+  border-color: var(--brand-soft);
+}
+.tag-cats {
+  display: grid;
+  gap: 16px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin: 0 -24px;
+  padding: 0 24px;
+}
+.tag-cats fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 4px;
+}
+.tag-cats legend {
+  float: left; /* lets the All / None links share its line */
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.tag-cats legend .n {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin-left: 4px;
+}
+.tag-cat-ctl {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+}
+.tag-checks {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+}
+.tag-checks .check-row {
+  margin: 0;
+  min-height: 32px;
+  font-size: 13px;
+}
+.tag-checks .check-row input {
+  width: 18px;
+  height: 18px;
+}
+.tag-note {
   font-size: 13px;
 }
 .set-bar .n,
@@ -1607,13 +2087,49 @@ onUnmounted(() => {
   left: 50%;
   bottom: 20px;
   transform: translateX(-50%);
+  width: max-content;
   max-width: calc(100% - 160px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
   font-size: 13px;
-  color: oklch(70% 0 0);
-  pointer-events: none;
+}
+.pswp__lb-tags .lb-tag {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px 0 12px;
+  border-radius: 99px;
+  border: 0;
+  background: oklch(25% 0.005 255);
+  color: oklch(85% 0 0);
+  font: inherit;
+}
+.pswp__lb-tags .lb-tag button {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: oklch(65% 0 0);
+}
+.pswp__lb-tags .lb-tag button:hover,
+.pswp__lb-tags .lb-tag.add:hover {
+  background: oklch(32% 0.005 255);
+  color: white;
+}
+.pswp__lb-tags .lb-tag.add {
+  padding: 0 12px 0 8px;
+  gap: 4px;
+}
+.pswp__lb-tags svg {
+  width: 14px;
+  height: 14px;
 }
 .pswp__lb-tags[hidden] {
   display: none;

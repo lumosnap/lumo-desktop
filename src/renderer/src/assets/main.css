@@ -942,6 +942,7 @@ select.input {
   border-radius: var(--r-card);
   padding: 12px;
   min-height: 70vh;
+  min-width: 0; /* the scrolling set / tag bars must not widen the grid column */
 }
 .g-bar {
   display: flex;
