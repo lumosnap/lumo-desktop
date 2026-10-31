@@ -690,7 +690,7 @@ const focusPerson = computed(() =>
 )
 const personName = (p: Person | undefined | null): string => p?.name ?? 'This person'
 const peopleNames = (ids: readonly string[]): string =>
-  ids.flatMap((id) => personById.value.get(id)?.name.split(' ')[0] ?? []).join(' + ')
+  ids.flatMap((id) => personById.value.get(id)?.name ?? []).join(' + ')
 const photoAspect = (id: number): number => {
   const img = imageById.value.get(id)
   return img?.width && img.height ? img.width / img.height : 0
@@ -855,14 +855,14 @@ async function hidePerson(p: Person, hidden: boolean): Promise<void> {
   setPersonHidden(p.id, hidden)
   const ok = await peopleCall(
     () => peopleApi!.setHidden(albumId, p.id, hidden),
-    hidden ? `hide ${firstName(p.name)}` : `show ${firstName(p.name)}`,
+    hidden ? `hide ${p.name}` : `show ${p.name}`,
     () => hidePerson(p, hidden)
   )
   if (!ok) return setPersonHidden(p.id, !hidden)
   toast(
     hidden
-      ? `${firstName(p.name)} is hidden from your client`
-      : `${firstName(p.name)} shows in your client's gallery again`,
+      ? `${p.name} is hidden from your client`
+      : `${p.name} shows in your client's gallery again`,
     hidden ? { label: 'Undo', run: () => hidePerson(p, false) } : undefined
   )
   await afterPeopleEdit()
@@ -949,7 +949,7 @@ async function renderLbFaces(): Promise<void> {
     b.setAttribute('aria-label', f.name ? `${f.name}${sure}, change` : 'Who is this?')
     if (f.name) {
       const n = document.createElement('span')
-      n.textContent = firstName(f.name) + sure
+      n.textContent = f.name + sure
       b.append(n)
     }
     // PhotoSwipe reads a press on the photo as zoom or close
@@ -1899,7 +1899,7 @@ onUnmounted(() => {
                 @contextmenu.prevent="openPop({ kind: 'person', person: p }, $event)"
               >
                 <span class="avatar face" :style="faceStyle(p)"></span>
-                <span class="face-n"><EyeOff v-if="p.hidden" />{{ firstName(p.name) }}</span>
+                <span class="face-n"><EyeOff v-if="p.hidden" />{{ p.name }}</span>
               </button>
               <button
                 class="face-btn face-add"
@@ -3087,10 +3087,15 @@ onUnmounted(() => {
   outline-offset: 4px;
 }
 .face-n {
+  /* Full names over two lines: role names ("bride father") must stay distinct */
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  text-align: center;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
   font-size: 12px;
   color: var(--ink-2);
 }

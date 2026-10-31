@@ -31,7 +31,8 @@ const loadFailed = ref(false)
 const yes = ref(new Set<number>())
 const remaining = ref(props.person.reviewCount)
 const busy = ref(false)
-const first = computed(() => props.person.name.split(' ')[0])
+// Full name: photographers name roles ("bride father"), so a first word can be ambiguous
+const first = computed(() => props.person.name)
 const saveLabel = computed(() => {
   const n = yes.value.size
   return n ? `Save ${n} as ${first.value}` : `None of these are ${first.value}`
