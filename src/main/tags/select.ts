@@ -1,28 +1,66 @@
 /**
- * Image embedding -> AI tags. SigLIP is trained with a sigmoid loss, so each tag is an
- * independent yes/no: p = sigmoid(scale * cos(image, prompt) + bias), max over the tag's prompts.
+ * Image embeddings -> AI tags, scored per album.
+ *
+ * SigLIP is trained with a sigmoid loss, so each tag is an independent yes/no with
+ * logit = scale * max_prompt cos(image, prompt) + bias. Absolute logits are a poor signal on
+ * their own: on a Kerala wedding album every photo "looks like a thali ceremony". So a tag is
+ * kept on a photo only when its logit stands out against the album's baseline for that tag
+ * (album mean, or a global prior for tiny albums) AND clears an absolute floor.
  */
 import vectors from './tag-vectors.json'
+import prior from './tag-prior.json'
 import { TAGS, type TagCategory } from './vocabulary'
 
 export const TAG_MODEL = vectors.model
+/** Bump whenever selection changes: albums scored with an older version are re-scored. */
+export const TAG_SCORING_VERSION = 2
 
-// ponytail: hand-tuned on ~400 bench photos (320 wedding/event, 82 unrelated stock) for
-// ~2.5 tags/photo on average, 0 on unrelated images. SigLIP2-base's sigmoid scores multi-subject
-// photos far below 0.5 (an obvious wedding cake scores ~0.02), so 0.1 tagged almost nothing.
-// People tags fire broadly and get the highest bar; things/moments are rarer, so lower.
+// ponytail: hand-tuned on one 15-photo Kerala album + ~400 bench photos (in logits).
 // Retune against a labelled album if tags feel noisy or sparse.
-export const TAG_THRESHOLDS: Record<TagCategory, number> = {
-  events: 0.004,
-  people: 0.006,
-  shots: 0.005,
-  things: 0.002,
-  moments: 0.002,
-  settings: 0.004
+export const MAX_TAGS = 5
+/** Below this many photos the album mean is too noisy; use the global prior instead. */
+export const MIN_ALBUM = 8
+/** Absolute floor for any tag (p ~ 0.002); the album margin does the noise filtering. */
+const FLOOR = -6.2
+/** How far above the album baseline a tag must be, per category. */
+const MARGIN: Record<TagCategory, number> = {
+  events: 3.5,
+  people: 2,
+  shots: 2,
+  things: 2,
+  moments: 3,
+  settings: 2
 }
-export const MAX_TAGS = 8
+/** A tag this confident (p ~ 0.27) is kept even when the whole album shares it (e.g. bride). */
+const STRONG = -1
+/** Tags on more than this share of an album survive only where STRONG. */
+const UNIVERSAL = 0.6
+/**
+ * Tags SigLIP can't tell apart in practice: on the bench their top hits were wrong (pheras on a
+ * couple portrait, haldi on cake feeding, thali on every Kerala photo but the real thali one).
+ * They need a near-certain logit (p ~ 0.82) and a big margin.
+ */
+export const STRICT_TAGS = new Set([
+  'thali',
+  'pheras',
+  'varmala',
+  'nikah',
+  'engagement',
+  'baraat',
+  'sangeet',
+  'mehendi',
+  'haldi',
+  'sacred-fire',
+  'church-wedding',
+  'getting-ready',
+  'sadya'
+])
+const STRICT_FLOOR = 1.5
+const STRICT_MARGIN = 4
 
 const categoryOf = new Map(TAGS.map((t) => [t.slug, t.category]))
+/** 90th-percentile logit per tag over the bench set: "more X than a typical photo". */
+const PRIOR: Record<string, number> = prior.logits
 const DIM = vectors.dim
 const prompts = vectors.tags.map((t) => ({
   slug: t.slug,
@@ -32,8 +70,8 @@ const prompts = vectors.tags.map((t) => ({
   })
 }))
 
-/** Per-tag probability for an L2-normalized image embedding. */
-export function tagProbabilities(embedding: Float32Array): Map<string, number> {
+/** Per-tag logit for an L2-normalized image embedding (max over the tag's prompts). */
+export function tagLogits(embedding: Float32Array): Map<string, number> {
   const out = new Map<string, number>()
   for (const { slug, vecs } of prompts) {
     let best = -1
@@ -42,23 +80,58 @@ export function tagProbabilities(embedding: Float32Array): Map<string, number> {
       for (let j = 0; j < DIM; j++) cos += embedding[j] * v[j]
       if (cos > best) best = cos
     }
-    out.set(slug, 1 / (1 + Math.exp(-(vectors.logitScale * best + vectors.logitBias))))
+    out.set(slug, vectors.logitScale * best + vectors.logitBias)
   }
   return out
 }
 
-/** Tags at or above their category threshold, best first, at most `max`. */
-export function selectTags(
-  probs: Map<string, number>,
-  thresholds: Record<TagCategory, number> = TAG_THRESHOLDS,
-  max = MAX_TAGS
-): Array<{ tag: string; score: number }> {
-  return [...probs]
-    .filter(([slug, p]) => {
-      const category = categoryOf.get(slug)
-      return category !== undefined && p >= thresholds[category]
-    })
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, max)
-    .map(([tag, score]) => ({ tag, score }))
+/**
+ * Tags for every photo of one album, best first. `score` is the logit above the album baseline.
+ * Input and output are index-aligned. `enabled` limits the vocabulary (null = all of it).
+ */
+export function selectAlbumTags(
+  album: Array<Map<string, number>>,
+  enabled: ReadonlySet<string> | null = null
+): Array<Array<{ tag: string; score: number }>> {
+  const n = album.length
+  const baseline = (slug: string): number =>
+    n >= MIN_ALBUM ? album.reduce((s, l) => s + (l.get(slug) ?? 0), 0) / n : (PRIOR[slug] ?? 0)
+  const base = new Map([...categoryOf.keys()].map((slug) => [slug, baseline(slug)]))
+
+  const picked = album.map((logits) =>
+    [...logits]
+      .flatMap(([tag, l]) => {
+        const category = categoryOf.get(tag)
+        if (category === undefined || (enabled && !enabled.has(tag))) return []
+        const score = l - base.get(tag)!
+        const ok = STRICT_TAGS.has(tag)
+          ? l >= STRICT_FLOOR && score >= STRICT_MARGIN
+          : l >= FLOOR && (score >= MARGIN[category] || l >= STRONG)
+        return ok ? [{ tag, score, l }] : []
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_TAGS)
+  )
+
+  if (n >= MIN_ALBUM) {
+    const count = new Map<string, number>()
+    for (const p of picked) for (const t of p) count.set(t.tag, (count.get(t.tag) ?? 0) + 1)
+    for (let i = 0; i < n; i++) {
+      picked[i] = picked[i].filter((t) => count.get(t.tag)! <= UNIVERSAL * n || t.l >= STRONG)
+    }
+  }
+  return picked.map((p) => p.map(({ tag, score }) => ({ tag, score })))
+}
+
+/** Slug rule for manual tags (any slug, not only the vocabulary). */
+export const TAG_SLUG = /^[a-z0-9-]{1,40}$/
+
+/** Tags shown/pushed for a photo: manual adds first, then AI tags not manually removed. */
+export function effectiveTags(
+  ai: string[],
+  overrides: Array<{ tag: string; action: 'add' | 'remove' }>
+): string[] {
+  const adds = overrides.filter((o) => o.action === 'add').map((o) => o.tag)
+  const removed = new Set(overrides.filter((o) => o.action === 'remove').map((o) => o.tag))
+  return [...new Set([...adds, ...ai.filter((t) => !removed.has(t))])]
 }

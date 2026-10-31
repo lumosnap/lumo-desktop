@@ -4,6 +4,7 @@ import { join } from 'path'
 import { existsSync, unlinkSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { createLogger, getErrorMessage } from './logger'
+import { effectiveTags } from './tags/select'
 
 const logger = createLogger('Database')
 
@@ -24,6 +25,8 @@ export interface Album {
   isOrphaned: number // 0 or 1 - true if source folder was deleted
   createdAt: string
   sets_need_push?: number // migration 4: >0 = sets changed locally since the last full push
+  tag_set?: string | null // migration 6: JSON array of enabled AI tag slugs; null = all
+  tags_scored?: string | null // migration 6: scoring key the AI tags were last computed with
 }
 
 export interface AlbumSet {
@@ -177,6 +180,19 @@ const migrations: Array<(database: Database.Database) => void> = [
       );
       CREATE INDEX idx_image_tags_tag ON image_tags(tag);
       ALTER TABLE images ADD COLUMN tags_need_push INTEGER DEFAULT 0;
+    `)
+  },
+  // 6: per-album AI tag set, album-relative scoring key, manual per-photo tag overrides
+  (database) => {
+    database.exec(`
+      ALTER TABLE albums ADD COLUMN tag_set TEXT;
+      ALTER TABLE albums ADD COLUMN tags_scored TEXT;
+      CREATE TABLE image_tag_overrides (
+        image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+        tag TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('add', 'remove')),
+        PRIMARY KEY (image_id, tag)
+      );
     `)
   }
 ]
@@ -733,19 +749,29 @@ export function getImagesMissingEmbedding(albumId: string, model: string): Image
     .all(model, albumId) as Image[]
 }
 
-/** Album's tags per image id, best first. Untagged images are absent. */
+/** Album's effective tags (manual adds, then AI tags not removed) per image id. Untagged are absent. */
 export function getAlbumTags(albumId: string): Map<number, string[]> {
-  const rows = conn()
+  const d = conn()
+  const ai = d
     .prepare(
       `SELECT t.image_id, t.tag FROM image_tags t JOIN images i ON i.id = t.image_id
        WHERE i.albumId = ? ORDER BY t.image_id, t.score DESC`
     )
     .all(albumId) as Array<{ image_id: number; tag: string }>
+  const ov = d
+    .prepare(
+      `SELECT o.image_id, o.tag, o.action FROM image_tag_overrides o
+       JOIN images i ON i.id = o.image_id WHERE i.albumId = ? ORDER BY o.rowid`
+    )
+    .all(albumId) as Array<{ image_id: number; tag: string; action: 'add' | 'remove' }>
+  const aiBy = new Map<number, string[]>()
+  for (const r of ai) aiBy.set(r.image_id, [...(aiBy.get(r.image_id) ?? []), r.tag])
+  const ovBy = new Map<number, typeof ov>()
+  for (const r of ov) ovBy.set(r.image_id, [...(ovBy.get(r.image_id) ?? []), r])
   const out = new Map<number, string[]>()
-  for (const r of rows) {
-    const list = out.get(r.image_id)
-    if (list) list.push(r.tag)
-    else out.set(r.image_id, [r.tag])
+  for (const id of new Set([...aiBy.keys(), ...ovBy.keys()])) {
+    const tags = effectiveTags(aiBy.get(id) ?? [], ovBy.get(id) ?? [])
+    if (tags.length > 0) out.set(id, tags)
   }
   return out
 }
@@ -760,41 +786,119 @@ export function getEmbeddedImageIds(albumId: string): Set<number> {
   return new Set(rows.map((r) => r.image_id))
 }
 
+/** Album's stored embeddings from `model`, by image id. */
+export function getAlbumEmbeddings(
+  albumId: string,
+  model: string
+): Array<{ imageId: number; vec: Float32Array }> {
+  const rows = conn()
+    .prepare(
+      `SELECT e.image_id, e.vec FROM image_embeddings e JOIN images i ON i.id = e.image_id
+       WHERE i.albumId = ? AND e.model = ? ORDER BY e.image_id`
+    )
+    .all(albumId, model) as Array<{ image_id: number; vec: Buffer }>
+  return rows.map((r) => ({
+    imageId: r.image_id,
+    vec: new Float32Array(r.vec.buffer.slice(r.vec.byteOffset, r.vec.byteOffset + r.vec.length))
+  }))
+}
+
 /**
- * Store embeddings and replace tags in one transaction. Marks tags_need_push only where the
- * tag set actually changed. Returns how many images' tags changed.
+ * Store embeddings. A first embedding marks tags_need_push, so the server learns
+ * "analyzed" even if the photo ends up with no tags. Returns how many were stored.
  */
-export function saveImageTags(
+export function saveImageEmbeddings(
   model: string,
-  items: Array<{ imageId: number; vec: Float32Array; tags: Array<{ tag: string; score: number }> }>
+  items: Array<{ imageId: number; vec: Float32Array }>
 ): number {
   const d = conn()
   const putVec = d.prepare(
     'INSERT OR REPLACE INTO image_embeddings (image_id, model, vec) VALUES (?, ?, ?)'
   )
+  const exists = d.prepare('SELECT 1 FROM images WHERE id = ?')
+  const hadVec = d.prepare('SELECT 1 FROM image_embeddings WHERE image_id = ?')
+  const dirty = d.prepare('UPDATE images SET tags_need_push = 1 WHERE id = ?')
+  let saved = 0
+  d.transaction(() => {
+    for (const { imageId, vec } of items) {
+      if (!exists.get(imageId)) continue // deleted meanwhile
+      if (!hadVec.get(imageId)) dirty.run(imageId)
+      putVec.run(imageId, model, Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength))
+      saved++
+    }
+  })()
+  return saved
+}
+
+/**
+ * Replace AI tags in one transaction. Marks tags_need_push only where the tag list actually
+ * changed. Returns how many images' tags changed.
+ */
+export function saveImageTags(
+  items: Array<{ imageId: number; tags: Array<{ tag: string; score: number }> }>
+): number {
+  const d = conn()
   const oldTags = d.prepare('SELECT tag FROM image_tags WHERE image_id = ? ORDER BY score DESC')
   const clear = d.prepare('DELETE FROM image_tags WHERE image_id = ?')
   const put = d.prepare('INSERT INTO image_tags (image_id, tag, score) VALUES (?, ?, ?)')
   const dirty = d.prepare('UPDATE images SET tags_need_push = 1 WHERE id = ?')
   const exists = d.prepare('SELECT 1 FROM images WHERE id = ?')
-  const hadVec = d.prepare('SELECT 1 FROM image_embeddings WHERE image_id = ?')
   let changed = 0
   d.transaction(() => {
-    for (const { imageId, vec, tags } of items) {
+    for (const { imageId, tags } of items) {
       if (!exists.get(imageId)) continue // deleted meanwhile
-      const first = !hadVec.get(imageId)
-      putVec.run(imageId, model, Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength))
       const before = (oldTags.all(imageId) as Array<{ tag: string }>).map((r) => r.tag).join()
       clear.run(imageId)
       for (const t of tags) put.run(imageId, t.tag, t.score)
-      // A first embedding always pushes, even with no tags, so the server learns "analyzed, none"
-      if (first || before !== tags.map((t) => t.tag).join()) {
+      if (before !== tags.map((t) => t.tag).join()) {
         dirty.run(imageId)
         changed++
       }
     }
   })()
   return changed
+}
+
+export function setAlbumTagsScored(albumId: string, key: string): void {
+  conn().prepare('UPDATE albums SET tags_scored = ? WHERE id = ?').run(key, albumId)
+}
+
+/** Enabled AI tag slugs for an album; null = the whole vocabulary. */
+export function getAlbumTagSet(albumId: string): string[] | null {
+  const row = conn().prepare('SELECT tag_set FROM albums WHERE id = ?').get(albumId) as
+    | { tag_set: string | null }
+    | undefined
+  return row?.tag_set ? (JSON.parse(row.tag_set) as string[]) : null
+}
+
+export function setAlbumTagSet(albumId: string, enabled: string[] | null): void {
+  conn()
+    .prepare('UPDATE albums SET tag_set = ? WHERE id = ?')
+    .run(enabled ? JSON.stringify(enabled) : null, albumId)
+}
+
+/**
+ * Manual add/remove of a tag on photos of an album. One row per (image, tag), so an add
+ * replaces a remove and vice versa. Marks the photos for push.
+ */
+export function setTagOverride(
+  albumId: string,
+  imageIds: number[],
+  tag: string,
+  action: 'add' | 'remove'
+): void {
+  const d = conn()
+  const put = d.prepare(
+    `INSERT OR REPLACE INTO image_tag_overrides (image_id, tag, action)
+     SELECT id, ?, ? FROM images WHERE id = ? AND albumId = ?`
+  )
+  const dirty = d.prepare('UPDATE images SET tags_need_push = 1 WHERE id = ? AND albumId = ?')
+  d.transaction(() => {
+    for (const id of imageIds) {
+      put.run(tag, action, id, albumId)
+      dirty.run(id, albumId)
+    }
+  })()
 }
 
 export function closeDatabase(): void {

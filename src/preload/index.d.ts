@@ -12,6 +12,7 @@ import type { AppConfig } from '../main/config'
 import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/sync'
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
+import type { TagConfig } from '../main/ipc/albums'
 
 type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
 
@@ -32,7 +33,7 @@ type AlbumImageWithFavorites = Image & {
   burstId: string | null
   isBurstCover: boolean
   momentId: string | null
-  tags: string[] // AI tag slugs, by score; empty when none or not analysed yet
+  tags: string[] // effective tags: manual adds first, then AI tags (by score) not removed
 }
 
 declare global {
@@ -144,6 +145,22 @@ declare global {
         setCover: (setId: string, imageId: number | null) => Promise<SetsResult>
         fromMoment: (albumId: string, momentId: string, name: string) => Promise<SetsResult>
         onSetsChanged: (callback: (albumId: string) => void) => () => void
+      }
+      tags: {
+        getAlbumConfig: (albumId: string) => Promise<TagConfig>
+        // Re-scores the album's AI tags from stored embeddings; null = whole vocabulary
+        setAlbumConfig: (albumId: string, enabled: string[] | null) => Promise<TagConfig>
+        // Manual per-photo overrides (any slug matching /^[a-z0-9-]{1,40}$/); survive re-scoring
+        add: (
+          albumId: string,
+          imageIds: number[],
+          tag: string
+        ) => Promise<{ success: boolean; error?: string }>
+        remove: (
+          albumId: string,
+          imageIds: number[],
+          tag: string
+        ) => Promise<{ success: boolean; error?: string }>
       }
       sync: {
         detectChanges: (albumId: string) => Promise<SyncResult>

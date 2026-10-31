@@ -6,6 +6,7 @@ import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/syn
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { Booking, ApiFavoriteImage } from '../main/api-client'
+import type { TagConfig } from '../main/ipc/albums'
 
 type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
 
@@ -147,6 +148,25 @@ const api = {
       ipcRenderer.on('album:setsChanged', handler)
       return () => ipcRenderer.removeListener('album:setsChanged', handler)
     }
+  },
+  tags: {
+    getAlbumConfig: (albumId: string): Promise<TagConfig> =>
+      ipcRenderer.invoke('tags:getAlbumConfig', albumId),
+    // Re-scores the album's AI tags from stored embeddings
+    setAlbumConfig: (albumId: string, enabled: string[] | null): Promise<TagConfig> =>
+      ipcRenderer.invoke('tags:setAlbumConfig', albumId, enabled),
+    add: (
+      albumId: string,
+      imageIds: number[],
+      tag: string
+    ): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('tags:add', albumId, imageIds, tag),
+    remove: (
+      albumId: string,
+      imageIds: number[],
+      tag: string
+    ): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('tags:remove', albumId, imageIds, tag)
   },
   sync: {
     detectChanges: (albumId: string): Promise<SyncResult> =>

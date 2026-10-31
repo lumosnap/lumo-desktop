@@ -19,12 +19,16 @@ import {
   getImagesMissingEmbedding,
   getAlbumTags,
   getEmbeddedImageIds,
+  getAlbumEmbeddings,
+  getAlbumTagSet,
+  saveImageEmbeddings,
   saveImageTags,
+  setAlbumTagsScored,
   Album,
   Image
 } from './database'
 import { embedBatch, stopEmbedder, BATCH_SIZE } from './ml/embedder'
-import { TAG_MODEL, selectTags, tagProbabilities } from './tags/select'
+import { TAG_MODEL, TAG_SCORING_VERSION, selectAlbumTags, tagLogits } from './tags/select'
 import { uploadPipeline } from './pipeline'
 import { albumsApi } from './api-client'
 import { groupImages } from './grouping'
@@ -246,8 +250,8 @@ async function pushDirty(albumId: string): Promise<void> {
         phash: r.phash ?? null,
         sharpness: r.sharpness ?? null,
         thumbhash: r.thumbhash ?? null,
-        // Omitted (not null) until analyzed, so a regroup push never wipes server-side tags
-        tags: embedded.has(r.id) ? (tags.get(r.id) ?? []) : undefined
+        // Omitted (not null) until analyzed or edited, so a regroup push never wipes server tags
+        tags: embedded.has(r.id) || r.tags_need_push ? (tags.get(r.id) ?? []) : undefined
       }))
     )
     updateImagesBatch(
@@ -286,23 +290,64 @@ export function cancelTagging(albumId: string): void {
   if (taggingAlbum === albumId) stopEmbedder()
 }
 
+const TAGS_PUSH_DEBOUNCE_MS = 2000
+const tagsPushTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/** Debounced push after a manual tag edit or tag-set change; also refreshes the renderer. */
+export function scheduleTagsPush(albumId: string): void {
+  notifyAnalyzed(albumId)
+  clearTimeout(tagsPushTimers.get(albumId))
+  tagsPushTimers.set(
+    albumId,
+    setTimeout(() => {
+      tagsPushTimers.delete(albumId)
+      enqueue(`Push tags ${albumId}`, () => pushDirty(albumId))
+    }, TAGS_PUSH_DEBOUNCE_MS)
+  )
+}
+
+/**
+ * Recompute an album's AI tags from stored embeddings (no model run). Album-relative, so it
+ * runs over the whole album whenever its embedded set, tag set or the scoring version changes.
+ * Returns how many photos' tags changed.
+ */
+export function rescoreAlbum(albumId: string, { force = false } = {}): Promise<number> {
+  let changed = 0
+  return enqueue(`Rescore ${albumId}`, async () => {
+    const album = getAlbum(albumId)
+    if (!album) return
+    const rows = getAlbumEmbeddings(albumId, TAG_MODEL)
+    const enabled = getAlbumTagSet(albumId)
+    const key = `${TAG_SCORING_VERSION}:${TAG_MODEL}:${rows.length}:${rows.reduce((s, r) => s + r.imageId, 0)}:${enabled?.join() ?? '*'}`
+    if (!force && album.tags_scored === key) return
+    // ponytail: O(album) on the main thread, ~1s per 5k photos; move to the embedder process if it janks
+    const tags = selectAlbumTags(
+      rows.map((r) => tagLogits(r.vec)),
+      enabled && new Set(enabled)
+    )
+    changed = saveImageTags(rows.map((r, i) => ({ imageId: r.imageId, tags: tags[i] })))
+    setAlbumTagsScored(albumId, key)
+    if (changed > 0) log.info(`Rescored ${albumId}: ${changed}/${rows.length} images changed`)
+  }).then(() => changed)
+}
+
 async function tagNow(albumId: string): Promise<void> {
   const album = getAlbum(albumId)
   if (!album || tagCancelled.has(albumId)) return
   const todo = getImagesMissingEmbedding(albumId, TAG_MODEL)
     .map((img) => ({ img, path: thumbnailPathOf(album, img) }))
     .filter((t) => existsSync(t.path)) // no thumbnail yet: the post-upload pass gets it
-  if (todo.length === 0) return
-  log.info(`Tagging ${todo.length} images in ${albumId}`)
+  if (todo.length > 0) log.info(`Tagging ${todo.length} images in ${albumId}`)
 
   taggingAlbum = albumId
   let done = 0
-  let changedSincePush = 0
-  const flush = (): Promise<void> => {
-    if (changedSincePush === 0) return Promise.resolve()
-    changedSincePush = 0
-    notifyAnalyzed(albumId)
-    return enqueue(`Push tags ${albumId}`, () => pushDirty(albumId))
+  let sinceRescore = 0
+  // Album-relative scores: every flush rescores the whole album (cheap, embeddings are stored)
+  const flush = async (): Promise<void> => {
+    const embedded = sinceRescore
+    sinceRescore = 0
+    if ((await rescoreAlbum(albumId)) > 0 || embedded > 0) notifyAnalyzed(albumId)
+    await enqueue(`Push tags ${albumId}`, () => pushDirty(albumId))
   }
   try {
     for (let i = 0; i < todo.length; i += BATCH_SIZE) {
@@ -313,23 +358,24 @@ async function tagNow(albumId: string): Promise<void> {
       if (tagCancelled.has(albumId)) return
       const chunk = todo.slice(i, i + BATCH_SIZE)
       const vecs = await embedBatch(chunk.map((t) => t.path))
-      const items = chunk.flatMap(({ img }, k) => {
-        const vec = vecs[k]
-        // ponytail: undecodable thumbnails stay untagged and retry next session
-        return vec ? [{ imageId: img.id, vec, tags: selectTags(tagProbabilities(vec)) }] : []
-      })
-      await enqueue(`Save tags ${albumId}`, async () => {
-        changedSincePush += saveImageTags(TAG_MODEL, items)
+      // ponytail: undecodable thumbnails stay unembedded and retry next session
+      const items = chunk.flatMap(({ img }, k) =>
+        vecs[k] ? [{ imageId: img.id, vec: vecs[k] }] : []
+      )
+      await enqueue(`Save embeddings ${albumId}`, async () => {
+        saveImageEmbeddings(TAG_MODEL, items)
       })
       done += items.length
-      if (changedSincePush >= TAG_PUSH_EVERY) await flush()
+      sinceRescore += items.length
+      if (sinceRescore >= TAG_PUSH_EVERY) await flush()
     }
   } catch (error) {
     if (tagCancelled.has(albumId)) return
     throw error
   } finally {
     taggingAlbum = null
-    await flush()
-    log.info(`Tagged ${done}/${todo.length} images in ${albumId}`)
+    // Also covers albums scored with an older TAG_SCORING_VERSION or with deleted photos
+    if (!tagCancelled.has(albumId)) await flush()
+    if (todo.length > 0) log.info(`Tagged ${done}/${todo.length} images in ${albumId}`)
   }
 }

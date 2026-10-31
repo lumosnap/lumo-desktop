@@ -444,3 +444,12 @@ export const TAGS: TagDef[] = [
     'a photo of a church building'
   )
 ]
+
+const LABELS: Record<string, string> = {
+  'black-and-white': 'Black & white',
+  'close-up': 'Close-up'
+}
+
+/** Human label for a slug, vocabulary or custom: 'group-photo' -> 'Group photo'. */
+export const tagLabel = (slug: string): string =>
+  LABELS[slug] ?? slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' ')

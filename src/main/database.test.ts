@@ -18,6 +18,11 @@ import {
   deleteSet,
   clearSetsNeedPush,
   saveImageTags,
+  saveImageEmbeddings,
+  getAlbumEmbeddings,
+  setTagOverride,
+  getAlbumTagSet,
+  setAlbumTagSet,
   getAlbumTags,
   getImagesMissingEmbedding,
   getEmbeddedImageIds,
@@ -46,7 +51,7 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
+    expect(db.pragma('user_version', { simple: true })).toBe(6)
     expect(cols('albums')).toEqual(
       expect.arrayContaining(['startTime', 'endTime', 'isOrphaned', 'albumType'])
     )
@@ -70,6 +75,8 @@ describe.skipIf(!loadable)('runMigrations', () => {
     expect(cols('set_images')).toEqual(['set_id', 'image_id', 'position'])
     expect(cols('image_embeddings')).toEqual(['image_id', 'model', 'vec'])
     expect(cols('image_tags')).toEqual(['image_id', 'tag', 'score'])
+    expect(cols('albums')).toEqual(expect.arrayContaining(['tag_set', 'tags_scored']))
+    expect(cols('image_tag_overrides')).toEqual(['image_id', 'tag', 'action'])
     db.close()
   })
 })
@@ -116,12 +123,20 @@ describe.skipIf(!loadable)('ai tags', () => {
     const [i1, i2, i3] = mk('a', 3)
     const vec = Float32Array.from([1, 0, 0])
     const save = (id: number, tags: string[]): number =>
-      saveImageTags('m1', [
-        { imageId: id, vec, tags: tags.map((tag, k) => ({ tag, score: 1 - k / 10 })) }
-      ])
+      saveImageTags([{ imageId: id, tags: tags.map((tag, k) => ({ tag, score: 1 - k / 10 })) }])
 
+    expect(
+      saveImageEmbeddings('m1', [
+        { imageId: i1, vec },
+        { imageId: i2, vec }
+      ])
+    ).toBe(2)
+    expect(getImage(i2)!.tags_need_push).toBe(1) // first embedding pushes even with no tags
+    expect(getAlbumEmbeddings('a', 'm1').map((e) => [e.imageId, [...e.vec]])).toEqual([
+      [i1, [1, 0, 0]],
+      [i2, [1, 0, 0]]
+    ])
     expect(save(i1, ['bride', 'haldi'])).toBe(1)
-    expect(save(i2, [])).toBe(1) // first embedding pushes even with no tags
     expect(getImagesMissingEmbedding('a', 'm1').map((r) => r.id)).toEqual([i3])
     expect(getImagesMissingEmbedding('a', 'm2').map((r) => r.id)).toEqual([i1, i2, i3])
     expect(getAlbumTags('a')).toEqual(new Map([[i1, ['bride', 'haldi']]]))
@@ -137,7 +152,63 @@ describe.skipIf(!loadable)('ai tags', () => {
 
     deleteImages([i1])
     expect(getAlbumTags('a').size).toBe(0)
-    expect(saveImageTags('m1', [{ imageId: i1, vec, tags: [] }])).toBe(0) // deleted meanwhile
+    expect(save(i1, [])).toBe(0) // deleted meanwhile
+    expect(saveImageEmbeddings('m1', [{ imageId: i1, vec }])).toBe(0)
+    closeDatabase()
+  })
+
+  it('manual overrides survive re-scoring; album tag set round-trips', () => {
+    initDatabase(':memory:')
+    album('a')
+    album('b')
+    const [i1, i2] = mk('a', 2)
+    const [j1] = mk('b', 1)
+    saveImageTags([
+      {
+        imageId: i1,
+        tags: [
+          { tag: 'bride', score: 2 },
+          { tag: 'indoor', score: 1 }
+        ]
+      }
+    ])
+    updateImagesBatch([{ id: i1, changes: { tags_need_push: 0 } }])
+
+    setTagOverride('a', [i1, i2, j1], 'my-tag', 'add') // j1 is in another album: ignored
+    setTagOverride('a', [i1], 'indoor', 'remove')
+    expect(getImage(i1)!.tags_need_push).toBe(1)
+    expect(getAlbumTags('a')).toEqual(
+      new Map([
+        [i1, ['my-tag', 'bride']],
+        [i2, ['my-tag']]
+      ])
+    )
+    expect(getAlbumTags('b').size).toBe(0)
+
+    // Re-scoring replaces AI tags only
+    saveImageTags([
+      {
+        imageId: i1,
+        tags: [
+          { tag: 'indoor', score: 3 },
+          { tag: 'groom', score: 1 }
+        ]
+      }
+    ])
+    expect(getAlbumTags('a').get(i1)).toEqual(['my-tag', 'groom'])
+
+    setTagOverride('a', [i1], 'my-tag', 'remove') // replaces the add
+    setTagOverride('a', [i1], 'indoor', 'add') // replaces the remove
+    expect(getAlbumTags('a').get(i1)).toEqual(['indoor', 'groom'])
+
+    expect(getAlbumTagSet('a')).toBeNull()
+    setAlbumTagSet('a', ['bride', 'groom'])
+    expect(getAlbumTagSet('a')).toEqual(['bride', 'groom'])
+    setAlbumTagSet('a', null)
+    expect(getAlbumTagSet('a')).toBeNull()
+
+    deleteImages([i1])
+    expect(getAlbumTags('a')).toEqual(new Map([[i2, ['my-tag']]]))
     closeDatabase()
   })
 })

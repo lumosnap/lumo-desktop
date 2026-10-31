@@ -16,6 +16,9 @@ import {
   runInTransaction,
   getAlbumImages,
   getAlbumTags,
+  getAlbumTagSet,
+  setAlbumTagSet,
+  setTagOverride,
   deleteImages,
   updateAlbum,
   listSets,
@@ -30,11 +33,25 @@ import {
 } from '../database'
 import { albumsApi } from '../api-client'
 import { uploadPipeline } from '../pipeline'
-import { analyzeAlbum, regroupAlbum, scheduleSetsPush, cancelTagging } from '../album-analysis'
+import {
+  analyzeAlbum,
+  regroupAlbum,
+  scheduleSetsPush,
+  cancelTagging,
+  rescoreAlbum,
+  scheduleTagsPush
+} from '../album-analysis'
+import { TAGS, tagLabel, type TagCategory } from '../tags/vocabulary'
+import { TAG_SLUG } from '../tags/select'
 import { watcherService } from '../watcher'
 import { createLogger, getErrorMessage } from '../logger'
 
 const logger = createLogger('IPC:Album')
+
+export interface TagConfig {
+  enabled: string[] | null // null = whole vocabulary
+  vocabulary: Array<{ slug: string; label: string; category: TagCategory }>
+}
 
 export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle(
@@ -257,7 +274,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           burstId: burst_id ?? null,
           isBurstCover: is_burst_cover === 1,
           momentId: moment_id ?? null,
-          tags: tags.get(row.id) ?? [], // AI tag slugs, best first
+          tags: tags.get(row.id) ?? [], // effective: manual adds, then AI tags not removed
           isFavorite: false,
           favoriteCount: 0,
           notesCount: 0,
@@ -515,6 +532,43 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
   setsMutation('sets:setCover', (setId: string, imageId: number | null) =>
     setSetCover(setId, Number.isInteger(imageId) ? imageId : null)
   )
+
+  // AI tags: per-album tag set + manual per-photo overrides
+  const vocabulary = TAGS.map((t) => ({
+    slug: t.slug,
+    label: tagLabel(t.slug),
+    category: t.category
+  }))
+  const tagConfig = (albumId: string): TagConfig => ({
+    enabled: getAlbumTagSet(albumId),
+    vocabulary
+  })
+  ipcMain.handle('tags:getAlbumConfig', (_event, albumId: string) => tagConfig(albumId))
+  ipcMain.handle('tags:setAlbumConfig', async (_event, albumId: string, enabled: unknown) => {
+    if (!getAlbum(albumId)) throw new Error('Album not found')
+    const known = new Set(TAGS.map((t) => t.slug))
+    setAlbumTagSet(
+      albumId,
+      Array.isArray(enabled) ? [...new Set(enabled.filter((s) => known.has(s)))] : null
+    )
+    await rescoreAlbum(albumId) // tag set is part of the scoring key, so this always recomputes
+    scheduleTagsPush(albumId)
+    return tagConfig(albumId)
+  })
+  for (const action of ['add', 'remove'] as const) {
+    ipcMain.handle(`tags:${action}`, (_event, albumId: string, imageIds: unknown, tag: unknown) => {
+      try {
+        if (typeof tag !== 'string' || !TAG_SLUG.test(tag)) throw new Error('Invalid tag')
+        if (!getAlbum(albumId)) throw new Error('Album not found')
+        setTagOverride(albumId, ids(imageIds), tag, action)
+        scheduleTagsPush(albumId)
+        return { success: true }
+      } catch (error: unknown) {
+        logger.error(`tags:${action} failed:`, getErrorMessage(error))
+        return { success: false, error: getErrorMessage(error) }
+      }
+    })
+  }
 
   // Show item in folder
   ipcMain.handle('shell:showItemInFolder', (_event, albumId: string, imageId: number) => {
