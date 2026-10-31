@@ -280,7 +280,8 @@ function closePop(restoreFocus = false): void {
   pop.value = null
   if (restoreFocus && popReturn?.isConnected) popReturn.focus()
 }
-// Scrolling the page closes a popover; scrolling inside one (the tag list) doesn't
+// The user scrolling the page closes a popover; scrolling inside one (the tag list) doesn't.
+// Wheel/touch rather than scroll events: grid refreshes restore scroll position programmatically.
 function onDocScroll(e: Event): void {
   if (!(e.target as Element).closest?.('.menu')) closePop()
 }
@@ -531,7 +532,9 @@ async function pickAdd(slug: string): Promise<void> {
   popBusy.value = false
   if (!ok) return
   if (p.ids.length > 1) toast(`Tagged ${photos(p.ids.length)} “${labelOf(slug)}”`)
-  closePop(true)
+  // Stay open for the next tag
+  p.query = ''
+  popEl.value?.querySelector('input')?.focus()
 }
 
 async function pickRemove(slug: string): Promise<void> {
@@ -1222,7 +1225,8 @@ onMounted(() => {
   })
   document.addEventListener('pointerdown', onDocPointer)
   document.addEventListener('keydown', onDocKey)
-  document.addEventListener('scroll', onDocScroll, true)
+  document.addEventListener('wheel', onDocScroll, { capture: true, passive: true })
+  document.addEventListener('touchmove', onDocScroll, { capture: true, passive: true })
 })
 
 onUnmounted(() => {
@@ -1234,7 +1238,8 @@ onUnmounted(() => {
   offSetsChanged?.()
   document.removeEventListener('pointerdown', onDocPointer)
   document.removeEventListener('keydown', onDocKey)
-  document.removeEventListener('scroll', onDocScroll, true)
+  document.removeEventListener('wheel', onDocScroll, true)
+  document.removeEventListener('touchmove', onDocScroll, true)
   if (lightbox) {
     lightbox.destroy()
     lightbox = null
