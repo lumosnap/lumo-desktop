@@ -32,6 +32,7 @@ export interface Album {
   people_enabled?: number // migration 8: 1 = find and group faces (opt-in)
   people_need_push?: number // migration 8: >0 = people changed locally since the last full push
   vectors_hash?: string | null // migration 11: hash of the LSV1 search file last uploaded; null = none
+  vectors_ids?: string | null // migration 12: JSON server ids in that file (deletes-only changes skip the upload)
 }
 
 export interface AlbumSet {
@@ -275,6 +276,10 @@ const migrations: Array<(database: Database.Database) => void> = [
   // 11: gallery search vectors. Differs from the album's current LSV1 file hash = needs upload.
   (database) => {
     database.exec('ALTER TABLE albums ADD COLUMN vectors_hash TEXT')
+  },
+  // 12: server ids in the uploaded vectors file; the gallery ignores ids no longer in the album
+  (database) => {
+    database.exec('ALTER TABLE albums ADD COLUMN vectors_ids TEXT')
   }
 ]
 
@@ -883,6 +888,18 @@ export function getAlbumEmbeddingsSignature(albumId: string, model: string): str
     )
     .get(albumId, model) as { n: number; s: number; r: number }
   return `${r.n}:${r.s}:${r.r}`
+}
+
+/** Server ids of photos with an embedding for `model` (no vector decoding). */
+export function getAlbumEmbeddedServerIds(albumId: string, model: string): number[] {
+  return (
+    conn()
+      .prepare(
+        `SELECT i.serverId AS id FROM image_embeddings e JOIN images i ON i.id = e.image_id
+         WHERE i.albumId = ? AND e.model = ? AND i.serverId IS NOT NULL`
+      )
+      .all(albumId, model) as Array<{ id: number }>
+  ).map((r) => r.id)
 }
 
 export function getAlbumEmbeddings(

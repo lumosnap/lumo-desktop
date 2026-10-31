@@ -21,6 +21,7 @@ import {
   getAlbumTags,
   getEmbeddedImageIds,
   getAlbumEmbeddings,
+  getAlbumEmbeddedServerIds,
   getAlbumEmbeddingsSignature,
   getAlbumTagSet,
   saveImageEmbeddings,
@@ -218,6 +219,16 @@ async function pushVectors(albumId: string): Promise<void> {
   if (!album) return
   const sig = getAlbumEmbeddingsSignature(albumId, TAG_MODEL)
   if (album.vectors_hash && vectorsSigs.get(albumId) === sig) return
+  // Only deletions since the last upload: the gallery drops ids missing from its manifest, so the
+  // file already on the server still answers correctly. Skip the rebuild and the ~8 MB re-upload.
+  const current = getAlbumEmbeddedServerIds(albumId, TAG_MODEL)
+  if (album.vectors_hash && album.vectors_ids && current.length > 0) {
+    const pushed = new Set(JSON.parse(album.vectors_ids) as number[])
+    if (current.every((id) => pushed.has(id))) {
+      vectorsSigs.set(albumId, sig)
+      return
+    }
+  }
   const started = Date.now()
   const serverIds = new Map(getAlbumImages(albumId).map((r) => [r.id, r.serverId]))
   const items = getAlbumEmbeddings(albumId, TAG_MODEL).flatMap(({ imageId, vec }) => {
@@ -227,7 +238,7 @@ async function pushVectors(albumId: string): Promise<void> {
   if (items.length === 0) {
     if (album.vectors_hash) {
       await albumsApi.deleteVectors(albumId)
-      updateAlbum(albumId, { vectors_hash: null })
+      updateAlbum(albumId, { vectors_hash: null, vectors_ids: null })
       log.info(`Cleared search vectors for ${albumId}`)
     }
     return
@@ -252,7 +263,10 @@ async function pushVectors(albumId: string): Promise<void> {
     })
     if (!put.success) throw new Error(`Vectors upload failed: ${put.error}`)
     await albumsApi.putVectors(albumId, key, items.length, VECTORS_MODEL_TAG)
-    updateAlbum(albumId, { vectors_hash: hash })
+    updateAlbum(albumId, {
+      vectors_hash: hash,
+      vectors_ids: JSON.stringify(items.map((i) => i.serverId))
+    })
     vectorsSigs.set(albumId, sig)
   } finally {
     await rm(path, { force: true })
