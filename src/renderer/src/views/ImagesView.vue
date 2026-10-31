@@ -45,6 +45,7 @@ import {
   type Row,
   type Tile
 } from '../utils/grid'
+import { tagLabel, tagCounts, withTags, searchTags } from '../utils/tags'
 
 const route = useRoute()
 const networkStore = useNetworkStore()
@@ -75,6 +76,7 @@ interface Image extends GroupableImage {
   notesCount?: number
   comments?: Comment[]
   favoritedBy?: string[] // client names who favorited this image
+  tags?: string[]
 }
 
 interface Album {
@@ -396,11 +398,36 @@ async function confirmDeleteSet(): Promise<void> {
 
 // Capture-time order when the album has moments, else upload order
 const orderedImages = computed(() => orderForGrouping(images.value))
-const filteredImages = computed(() => {
+// Set, then picks: the scope tag chips count over
+const scopedImages = computed(() => {
   const inView = inSet(orderedImages.value, activeSet.value?.imageIds ?? null)
   if (!showFavoritesOnly.value) return inView
   return inView.filter((img) => img.isFavorite)
 })
+const filteredImages = computed(() => withTags(scopedImages.value, activeTags.value))
+
+// Tag filter: chips for the most frequent tags in scope, all of them while searching
+const activeTags = ref<string[]>([])
+const tagQuery = ref('')
+const hasTags = computed(() => images.value.some((img) => img.tags?.length))
+const tagChips = computed(() => {
+  const counts = tagCounts(scopedImages.value)
+  const shown = tagQuery.value ? searchTags(counts, tagQuery.value) : counts.slice(0, 10)
+  // Active tags stay visible first, even when out of scope or not matching the search
+  const n = new Map(counts)
+  return [
+    ...activeTags.value.map((t) => [t, n.get(t) ?? 0] as const),
+    ...shown.filter(([t]) => !activeTags.value.includes(t))
+  ]
+})
+function toggleTag(slug: string): void {
+  const on = activeTags.value.includes(slug)
+  activeTags.value = on ? activeTags.value.filter((t) => t !== slug) : [...activeTags.value, slug]
+}
+function clearTags(): void {
+  activeTags.value = []
+  tagQuery.value = ''
+}
 
 const grid = computed(() =>
   flattenRows(filteredImages.value, { columns: columns.value, stackBursts: stackBursts.value })
@@ -479,6 +506,8 @@ watch(
 )
 // The selection bar is a little taller than the title bar, which moves the grid
 watch(isSelectionMode, () => nextTick(updateGridLayout))
+// So does the tag row appearing once photos are analysed
+watch(hasTags, () => nextTick(updateGridLayout))
 
 const currentHeader = computed(() => virtualRows.value.find((r) => r.sticky)?.v.index ?? null)
 
@@ -866,6 +895,20 @@ function initLightbox(): void {
       }
     })
 
+    // AI tags, a quiet line along the bottom
+    ui.registerElement({
+      name: 'lb-tags',
+      order: 10,
+      appendTo: 'root',
+      onInit: (el, pswp) => {
+        pswp.on('change', () => {
+          const tags = slideImage(pswp)?.tags || []
+          el.hidden = tags.length === 0
+          el.textContent = tags.map(tagLabel).join(' · ')
+        })
+      }
+    })
+
     // Notes button opens the notes panel
     ui.registerElement({
       name: 'notes-button',
@@ -1137,6 +1180,37 @@ onUnmounted(() => {
           </button>
         </div>
 
+        <div v-if="hasTags" class="set-bar" role="toolbar" aria-label="Tags">
+          <input
+            v-model="tagQuery"
+            class="input tag-search"
+            type="search"
+            placeholder="Find a tag"
+            aria-label="Find a tag"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button
+            v-for="[slug, n] in tagChips"
+            :key="slug"
+            class="btn sm ghost"
+            :aria-pressed="activeTags.includes(slug)"
+            @click="toggleTag(slug)"
+          >
+            {{ tagLabel(slug) }} <span class="n num">{{ nf(n) }}</span>
+          </button>
+          <span v-if="tagQuery && !tagChips.length" class="n">No tags match</span>
+          <button
+            v-if="activeTags.length || tagQuery"
+            class="icon-btn sm plain"
+            aria-label="Clear tag filters"
+            title="Clear tag filters"
+            @click="clearTags"
+          >
+            <X />
+          </button>
+        </div>
+
         <div v-if="gridLoading" class="photos" aria-busy="true">
           <div v-for="i in 18" :key="i" class="ph skel"></div>
         </div>
@@ -1150,6 +1224,12 @@ onUnmounted(() => {
           <button v-if="album?.sourceFolderPath" class="btn ghost" @click="showAlbumFolder">
             <FolderOpen />Show in Finder
           </button>
+        </div>
+
+        <div v-else-if="filteredImages.length === 0 && activeTags.length" class="empty">
+          <h2>No photos tagged {{ activeTags.map(tagLabel).join(' + ') }}</h2>
+          <p>Try fewer tags{{ activeSet || showFavoritesOnly ? ', or a wider view' : '' }}.</p>
+          <button class="btn ghost" @click="clearTags">Clear tags</button>
         </div>
 
         <div
@@ -1392,6 +1472,12 @@ onUnmounted(() => {
 .set-bar > * {
   flex: none;
 }
+.tag-search {
+  width: 160px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
 .set-bar .n,
 .menu .n {
   color: var(--ink-3);
@@ -1515,6 +1601,22 @@ onUnmounted(() => {
   height: 16px;
   fill: white;
   stroke: white;
+}
+.pswp__lb-tags {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 160px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: oklch(70% 0 0);
+  pointer-events: none;
+}
+.pswp__lb-tags[hidden] {
+  display: none;
 }
 .pswp__button,
 .pswp__button:hover,

@@ -32,6 +32,7 @@ type AlbumImageWithFavorites = Image & {
   burstId: string | null
   isBurstCover: boolean
   momentId: string | null
+  tags: string[] // AI tag slugs, by score; empty when none or not analysed yet
 }
 
 declare global {

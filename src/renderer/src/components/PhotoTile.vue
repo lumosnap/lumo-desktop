@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { thumbHashToDataURL } from 'thumbhash'
+import { tagLabel } from '../utils/tags'
 import { Heart, Check, FolderSearch, MessageSquare, ImageOff, Layers } from 'lucide-vue-next'
 
 interface TileImage {
@@ -9,6 +10,7 @@ interface TileImage {
   favoritedBy?: string[]
   notesCount?: number
   thumbhash?: string | null
+  tags?: string[]
 }
 
 const props = defineProps<{
@@ -120,7 +122,12 @@ onMounted(() => {
       >Processing
     </span>
     <div class="fname">
-      <span>{{ image.originalFilename }}</span>
+      <span class="fn">
+        {{ image.originalFilename }}
+        <span v-if="image.tags?.length" class="tg">{{
+          image.tags.slice(0, 4).map(tagLabel).join(' · ')
+        }}</span>
+      </span>
       <button
         aria-label="Show original in Finder"
         title="Show original in Finder"

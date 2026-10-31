@@ -1084,6 +1084,20 @@ select.input {
 .ph:hover .fname {
   opacity: 1;
 }
+.ph .fname .fn {
+  min-width: 0;
+}
+.ph .fname .fn,
+.ph .fname .tg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ph .fname .tg {
+  display: block;
+  font-size: 11px;
+  opacity: 0.75;
+}
 .ph .fname button {
   margin-left: auto;
   background: none;
