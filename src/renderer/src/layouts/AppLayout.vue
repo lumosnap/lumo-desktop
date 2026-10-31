@@ -1,163 +1,163 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import FloatingNavbar from '../components/FloatingNavbar.vue'
-import { AlertTriangle, WifiOff, X } from 'lucide-vue-next'
+import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { Images, CalendarDays, Settings2, WifiOff, X } from 'lucide-vue-next'
+import PrintStack from '../components/PrintStack.vue'
 import { useNetworkStore } from '../stores/network'
+import { useProfileStore } from '../stores/profile'
+import { useAuthStore } from '../stores/auth'
+import { useAlbumStore } from '../stores/album'
 
 const BANNER_DISMISSED_KEY = 'lumosnap:lowStorageBannerDismissed'
 const BANNER_DISMISSED_SPACE_KEY = 'lumosnap:lowStorageBannerDismissedAtSpace'
 
-const showLowStorageBanner = ref(false)
-const isCheckingStorage = ref(true)
+const route = useRoute()
 const networkStore = useNetworkStore()
+const profileStore = useProfileStore()
+const authStore = useAuthStore()
+const albumStore = useAlbumStore()
+
+const lowStorage = ref<string | null>(null)
+const upcoming = ref<number | null>(null)
+
+const nf = (n: number): string => n.toLocaleString('en-IN')
+const section = computed(() =>
+  route.path.startsWith('/bookings')
+    ? 'bookings'
+    : route.path.startsWith('/settings')
+      ? 'settings'
+      : 'albums'
+)
+const biz = computed(
+  () => profileStore.profile?.businessName || authStore.user?.name || authStore.user?.email || ''
+)
+const used = computed(() => profileStore.profile?.totalImages ?? 0)
+const limit = computed(() => profileStore.profile?.imageLimit || 0)
 
 async function checkStorageStatus(): Promise<void> {
-  isCheckingStorage.value = true
   try {
     const info = await window.api.config.getCurrentStorageInfo()
-
-    if (info.success && info.isLowStorage) {
-      // Check if banner was previously dismissed
-      const dismissedAt = localStorage.getItem(BANNER_DISMISSED_KEY)
-      const dismissedSpace = localStorage.getItem(BANNER_DISMISSED_SPACE_KEY)
-
-      // If storage has gotten worse (less space) since dismissal, show again
-      if (dismissedAt && dismissedSpace) {
-        const previousSpace = parseInt(dismissedSpace, 10)
-        // Show again if space decreased by more than 1GB since last dismissal
-        if (info.freeSpace >= previousSpace - 1024 * 1024 * 1024) {
-          showLowStorageBanner.value = false
-        } else {
-          // Space got significantly worse, show banner again
-          showLowStorageBanner.value = true
-        }
-      } else {
-        showLowStorageBanner.value = true
-      }
-    } else {
-      // Storage is healthy, clear any previous dismissal
+    if (!info.success || !info.isLowStorage) {
       localStorage.removeItem(BANNER_DISMISSED_KEY)
       localStorage.removeItem(BANNER_DISMISSED_SPACE_KEY)
-      showLowStorageBanner.value = false
+      lowStorage.value = null
+      return
     }
+    const dismissedSpace = localStorage.getItem(BANNER_DISMISSED_SPACE_KEY)
+    // Show again if space dropped by more than 1 GB since the last dismissal
+    const stillDismissed =
+      localStorage.getItem(BANNER_DISMISSED_KEY) &&
+      dismissedSpace &&
+      info.freeSpace >= parseInt(dismissedSpace, 10) - 1024 * 1024 * 1024
+    lowStorage.value = stillDismissed ? null : info.freeSpaceFormatted
   } catch {
-    // Silent fail, don't show banner on error
-    showLowStorageBanner.value = false
-  } finally {
-    isCheckingStorage.value = false
+    lowStorage.value = null
   }
 }
 
 function dismissBanner(): void {
-  showLowStorageBanner.value = false
+  lowStorage.value = null
   localStorage.setItem(BANNER_DISMISSED_KEY, Date.now().toString())
-  // Store current space to detect if it gets worse
   window.api.config.getCurrentStorageInfo().then((info) => {
-    if (info.success) {
-      localStorage.setItem(BANNER_DISMISSED_SPACE_KEY, info.freeSpace.toString())
-    }
+    if (info.success) localStorage.setItem(BANNER_DISMISSED_SPACE_KEY, info.freeSpace.toString())
   })
+}
+
+async function countUpcoming(): Promise<void> {
+  const res = await window.api.profile.getBookings()
+  if (!res.success || !res.data) return
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  upcoming.value = res.data.filter((b) => new Date(b.eventDate) >= today).length
 }
 
 onMounted(() => {
   checkStorageStatus()
+  profileStore.fetchProfile()
+  if (albumStore.status !== 'ready') albumStore.load()
+  countUpcoming().catch((e) => console.error('Failed to count bookings:', e))
 })
 </script>
 
 <template>
-  <div
-    class="min-h-screen bg-[#0f0f13] font-sans text-gray-900 selection:bg-[#00E0C6] selection:text-white overflow-hidden"
-  >
-    <!-- Ambient Background Blobs -->
-    <div class="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-      <!-- Turquoise/Blue Blob (Top Left) -->
-      <div
-        class="absolute -left-32 top-1/4 h-[500px] w-[500px] rounded-full bg-gradient-to-br from-teal-500/40 to-blue-600/30 blur-[100px] animate-pulse-slow"
-      ></div>
-
-      <!-- Cyan/Emerald Blob (Bottom Right) -->
-      <div
-        class="absolute -left-20 bottom-0 h-[400px] w-[400px] rounded-full bg-gradient-to-br from-cyan-500/30 to-emerald-400/20 blur-[80px]"
-      ></div>
-
-      <!-- Blue/Teal Blob (Top Right) -->
-      <div
-        class="absolute left-32 top-0 h-[300px] w-[300px] rounded-full bg-gradient-to-br from-blue-500/20 to-teal-400/20 blur-[60px]"
-      ></div>
-    </div>
-
-    <FloatingNavbar />
-
-    <!-- Main Content Area -->
-    <main class="min-h-screen relative z-10">
-      <div class="h-screen bg-[#f5f6f7] overflow-hidden relative flex flex-col">
-        <!-- Offline Banner -->
-        <Transition name="slide-down">
-          <div
-            v-if="!networkStore.isOnline"
-            class="bg-gradient-to-r from-slate-600 to-slate-700 px-4 py-3 flex items-center gap-3 shrink-0"
-          >
-            <WifiOff class="w-5 h-5 text-white shrink-0" />
-            <p class="text-sm font-medium text-white">
-              You're offline. Some features like sync and album creation are disabled.
-            </p>
+  <div class="app">
+    <aside class="side">
+      <div class="mark"><img src="../assets/logo.png" alt="" />LumoSnap</div>
+      <nav class="nav" aria-label="Main">
+        <router-link to="/albums" :aria-current="section === 'albums' ? 'page' : undefined">
+          <Images />Albums
+          <span v-if="albumStore.status === 'ready'" class="count num">{{
+            albumStore.albums.length
+          }}</span>
+        </router-link>
+        <router-link to="/bookings" :aria-current="section === 'bookings' ? 'page' : undefined">
+          <CalendarDays />Bookings
+          <span v-if="upcoming !== null" class="count num">{{ upcoming }}</span>
+        </router-link>
+        <router-link
+          to="/settings/profile"
+          :aria-current="section === 'settings' ? 'page' : undefined"
+        >
+          <Settings2 />Settings
+        </router-link>
+      </nav>
+      <PrintStack />
+      <div class="side-foot">
+        <div v-if="limit" class="usage">
+          <div class="usage-row">
+            <span>{{ profileStore.profile?.planName }} plan</span>
+            <span class="num">{{ Math.round((used / limit) * 100) }}%</span>
           </div>
-        </Transition>
-
-        <!-- Low Storage Banner -->
-        <Transition name="slide-down">
           <div
-            v-if="showLowStorageBanner"
-            class="bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-3 flex items-center justify-between gap-4 shrink-0"
+            class="bar"
+            role="meter"
+            :aria-valuenow="used"
+            :aria-valuemax="limit"
+            aria-label="Photos used"
           >
-            <div class="flex items-center gap-3">
-              <AlertTriangle class="w-5 h-5 text-white shrink-0" />
-              <p class="text-sm font-medium text-white">
-                You're running low on storage space. Consider freeing up space or changing your
-                storage location in Settings.
-              </p>
-            </div>
-            <button
-              class="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 transition-colors shrink-0"
-              @click="dismissBanner"
+            <span :style="{ '--p': Math.min(1, used / limit) }"></span>
+          </div>
+          <div class="usage-row">
+            <span
+              ><b class="num">{{ nf(used) }}</b> of {{ nf(limit) }} photos</span
             >
-              <X class="w-4 h-4 text-white" />
-            </button>
           </div>
-        </Transition>
-
-        <div class="flex-1 overflow-y-auto custom-scrollbar">
-          <slot />
+          <div style="margin-top: 8px">
+            <router-link to="/settings/billing">See plans</router-link>
+          </div>
         </div>
+        <router-link class="who" to="/settings/profile">
+          <span class="avatar brand">{{ biz[0]?.toUpperCase() }}</span>
+          <span
+            >{{ biz }}<small>{{ authStore.user?.email }}</small></span
+          >
+        </router-link>
       </div>
+    </aside>
+    <main id="main" class="main">
+      <div v-if="!networkStore.isOnline" class="banner offline" role="status">
+        <WifiOff />
+        <p>
+          <b>You're offline.</b> Uploads and new albums wait until you reconnect. Your photos stay
+          on this computer.
+        </p>
+      </div>
+      <div v-if="lowStorage && route.path !== '/settings/storage'" class="banner" role="status">
+        <span class="dot warn"></span>
+        <p>
+          <b>{{ lowStorage }} left on this drive.</b> LumoSnap keeps compressed copies here until
+          they upload.
+        </p>
+        <router-link class="btn sm ghost" to="/settings/storage">Change location</router-link>
+        <button
+          class="icon-btn sm plain"
+          aria-label="Dismiss storage warning"
+          @click="dismissBanner"
+        >
+          <X />
+        </button>
+      </div>
+      <slot />
     </main>
   </div>
 </template>
-
-<style>
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.1);
-  border-radius: 20px;
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.2);
-}
-
-/* Banner slide transition */
-.slide-down-enter-active,
-.slide-down-leave-active {
-  transition: all 0.3s ease;
-}
-
-.slide-down-enter-from,
-.slide-down-leave-to {
-  opacity: 0;
-  transform: translateY(-100%);
-}
-</style>

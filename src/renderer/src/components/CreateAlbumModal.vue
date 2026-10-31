@@ -1,16 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import Modal from './ui/Modal.vue'
-import {
-  AlertCircle,
-  Plus,
-  Loader2,
-  AlertTriangle,
-  ArrowUpCircle,
-  WifiOff,
-  FolderOpen,
-  X
-} from 'lucide-vue-next'
+import { FolderOpen, Folder, X } from 'lucide-vue-next'
 import { useProfileStore } from '../stores/profile'
 import { useNetworkStore } from '../stores/network'
 
@@ -23,7 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  created: [albumId: string]
+  created: [album: { id: string; title: string; sourceFolderPath: string }]
 }>()
 
 const title = ref<string>('')
@@ -43,22 +34,19 @@ watch(
   }
 )
 
-// Computed for limit warning message
 const limitWarning = computed(() => {
   if (!profileStore.profile) return null
   if (profileStore.isAtLimit) {
     return {
-      type: 'error' as const,
+      type: 'bad' as const,
       message:
-        "You've reached your image limit. Uploads will not be processed until you upgrade your plan.",
-      remaining: 0
+        "You've reached your photo limit. New photos won't upload until you upgrade your plan."
     }
   }
   if (profileStore.isNearLimit) {
     return {
-      type: 'warning' as const,
-      message: `Only ${profileStore.remainingImages.toLocaleString()} images remaining in your plan. Consider upgrading.`,
-      remaining: profileStore.remainingImages
+      type: 'warn' as const,
+      message: `Only ${profileStore.remainingImages.toLocaleString('en-IN')} photos left in your plan.`
     }
   }
   return null
@@ -75,12 +63,12 @@ async function selectFolder(): Promise<void> {
       sourceFolderPath.value = result
       // Auto-fill title from folder name if empty
       if (!title.value.trim()) {
-        const folderName = result.split(/[/\\]/).pop() || ''
-        title.value = folderName
+        title.value = result.split(/[/\\]/).pop() || ''
       }
     }
   } catch (err) {
     console.error('Failed to open folder dialog:', err)
+    error.value = "Couldn't open the folder picker"
   }
 }
 
@@ -90,7 +78,7 @@ function clearFolder(): void {
 
 async function createAlbum(): Promise<void> {
   if (!isFormValid.value) {
-    error.value = 'Please enter an album title and select a source folder'
+    error.value = 'Give the album a name and choose a folder'
     return
   }
 
@@ -106,7 +94,11 @@ async function createAlbum(): Promise<void> {
     })
 
     if (result.success) {
-      emit('created', result.album.id)
+      emit('created', {
+        id: result.album.id,
+        title: title.value.trim(),
+        sourceFolderPath: sourceFolderPath.value
+      })
       resetForm()
     } else {
       error.value = result.error || 'Failed to create album'
@@ -133,150 +125,81 @@ function handleClose(): void {
 </script>
 
 <template>
-  <Modal :show="show" title="Create New Album" @close="handleClose">
-    <div class="space-y-5">
-      <!-- Limit Warning -->
+  <Modal :show="show" title="New album" @close="handleClose">
+    <form id="create-album" @submit.prevent="createAlbum">
       <div
         v-if="limitWarning"
-        class="flex items-start gap-3 p-4 rounded-xl border"
-        :class="
-          limitWarning.type === 'error'
-            ? 'bg-red-50 border-red-200'
-            : 'bg-amber-50 border-amber-200'
-        "
+        class="inset"
+        style="display: flex; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 16px"
       >
-        <AlertTriangle
-          class="w-5 h-5 flex-shrink-0 mt-0.5"
-          :class="limitWarning.type === 'error' ? 'text-red-500' : 'text-amber-500'"
-        />
-        <div class="flex-1">
-          <p
-            class="text-sm"
-            :class="limitWarning.type === 'error' ? 'text-red-600' : 'text-amber-600'"
-          >
-            {{ limitWarning.message }}
-          </p>
-          <router-link
-            to="/profile"
-            class="inline-flex items-center gap-1 mt-2 text-sm font-medium"
-            :class="
-              limitWarning.type === 'error'
-                ? 'text-red-700 hover:text-red-800'
-                : 'text-amber-700 hover:text-amber-800'
-            "
-            @click="handleClose"
-          >
-            <ArrowUpCircle class="w-4 h-4" />
-            Upgrade Plan
-          </router-link>
-        </div>
+        <span class="dot" :class="limitWarning.type"></span>
+        <span style="flex: 1">{{ limitWarning.message }}</span>
+        <router-link class="btn sm ghost" to="/settings/billing" @click="handleClose"
+          >See plans</router-link
+        >
       </div>
 
-      <!-- Album title -->
-      <div>
-        <label for="album-title" class="block text-sm font-medium text-slate-700 mb-2">
-          Album Name <span class="text-red-500">*</span>
-        </label>
+      <div class="field">
+        <label for="a-name">Album name</label>
         <input
-          id="album-title"
+          id="a-name"
           v-model="title"
-          type="text"
-          placeholder="e.g., Smith Wedding, Product Shoot"
+          class="input"
+          required
+          placeholder="Meera's 1st birthday"
           :disabled="isCreating"
-          class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all disabled:opacity-50"
-          @keyup.enter="createAlbum"
+          autofocus
         />
       </div>
 
-      <!-- Source Folder Picker (required) -->
-      <div>
-        <label class="block text-sm font-medium text-slate-700 mb-2">
-          Source Folder <span class="text-red-500">*</span>
-        </label>
-
-        <div v-if="!sourceFolderPath" class="flex gap-2">
+      <div class="field">
+        <span class="lbl">Photos from</span>
+        <div v-if="sourceFolderPath" class="inset path-row" style="padding: 8px 8px 8px 16px">
+          <Folder />
+          <span class="p" :title="sourceFolderPath">{{ sourceFolderPath }}</span>
           <button
             type="button"
+            class="icon-btn sm plain"
+            aria-label="Choose a different folder"
             :disabled="isCreating"
-            class="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 text-slate-500 hover:text-indigo-600 font-medium transition-all disabled:opacity-50"
-            @click="selectFolder"
-          >
-            <FolderOpen class="w-4 h-4" />
-            Select Existing Folder
-          </button>
-        </div>
-
-        <div v-else class="flex items-center gap-2">
-          <div
-            class="flex-1 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-sm text-indigo-900 truncate"
-          >
-            {{ sourceFolderPath }}
-          </div>
-          <button
-            type="button"
-            :disabled="isCreating"
-            class="p-3 rounded-xl bg-slate-100 hover:bg-red-100 text-slate-500 hover:text-red-600 transition-colors disabled:opacity-50"
-            title="Clear folder selection"
             @click="clearFolder"
           >
-            <X class="w-4 h-4" />
+            <X />
           </button>
         </div>
-
-        <p class="mt-2 text-xs text-slate-500">
-          <span v-if="!sourceFolderPath" class="text-amber-600 font-medium">
-            Select the folder on your computer that contains the photos you want to import.
-          </span>
-          <span v-else>
-            This folder will be watched independently for new photos.
-          </span>
-        </p>
-      </div>
-
-      <!-- Error message -->
-      <div
-        v-if="error"
-        class="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3"
-      >
-        <AlertCircle class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-        <p class="text-sm text-red-600">{{ error }}</p>
-      </div>
-
-      <!-- Info note -->
-      <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
-        <p class="text-sm text-slate-600">
-          <strong class="text-indigo-600">Tip:</strong>
-          The app will scan and upload all photos from the selected folder. Any new photos added
-          later will be detected automatically.
-        </p>
-      </div>
-
-      <!-- Action buttons -->
-      <div class="flex gap-3 pt-2">
         <button
+          v-else
+          type="button"
+          class="btn ghost"
+          style="justify-content: flex-start"
           :disabled="isCreating"
-          class="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors disabled:opacity-50"
-          @click="handleClose"
+          @click="selectFolder"
         >
-          Cancel
+          <FolderOpen />Choose a folder you already have…
         </button>
-        <button
-          :disabled="!isFormValid || isCreating || !networkStore.isOnline"
-          class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-semibold shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          :title="
-            !networkStore.isOnline
-              ? 'You are offline. Album creation requires an internet connection.'
-              : ''
-          "
-          @click="createAlbum"
-        >
-          <WifiOff v-if="!networkStore.isOnline" class="w-4 h-4" />
-          <Loader2 v-else-if="isCreating" class="w-4 h-4 animate-spin" />
-          <Plus v-else class="w-4 h-4" />
-          <span v-if="!networkStore.isOnline">Offline</span>
-          <span v-else>{{ isCreating ? 'Creating...' : 'Create Album' }}</span>
-        </button>
+        <span class="hint">{{
+          sourceFolderPath
+            ? 'Photos stay in this folder. New ones you add here upload on their own.'
+            : 'Pick the folder on this computer that holds the shoot. LumoSnap uploads what is in it.'
+        }}</span>
       </div>
-    </div>
+
+      <p v-if="error" class="err"><span class="dot bad"></span>{{ error }}</p>
+    </form>
+
+    <template #footer>
+      <button class="btn ghost" :disabled="isCreating" @click="handleClose">Cancel</button>
+      <button
+        type="submit"
+        form="create-album"
+        class="btn primary"
+        :disabled="!isFormValid || isCreating || !networkStore.isOnline"
+        :title="!networkStore.isOnline ? 'New albums need a connection' : ''"
+      >
+        <template v-if="!networkStore.isOnline">Offline</template>
+        <template v-else-if="isCreating"><span class="spin"></span>Creating…</template>
+        <template v-else>Create album</template>
+      </button>
+    </template>
   </Modal>
 </template>

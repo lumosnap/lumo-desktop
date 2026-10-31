@@ -346,7 +346,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         }
       }
 
-      return { success: true, count: successCount, errorCount }
+      return { success: true, count: successCount, errorCount, destinationDir }
     } catch (error: unknown) {
       logger.error('Failed to copy images:', getErrorMessage(error))
       return { success: false, error: getErrorMessage(error) }

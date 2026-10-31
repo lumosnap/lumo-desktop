@@ -102,7 +102,13 @@ declare global {
         copyImages: (
           albumId: string,
           imageIds: number[]
-        ) => Promise<{ success: boolean; count?: number; errorCount?: number; error?: string }>
+        ) => Promise<{
+          success: boolean
+          count?: number
+          errorCount?: number
+          destinationDir?: string
+          error?: string
+        }>
         scanSourceFolder: (
           path: string
         ) => Promise<{ success: boolean; count: number; images: FileStats[]; error?: string }>

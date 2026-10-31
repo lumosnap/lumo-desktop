@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useNetworkStore } from './stores/network'
+import AppToast from './components/ui/AppToast.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -35,4 +36,5 @@ onMounted(async () => {
 
 <template>
   <router-view />
+  <AppToast />
 </template>

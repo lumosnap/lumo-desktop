@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LumoSnap Design Log</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --canvas: oklch(94.6% 0.003 255); --card: oklch(99.5% 0.001 255); --inset: oklch(96.4% 0.003 255);
+  --line: oklch(91.8% 0.004 255); --ink: oklch(21% 0.01 255); --ink-2: oklch(42% 0.01 255); --ink-3: oklch(52% 0.008 255);
+  --brand: oklch(52% 0.16 255); --brand-soft: oklch(85% 0.06 255); --flag: oklch(55% 0.2 27);
+  --ok: oklch(60% 0.15 152); --warn: oklch(72% 0.15 70);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--ink); font: 400 15px/1.55 Outfit, system-ui, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 32px 16px 80px; display: grid; gap: 14px; }
+section, article, header.hero { background: var(--card); border-radius: 22px; padding: 26px 28px; }
+header.hero { padding: 34px 28px; }
+.hero small { color: var(--ink-3); }
+.hero h1 { font-weight: 300; font-size: 38px; letter-spacing: -.025em; line-height: 1.1; margin: 6px 0 12px; }
+.hero p { color: var(--ink-2); max-width: 62ch; margin: 0; }
+.hero mark { background: linear-gradient(transparent 60%, var(--brand-soft) 60%); color: inherit; }
+h2 { font-weight: 400; font-size: 22px; letter-spacing: -.01em; margin: 0 0 4px; }
+h3 { font-weight: 500; font-size: 15px; margin: 26px 0 8px; }
+p.lede { color: var(--ink-3); margin: 0 0 16px; }
+ul { padding-left: 20px; margin: 8px 0; } li { margin: 4px 0; }
+b, strong { font-weight: 500; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th { text-align: left; font-weight: 400; color: var(--ink-3); padding: 0 10px 8px 0; }
+td { padding: 9px 10px 9px 0; border-top: 1px solid var(--line); vertical-align: top; }
+td.rejected { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--ink-3); }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+.sw { width: 112px; border-radius: 14px; overflow: hidden; background: var(--inset); font-size: 12px; }
+.sw i { display: block; height: 52px; }
+.sw span { display: block; padding: 6px 10px; color: var(--ink-2); }
+.bar { height: 8px; border-radius: 9px; background: var(--line); display: flex; overflow: hidden; margin: 10px 0; max-width: 360px; }
+.bar span { background: var(--brand); } .bar span.p { background: var(--brand-soft); }
+.pill { display: inline-flex; align-items: center; height: 34px; padding: 0 16px; border-radius: 99px; background: var(--ink); color: var(--card); font-weight: 500; font-size: 13.5px; }
+.pill.o { background: var(--card); color: var(--ink); border: 1px solid oklch(86% 0.005 255); }
+.ask { border: 2px solid var(--flag); }
+.ask li::marker { color: var(--flag); }
+.dirs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 10px 0; }
+.dirs div { background: var(--inset); border-radius: 14px; padding: 12px 14px; font-size: 13.5px; }
+.dirs div.on { background: var(--card); outline: 2px solid var(--ink); }
+.dirs b { display: block; }
+code { font-size: 12.5px; background: var(--inset); padding: 1px 5px; border-radius: 5px; }
+a { color: var(--brand); }
+</style>
+</head>
+<body>
+<main>
+
+<header class="hero" id="top">
+<small>LumoSnap desktop · design log · 29 Oct 2026</small>
+<h1>Delivery tracking for photographs</h1>
+<p>The mock shows every signed-in and signed-out screen of the app in one file. Each album is <mark>a parcel on its way from your disk to your client</mark>, and the app always shows where it is. The look comes from the 5 reference images: grey canvas, white cards, one black pill, and blue from the sleep-bar reference. Open <a href="lumosnap-mock.html">lumosnap-mock.html</a> to use it.</p>
+</header>
+
+<section id="brief">
+<h2>Brief</h2>
+<p class="lede">Who uses it, for which job, in which moment.</p>
+<ul>
+<li><b>Who sets the look:</b> Existing, at Reimagine level. The requester asked for a cleaner, less generated look. The 5 reference images give the look, so the look is also Given.</li>
+<li><b>Scope:</b> product. All screens in <code>fe-design-flow.md</code>, as one connected mock.</li>
+<li><b>For:</b> independent photographers and small studios in India who shoot weddings, portraits and commercial work.</li>
+<li><b>Job:</b> move a shoot from a folder on disk to a private client link, then see what the client picked.</li>
+<li><b>Moment:</b> after the edit, often late, with a large upload in the background and a client who waits on WhatsApp.</li>
+<li><b>Character:</b> delivery tracking for photographs. Each album is a parcel. It is on disk, in transit, or delivered, and the app always says which.</li>
+<li><b>Feel:</b> calm and sure. In the first second the photos are the only colour. The app says "your work is handled", not "look at this app".</li>
+<li><b>Richness:</b> medium. The library and the gallery are full of photos, so the chrome stays plain. The progress surfaces get the richest detail because the photographer checks them most.</li>
+<li><b>Identity:</b> kept from the product: the violet aperture logo, Outfit (already bundled as @fontsource/outfit). New: blue only for progress, data, links and selection.</li>
+<li><b>Core copy:</b> "New album", "Share with client", "Client link", "Picked by", "Folder changed", "Folder missing", "Uploading 318 of 480", "Review folder changes", "Sync 25 changes".</li>
+<li><b>First value:</b> on the empty library, one action ("Create your first album") makes a real album with a real folder. A first-run sample album is not in the spec, so the mock does not add one.</li>
+<li><b>Signature moment:</b> the upload progress: a pill in the Albums header that opens a panel with the percent, a segmented bar and the stage counts. Failed files show as red notches on the bar.</li>
+<li><b>Delight piece:</b> the print stack, in the sidebar above the plan. Every delivered photo becomes a 6×4 print on a pile. The top print is the newest album cover, and the line says how tall the pile is (0.3 mm a print) next to a light stand. It needs no new back end: it uses album covers and photo counts the app already has. Two earlier tries on 30 Oct were removed. A 2 × 2 grid of agreed frames was the genre's favourites grid. A delivery record needed link and open tracking, which the product does not have, and it was a feature, not a feeling.</li>
+<li><b>Ending:</b> upload ends with "All 480 uploaded" in the pill, then the pill goes away. Sync ends with the thumb at "Cloud" and "In sync". Share ends with "Copied" on the button.</li>
+<li><b>Screens:</b> 960 px to 2560 px, desktop only. Source: Electron window 1400 × 900 in <code>src/main/index.ts</code>, no phone target.</li>
+<li><b>Map:</b> Albums is home. An album opens its gallery; the gallery leads to the lightbox and to client notes. Bookings and Settings are side places. The account and plan usage sit at the foot of the sidebar.</li>
+<li><b>Flow shape:</b> setup is 3 steps (one decision each). Create album, delete and sync are dialogs on top of Albums, because each is one short decision about one album.</li>
+<li><b>Constraints:</b> keep every function in the spec; no new back-end data.</li>
+</ul>
+</section>
+
+<section id="direction">
+<h2>Direction</h2>
+<p class="lede">Delivery tracking, not the contact sheet, because the ledger already holds a contact-sheet run for this product.</p>
+<ul>
+<li><b>Default to beat:</b> white #fff page, slate-200 borders, indigo-500 accent, Inter 14 px, 8 px radius cards with a small shadow, top bar plus card grid, title-case labels, gradient on the active nav item.</li>
+<li><b>Directions sampled:</b>
+  <ul>
+  <li>Delivery tracking (chosen): progress and place are the main facts. Typicality about 15%.</li>
+  <li>Darkroom: dark grey surround like an editing app. Typicality about 45%. Beat: the references are light, and clients judge photos on light pages.</li>
+  <li>Gallery wall labels: much white space, small serif captions. Typicality about 25%. Beat: Bookings and Settings need density.</li>
+  </ul></li>
+<li><b>Rolled candidate:</b> lab order envelope: kraft paper, stamped order numbers. Beat: on an Operate surface it is a costume.</li>
+<li><b>Chosen:</b> delivery tracking inside the given look. Mutation: remove the top bar. The account and plan usage move to the sidebar foot, so the header holds only the page and its actions.</li>
+<li><b>Motif:</b> the route bar: a track with two ends and a mark that moves (upload bar, sync bar, plan usage, free disk space).</li>
+<li><b>Style tile:</b> the setup screen and the Albums capture served as the tile. Both show the grey canvas, white cards, the black pill and one blue bar.</li>
+<li><b>Default check:</b> background is grey oklch(94.6%), not white. Type is Outfit 300/400/500, not Inter. Navigation is a left sidebar, not a top bar. Accent is a calm blue (the owner rejected violet), used only for progress, data, links and selection. Radius is 22 px for cards and 14 px for insets, not 8 px. The skeleton changed, so the direction landed.</li>
+</ul>
+<div class="dirs"><div class="on"><b>Delivery tracking</b>route bars, parcel states</div><div><b>Darkroom</b>dark surround</div><div><b>Gallery wall</b>white space, serif labels</div><div><b>Lab envelope</b>rolled; kraft, stamps</div></div>
+</section>
+
+<section id="language">
+<h2>Design language</h2>
+<p class="lede">One grey ladder, one ink, one blue, three status colours.</p>
+<div class="swatches">
+<div class="sw"><i style="background:oklch(94.6% 0.003 255)"></i><span>canvas</span></div>
+<div class="sw"><i style="background:oklch(99.5% 0.001 255)"></i><span>card</span></div>
+<div class="sw"><i style="background:oklch(96.4% 0.003 255)"></i><span>inset</span></div>
+<div class="sw"><i style="background:oklch(21% 0.01 255)"></i><span>ink, primary</span></div>
+<div class="sw"><i style="background:oklch(52% 0.16 255)"></i><span>blue, progress</span></div>
+<div class="sw"><i style="background:oklch(60% 0.15 152)"></i><span>ok</span></div>
+<div class="sw"><i style="background:oklch(72% 0.15 70)"></i><span>warn</span></div>
+<div class="sw"><i style="background:oklch(55% 0.2 27)"></i><span>bad</span></div>
+</div>
+<div class="bar"><span style="width:62%"></span><span class="p" style="width:20%"></span></div>
+<p><span class="pill">New album</span> <span class="pill o">Watch folder</span></p>
+<table>
+<tr><th>Row</th><th>Value</th><th>Source</th><th>Because</th></tr>
+<tr><td>Type</td><td>Outfit 300 for display numbers, 400 for titles and body, 500 for buttons. Titles 30 px, −0.02 em.</td><td>Codebase and reference 1</td><td>The font is already bundled. Reference 1 uses a light geometric face with no bold.</td></tr>
+<tr><td>Space and density</td><td>14 px between cards, 22 px card padding, 8 px between buttons.</td><td>References 1 and 5</td><td>Cards sit close like prints on a table; the gap between groups is larger than inside them.</td></tr>
+<tr><td>Colour roles</td><td>Blue = progress, data, links, selection. Green = synced or active. Amber = needs attention. Red = failed, missing, destructive.</td><td>Logo and reference 4</td><td>Photos must be the only strong colour, so the interface keeps one hue for "where it is".</td></tr>
+<tr><td>Shape and depth</td><td>Cards 22 px, insets 14 px, controls 12 px, pills full. Shadow only on hover, menus and popovers.</td><td>References 1 to 3</td><td>A flat page lets the photos carry the depth.</td></tr>
+<tr><td>Motif</td><td>Route bar: track, two ends, a moving mark. Red notches for failed files.</td><td>Reference 4 (sleep and flight bars)</td><td>The job is delivery, and the bar answers "how far along".</td></tr>
+<tr><td>Controls</td><td>Black pill for the one main action per view; outline pill for the second; grey circle for icon actions; grey track with a white chip for segmented choices; focus ring 2 px blue.</td><td>References 1 to 3</td><td>One black mark per view tells the photographer what comes next.</td></tr>
+<tr><td>Mechanics</td><td>One hand-written stylesheet in one file, tokens on :root, no framework. Nothing else competes in the cascade.</td><td>This mock</td><td>No kitchen sink needed. The real Vue app uses Tailwind 4, so a port needs the Mechanics row redone there.</td></tr>
+<tr><td>Motion</td><td>Ease-out cubic-bezier(.2,.8,.2,1). 120 ms for press, 220 ms for dialogs, 400–500 ms for bars. No overshoot.</td><td>desktop.md timing</td><td>A delivery app should feel steady, not playful.</td></tr>
+</table>
+<h3>Voice</h3>
+<ul>
+<li><b>This, not that:</b> "photos", not "images"; "client", not "user"; "Folder missing", not "ORPHANED"; plain facts, not cheer (one exclamation mark in the old setup is gone).</li>
+<li><b>Terms:</b> album, photos, client, picks, client link, booking link, watch folder, sync, upload.</li>
+<li><b>Address:</b> "you" for the photographer; buttons are verb plus object; sentence case everywhere.</li>
+</ul>
+</section>
+
+<section id="audit">
+<h2>Audit</h2>
+<p class="lede">What the old app does that this mock changes.</p>
+<table>
+<tr><th>Element</th><th>Old</th><th>State</th><th>Now</th></tr>
+<tr><td>App background</td><td>Dark base with 3 blurred teal and blue blobs</td><td>All signed-in screens</td><td>Removed. Grey canvas.</td></tr>
+<tr><td>Main navigation</td><td>Floating bottom dock, indigo-to-purple gradient on the active icon, icons with no labels</td><td>Active, hover</td><td>White sidebar panel with labels and counts; active is a grey chip, the same as the Settings tabs.</td></tr>
+<tr><td>Offline banner</td><td>Slate gradient strip</td><td>Offline</td><td>Ink strip inside the page, says what waits.</td></tr>
+<tr><td>Low storage banner</td><td>Amber-to-orange gradient, long text</td><td>Low disk</td><td>White strip with an amber dot, the free space as a number, "Change location".</td></tr>
+<tr><td>Album status</td><td>"SYNC" and "ORPHANED" caps badges</td><td>Changed, missing</td><td>"Folder changed" and "Folder missing" with a dot.</td></tr>
+<tr><td>Album actions</td><td>Menu shown on hover only</td><td>Rest, hover, keyboard</td><td>"More" button always visible.</td></tr>
+<tr><td>Copy to folder</td><td>Plain OS alert</td><td>Success</td><td>Toast with "Show in Finder".</td></tr>
+<tr><td>Device code</td><td>Two titles in setup and sign-in</td><td>Waiting</td><td>One block: "Browser didn't open? Use a code."</td></tr>
+<tr><td>Profile control</td><td>In the Albums header only</td><td>Near limit</td><td>Sidebar foot on every screen, with the usage bar.</td></tr>
+</table>
+</section>
+
+<section class="ask" id="decide">
+<h2>For you to decide</h2>
+<ul>
+<li>The sidebar replaces the bottom dock. It costs 232 px of width but shows labels and counts. Or: keep a dock with labels.</li>
+<li>The "Picked by" client list replaces the "Filter by client" dropdown. It shows counts without a click. Or: keep the dropdown if a studio has many clients per album.</li>
+<li>The booking link is inline on the Profile tab, not a popup. Bookings still uses the popup.</li>
+<li>The "Tip" section in Create album is removed. The helper line under "Photos from" changes with the choice and does the same job.</li>
+<li>Plan names, prices and the upload-time estimate are sample data.</li>
+</ul>
+</section>
+
+<section id="assumed">
+<h2>Assumed, please correct</h2>
+<ul>
+<li>Clients need no account to open a client link.</li>
+<li>"Delete album" keeps the photographer's original folder and removes only the cloud copy and the local cache.</li>
+<li>Changing the watch folder keeps existing albums.</li>
+<li>Photos come from picsum.photos and do not match the album names.</li>
+</ul>
+</section>
+
+<article id="session-2026-10-29-ds">
+<h2>Session 2026-10-29 (2): design system from the references only</h2>
+<p>The requester asked for a new design system made only from the 4 reference images. This session does not use the repo code, the mock above or the old logo. The design system is the Artifact at <a href="https://claude.ai/artifact/7iKFX9n6Jn3kzeWroXD2Fg">claude.ai/artifact/7iKFX9n6Jn3kzeWroXD2Fg</a>: tokens, one stylesheet (<code>bundle.css</code>, classes start with <code>ls-</code>), and 24 components, each with a live preview and usage rules.</p>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected default</th></tr>
+<tr><td>Font</td><td>Figtree 300–500, one family</td><td>It is soft and geometric like reference 1, and it has tabular figures for photo counts and sizes</td><td class="rejected">Inter</td></tr>
+<tr><td>Accent</td><td>Blue oklch(52% .17 255), only for progress, picks, links and focus</td><td>The photos must be the only strong colour; reference 4 uses blue for progress</td><td class="rejected">Accent on every active state</td></tr>
+<tr><td>Selection and picks</td><td>Photographer selection is a black ring; a client pick is a blue badge</td><td>The two must never look the same</td><td class="rejected">One "selected" style</td></tr>
+<tr><td>Route bar</td><td>A track from On disk to Client link with a moving mark and a red notch for each failed file</td><td>The job is delivery; reference 4's flight bar answers "how far along"</td><td class="rejected">Percent spinner</td></tr>
+<tr><td>Logo</td><td>None. The name is set in Figtree 500</td><td>No mark is given in the references</td><td class="rejected">A drawn placeholder mark</td></tr>
+</table>
+<h3>Checks</h3>
+<p>I ran <code>check.py</code>, <code>check.py --inventory</code> and <code>render_check.py --widths=960,1440</code> on a contact sheet of all the previews and on <code>bundle.css</code>. Result: 0 errors.</p>
+<ul>
+<li>Fixed: the search field had no label; the switch, the photo-select box and the link row were too small to click (now 24 px); "Upload failed" had low contrast on light photos (now on an ink pill); reduced motion stopped the upload pulse (now a slow 3.2 s pulse); straight quotes changed to curly quotes.</li>
+<li>Kept: <code>#000</code> in the upload-ring <code>mask</code>. A mask uses only alpha, so it paints no colour.</li>
+<li>Kept: middle dots in "4,820 photos · 14 Oct". Each run is one phrase that people read as a sentence, not fields that they compare across rows.</li>
+<li>Kept: the 20 px checkbox in toggle rows. The full 44 px label row is the click target.</li>
+<li>Kept: the small avatar's initials sit close to its edge. A small round avatar is meant to hug its text.</li>
+<li>Errors only in the test sheet (no <code>lang</code>, grey section labels) were fixed in the sheet. The sheet does not ship.</li>
+</ul>
+</article>
+
+<article id="session-2026-10-31">
+<h2>Session 2026-10-31: fixes ported from an unslop pass</h2>
+<p>Two runs of the unslop skill on copies of the mock (since deleted) both judged it light slop and polished. These fixes came back into the mock.</p>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Bold</td><td><code>b, strong</code> at 500</td><td>Outfit loads only 300–500, so every &lt;b&gt; rendered as synthesized bold</td><td class="rejected">Browser fake bold</td></tr>
+<tr><td>Progress bars</td><td>Each fill spans the track and scales with <code>--p</code>; the sync plane rides a translated rail</td><td>Transform tweens are smoother than width and left</td><td class="rejected">Animating width</td></tr>
+<tr><td>Spacing and sizes</td><td>Paddings, gaps and control heights on 4 px steps; photo grid gap 6 → 8</td><td>One rhythm instead of 2 px steps</td><td class="rejected">6/10/14/18/22 mix</td></tr>
+<tr><td>Icons</td><td>16 px inline, 18 px in controls, one stroke</td><td>Five inline sizes read as accidents</td><td class="rejected">12–15 px mix</td></tr>
+<tr><td>Copy</td><td>"2 Nov"; one-line captions and hints lose the full stop</td><td>Match the rest of the app</td><td class="rejected">"Nov 2"</td></tr>
+<tr><td>Kept against the skill</td><td>Album cover zoom on hover, print stack springs, light 300 display numbers, 12 px inner radii, "Welcome back"</td><td>The zoom and springs are the life of the screens; the radii stay soft like the cards</td><td class="rejected">Static covers, one curve, 4–6 px insets</td></tr>
+</table>
+</article>
+
+<article id="session-2026-10-29">
+<h2>Session 2026-10-29: full mock from the references</h2>
+
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected default</th><th>Layer</th></tr>
+<tr><td>Map</td><td>Albums is home; gallery, lightbox and notes go deeper; Bookings and Settings are side places.</td><td>The spec puts the album at the centre of every task.</td><td class="rejected">Flat tabs for every place</td><td>1 Bare structure</td></tr>
+<tr><td>Dialogs</td><td>Native &lt;dialog&gt; with showModal.</td><td>It gives Esc, focus trap and top layer for free.</td><td class="rejected">A div modal library</td><td>1 Bare structure</td></tr>
+<tr><td>Album menu</td><td>Fixed layer outside the scroll area, opens up near the bottom.</td><td>A menu in the last row must not be cut.</td><td class="rejected">Absolute menu inside the card</td><td>1 Bare structure</td></tr>
+<tr><td>Character</td><td>Delivery tracking, not contact sheet.</td><td>The ledger has a contact-sheet run for this product; the flight bar reference points at delivery.</td><td class="rejected">Contact sheet</td><td>2 Direction</td></tr>
+<tr><td>Top bar</td><td>Removed; account and usage go to the sidebar foot.</td><td>The header then holds only the page and its actions.</td><td class="rejected">Top bar with avatar</td><td>2 Direction</td></tr>
+<tr><td>Titles</td><td>30 px Outfit 400 with a small grey label above.</td><td>Reference 1 "Dec 14" uses size, not weight, for rank.</td><td class="rejected">Bold 24 px heading</td><td>3 Type and space</td></tr>
+<tr><td>Gallery</td><td>Info card left (300 px), photo grid right with 6 px gaps.</td><td>Thin gaps let the photos read as one set.</td><td class="rejected">16 px gaps, card per photo</td><td>3 Type and space</td></tr>
+<tr><td>Next shoot</td><td>Bookings opens with the next date in 44 px light type.</td><td>"Quick to find the next event" is the job of this screen.</td><td class="rejected">Table only</td><td>3 Type and space</td></tr>
+<tr><td>Blue</td><td>Only progress, data, links, selection.</td><td>Photos stay the only strong colour.</td><td class="rejected">Accent on every active state</td><td>4 Color and surface</td></tr>
+<tr><td>Lightbox</td><td>Near-black surround.</td><td>A neutral dark surround is the norm for judging a photo.</td><td class="rejected">White lightbox</td><td>4 Color and surface</td></tr>
+<tr><td>Delete album</td><td>Type the name to confirm.</td><td>Cloud and cache deletion cannot be undone, so undo is not possible.</td><td class="rejected">Undo toast</td><td>5 Use over time</td></tr>
+<tr><td>Offline</td><td>Main actions say "Offline" and are disabled; the upload says "Paused".</td><td>The reason sits on the control the photographer tries.</td><td class="rejected">Banner only</td><td>5 Use over time</td></tr>
+<tr><td>Failed uploads</td><td>Red notches on the bar plus "Try again".</td><td>Failures show where they are without a second list.</td><td class="rejected">Red full bar</td><td>6 Motion and detail</td></tr>
+<tr><td>Sync</td><td>Thumb moves from Folder to Cloud.</td><td>Reference 4 flight bar; shows direction of travel.</td><td class="rejected">Spinner with text</td><td>6 Motion and detail</td></tr>
+</table>
+
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th><th>Reduced motion</th></tr>
+<tr><td>Button press</td><td>micro</td><td>scale .98, 120 ms</td><td>none</td></tr>
+<tr><td>Dialog opens</td><td>transition</td><td>8 px rise and fade, 220 ms</td><td>instant</td></tr>
+<tr><td>Upload bar grows</td><td>transition</td><td>width, 500 ms ease-out</td><td>instant</td></tr>
+<tr><td>Sync thumb moves</td><td>moment</td><td>left and fill, 400 ms per step</td><td>instant steps, count text stays</td></tr>
+<tr><td>Notes panel opens</td><td>transition</td><td>24 px slide and fade, 280 ms</td><td>instant</td></tr>
+<tr><td>Photo selected</td><td>micro</td><td>image scales to .94, 180 ms</td><td>instant</td></tr>
+<tr><td>Album card hover</td><td>micro</td><td>cover scale 1.025, 600 ms</td><td>none</td></tr>
+<tr><td>Toast</td><td>transition</td><td>10 px rise, 250 ms; leaves after 4.2 s</td><td>instant</td></tr>
+<tr><td>Loading</td><td>micro</td><td>spinner 0.8 s turn; skeleton shimmer</td><td>spinner 1.6 s turn, shimmer stops</td></tr>
+<tr><td>Print stack: enter the pile zone</td><td>micro</td><td>The pile unfolds once (500 ms spring) and stays open until the pointer leaves the zone. Single-print hover starts only after 450 ms, when the unfold is done.</td><td>none</td></tr>
+<tr><td>Print stack: hover a back print</td><td>micro</td><td>The paper slides 22 px out toward the side the pointer came from, 350 ms; the hit area stays still</td><td>none</td></tr>
+<tr><td>Print stack: drag</td><td>micro</td><td>Print lifts (scale 1.07, ±5°, deep shadow) and follows the pointer; lands with a random tilt</td><td>no lift; position still changes</td></tr>
+<tr><td>Print turns over</td><td>micro</td><td>rotateY 180°, 600 ms, small overshoot; turns back on click, leave or blur</td><td>instant swap of the face</td></tr>
+<tr><td>Tidy the pile</td><td>moment</td><td>Each loose print flies home in pile order, 120 ms apart (lift, arc, ±5° lean, 640 ms) and lands crooked: 7–15 px off and 5–10°, the lean alternating print to print, so the pile looks thrown together. The last print floats down instead: it sways left and right like a sheet of paper in air, 1,050 ms. The messy pile holds for 520 ms, so the eye sees the mess. Then the pile is jogged: one 300 ms tap down and up, and every crooked print snaps square together. The pile edge squashes at each landing and harder at the jog. Caption: "Back on the pile." Built with FLIP, so the end state is the real layout.</td><td>instant reset; the same words are announced</td></tr>
+<tr><td>Find album from a print</td><td>transition</td><td>Albums opens, the card scrolls to centre and gets a blue ring that pulses twice in 1.8 s</td><td>no smooth scroll; ring shows</td></tr>
+<tr><td>Print stack: upload ends</td><td>moment</td><td>A print drops on the pile (800 ms spring); count runs up over 900 ms</td><td>new number at once</td></tr>
+<tr><td>Details expand</td><td>micro</td><td>chevron turns 180°, 200 ms</td><td>instant</td></tr>
+</table>
+
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>What shows</th></tr>
+<tr><td>Signed out</td><td>Sign-in screen with the code fallback.</td></tr>
+<tr><td>First launch</td><td>3-step setup.</td></tr>
+<tr><td>Offline</td><td>Ink banner; create, share, sync and sign-in say "Offline".</td></tr>
+<tr><td>Low disk</td><td>Banner with free space and "Change location".</td></tr>
+<tr><td>Load error</td><td>Albums and gallery each have "Try again" and say the files are safe.</td></tr>
+<tr><td>Not found, no access</td><td>Not in the spec; an unknown album id shows a default album in the mock. Owed for the real app.</td></tr>
+</table>
+
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Screens</th><th>Contract</th><th>Changed</th><th>Parity</th></tr>
+<tr><td>Shell</td><td>Sidebar, banners</td><td>3 places, active shown, offline and low disk banners</td><td>Dock to sidebar</td><td>Same places and banners; usage added from Albums header</td></tr>
+<tr><td>Albums</td><td>Grid, menu, create, delete, sync, upload</td><td>Spec §3, §7, §8, §9</td><td>Layout, words</td><td>All actions present; "Tip" section removed</td></tr>
+<tr><td>Gallery</td><td>Info, grid, selection, lightbox, notes, share</td><td>Spec §4</td><td>Client dropdown to list</td><td>All actions present; copy uses toast, not alert</td></tr>
+<tr><td>Bookings</td><td>Next shoot, tabs, table</td><td>Spec §6</td><td>Next-shoot card added</td><td>Same columns, expand and call actions</td></tr>
+<tr><td>Settings</td><td>5 tabs</td><td>Spec §5</td><td>Tab names, booking link inline</td><td>All fields and actions present</td></tr>
+<tr><td>Auth</td><td>Setup 1–3, sign-in</td><td>Spec §1, §2</td><td>One code block</td><td>Same steps, cancel, code, URL, error</td></tr>
+</table>
+
+<h3>Look notes</h3>
+<p>Captures at 1400 × 900 and 1000 × 760 for every screen and dialog. At 1000 px the gallery had only 2 photo columns, so the sidebar and info card now narrow below 1180 px. Button links showed an underline; removed. The sync file list was too tall; it now scrolls at 168 px.</p>
+
+<h3>Life</h3>
+<p>A second check on 30 Oct found 4 gaps in the life pass. The bars jumped, because each tick replaced the element. The upload ending left the screen after 5 s and did not offer the next step. The share ending only said "Copied". Progress was not announced. All 4 are fixed.</p>
+<table>
+<tr><th>Place</th><th>Mode</th><th>How often</th><th>What it tells the person</th></tr>
+<tr><td>Upload done: the pill says "Ready to share"; the panel shows the photos online and a "Share with client" button</td><td>Deep delight</td><td>Once per shoot</td><td>The work is safe, and the next step is one click. The panel stays until the person closes it.</td></tr>
+<tr><td>Picking a folder fills the album name; "Review" in the refresh toast opens that album's changes</td><td>Deep delight</td><td>Each new album, each refresh</td><td>The app does the step the person was about to do.</td></tr>
+<tr><td>Upload bar glides between ticks (500 ms ease-out); failed files stay as red ticks</td><td>Feedback</td><td>Constant during an upload</td><td>How far the upload is, and where files failed.</td></tr>
+<tr><td>Sync marker travels from Folder to Cloud in place, then becomes a check</td><td>Feedback</td><td>Each sync</td><td>The direction of travel and the count applied.</td></tr>
+<tr><td>Share: after "Copied", one line says where to paste it and what comes back</td><td>Ending</td><td>Once per album</td><td>What happens next: the client's hearts and notes arrive in this album.</td></tr>
+<tr><td>"Roughly one wedding" under the plan bar; "in 4 days" over the next shoot</td><td>Deep delight (words)</td><td>Each visit</td><td>The number in the photographer's own unit.</td></tr>
+</table>
+<p>Access: a polite live region announces "all 477 photos uploaded", "in sync" and "Link copied". Under reduced motion the bars change at once and keep their numbers. No surface delight is added: first run and the upload ending are the peaks, and both use plain words, not decoration.</p>
+
+<h3>Delight piece</h3>
+<table>
+<tr><th>Check</th><th>How the print stack meets it</th></tr>
+<tr><td>Comes from</td><td>What photographers keep and show: prints. A pile of prints on a desk is the body of work you can touch.</td></tr>
+<tr><td>Tells the truth</td><td>The count is the sum of photos in the albums. The height is the count × 0.3 mm. The prints are the real album covers.</td></tr>
+<tr><td>About the person</td><td>It shows their work and their effort, not the product. The logo does not appear.</td></tr>
+<tr><td>Costs the job nothing</td><td>It needs no task. Play: hover loosens the pile, and a print under the top one slides out as if a finger pushed it. Drag a print out and put it anywhere in the free sidebar space; it stays there after a reload. Bonus job: click a print (or press Enter) and Albums opens with that album ringed in blue.</td></tr>
+<tr><td>Changes over time</td><td>When an upload ends, a new print drops onto the pile and the count runs up. The words step from "Knee-high, so far" to "Taller than a light stand".</td></tr>
+<tr><td>States</td><td>No albums: one dashed print and "Your first print". Normal: up to 5 covers. Upload ends: the drop. It has no loading or error state, because it reads only local data.</td></tr>
+<tr><td>Quiet daily</td><td>At rest the prints sit nearly square. Motion happens only on hover, click and the drop.</td></tr>
+<tr><td>Turn it over</td><td>Double-click a print that is out of the pile and it turns over (600 ms, a small spring). The back is warm photo paper with the album name and date in Permanent Marker, each at its own slant, as people write on the back of prints. A click, moving the pointer away, or losing focus turns it back. A single click on a loose print waits 260 ms, so a double-click does not open Albums. Space turns a focused loose print; Enter still finds the album.</td></tr>
+<tr><td>Hover detail</td><td>Three causes of flicker were found and removed. 1: the pile had no box, so its hover state changed in the gaps between prints; it now has a still 176 px zone. 2: the whole pile and the single print animated at the same time; single hover now waits for the unfold. 3: the caption under the pile changed height (2 lines of hint, 1 line of album name), which moved the pile under the pointer; the caption is now a fixed 2 lines. The paper also slides toward the pointer's side, not away from it. Test: 120 pointer moves inside the zone gave 2 class changes (open, ready) and no fold.</td></tr>
+<tr><td>Access</td><td>Each print is a button with the album name and photo count. Arrow keys move a focused print out of the pile; Enter finds its album. The group has a full text name ("3,509 photos delivered, 105 cm as 6 by 4 prints. On top: …"). With reduced motion there is no fan, no drop and no count-up; the numbers stay true.</td></tr>
+<tr><td>Put away</td><td>"Tidy the pile" shows when a print is out and flies every print back, one by one. The owner removed the × on the piece; Settings, Profile, "Show the print stack" is the only off switch.</td></tr>
+<tr><td>Why the jog</td><td>People square a pile of prints by knocking it on the table; print shops call this jogging. A crooked pile that squares itself is the end of the tidy, so the end is the strongest part (peak-end). The float of the last print is how paper falls, not a trick.</td></tr>
+<tr><td>Exception</td><td>The drop and the fan use a spring with a small overshoot. The rest of the app has none. A print that lands should feel like paper, so this one place breaks the motion row on purpose.</td></tr>
+<tr><td>Rejected</td><td class="rejected">Agreed-frames grid; delivery record with link tracking; confetti</td></tr>
+</table>
+
+<h3>Critique caught</h3>
+<p>A fresh reviewer (a new subagent, not a fork) read the captures, the code and the spec. The critique found 1 blocker and 20 smaller faults. We fixed 18 and kept 3.</p>
+<table>
+<tr><th>Finding</th><th>Outcome</th></tr>
+<tr><td>Blocker: photo tiles were not focusable, so the lightbox needed a mouse.</td><td>Fixed. Tiles take focus, Enter and Space open; focus goes into the lightbox and notes and back to the tile.</td></tr>
+<tr><td>"Picked by" showed on hover only.</td><td>Fixed. It shows on focus too.</td></tr>
+<tr><td>Upload stages overlapped and did not add up to 480.</td><td>Fixed. Sent, Ready, Compressing, Failed now add up to the total.</td></tr>
+<tr><td>Failed notches read as gaps.</td><td>Fixed. Solid red ticks, 4 px.</td></tr>
+<tr><td>"Try again" for damaged files.</td><td>Fixed. "Show files" opens the album and says to export them again.</td></tr>
+<tr><td>Upload panel was fixed at 92 px and covered its pill.</td><td>Fixed. It opens under the pill.</td></tr>
+<tr><td>Gallery said "Synced" during an upload.</td><td>Fixed. It says "Adding 480 new, 318 sent" with a blue dot; the card says "480 new".</td></tr>
+<tr><td>Red meant both "failed" and "client heart".</td><td>Fixed. Hearts are ink; red is only failed, missing and destructive.</td></tr>
+<tr><td>Violet on the profile avatar.</td><td>Fixed. Ink, like the sidebar avatar.</td></tr>
+<tr><td>Caps labels "318 OF 480 SENT", "84% USED".</td><td>Fixed. Sentence case.</td></tr>
+<tr><td>"Review" in the refresh toast led to another toast.</td><td>Fixed. It opens the sync review for that album.</td></tr>
+<tr><td>"Folder missing" offered "Show in Finder".</td><td>Fixed. "Find folder…" links the album again.</td></tr>
+<tr><td>"Select all 30" selected only loaded tiles.</td><td>Fixed. "Select all 1,248" and the count follows.</td></tr>
+<tr><td>Sync did not say what removal does to picks.</td><td>Fixed. The removed file says it leaves the album with the client's heart.</td></tr>
+<tr><td>Past booking named an album as plain text.</td><td>Fixed. "Open the album" link.</td></tr>
+<tr><td>Wrong weekdays and album date.</td><td>Fixed. Dates match the 2026 calendar; the wedding album is 26 Oct.</td></tr>
+<tr><td>Every heart showed 2, every note chip 3.</td><td>Fixed. Counts vary 1 to 3.</td></tr>
+<tr><td>Lightbox next arrow did not show.</td><td>Fixed. The class .next also styled the Bookings card; renamed to .next-shoot.</td></tr>
+<tr><td>Bookings wrapped at 1000 px; "Read details" was hidden.</td><td>Fixed. Cells do not wrap, details truncate, the button stays.</td></tr>
+<tr><td>Low-disk warning twice on the Storage tab; plan warning in Create album at 84%.</td><td>Fixed. Banner hides on that tab; the dialog warning is removed.</td></tr>
+<tr><td>Sync progress has no trace after "Run in background".</td><td>Kept, owed. The spec has no background sync indicator; the real app needs one on the card.</td></tr>
+<tr><td>Native required-field bubble in Create album.</td><td>Kept. The empty name is the only error and the browser bubble names the field.</td></tr>
+<tr><td>Random picsum photos.</td><td>Kept. Placeholder content; real shoots replace them.</td></tr>
+</table>
+
+<h3>Measured</h3>
+<table>
+<tr><th>Check</th><th>Before</th><th>After</th></tr>
+<tr><td>check.py --inventory, old app (src/renderer/src)</td><td>41 colours (76 literals outside tokens), 14 radii, 9 font sizes, 5 font families (system, Inter, Outfit token, 2 mono), 4 weights (700 most used), 15 shadows, 11 durations</td><td>Mock: 8 colour tokens plus 2 tints, 4 radii, 1 family plus mono, 3 weights (no bold), 2 shadow tokens, 4 durations</td></tr>
+<tr><td>check.py</td><td>0 errors, 2 asks</td><td>0 errors, 1 ask kept (spinner keeps turning under reduced motion)</td></tr>
+<tr><td>render_check.py, 8 routes</td><td>5 small targets</td><td>No findings</td></tr>
+</table>
+
+<h3>Removed</h3>
+<p>Ambient blobs, gradient dock, gradient banners, the "Tip" box in Create album, the exclamation in "You're All Set!", caps badges.</p>
+</article>
+
+</main>
+</body>
+</html>

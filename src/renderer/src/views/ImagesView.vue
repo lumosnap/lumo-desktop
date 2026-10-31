@@ -1,31 +1,32 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import Modal from '../components/ui/Modal.vue'
-import Button from '../components/ui/Button.vue'
 import NotesSidebar from '../components/NotesSidebar.vue'
+import { toast } from '../composables/useToast'
+import { useNetworkStore } from '../stores/network'
 import {
   ArrowLeft,
   Heart,
   RefreshCw,
-  Share2,
+  RotateCw,
+  Link,
   Copy,
   Check,
+  X,
   ExternalLink,
-  Link2,
   FolderOpen,
+  FolderSearch,
   MessageSquare,
-  CheckCircle2,
-  ChevronDown,
-  Loader2,
   ImageOff
 } from 'lucide-vue-next'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
+import type PhotoSwipe from 'photoswipe'
 import 'photoswipe/style.css'
 
 const route = useRoute()
-const router = useRouter()
+const networkStore = useNetworkStore()
 const albumId = route.params.id as string
 
 const getDisplayStatus = (status: string): 'Processing' | 'Failed' | 'Success' => {
@@ -52,7 +53,7 @@ interface Image {
   favoriteCount?: number
   notesCount?: number
   comments?: Comment[]
-  favoritedBy?: string[] // List of client names who favorited this image
+  favoritedBy?: string[] // client names who favorited this image
 }
 
 interface Album {
@@ -60,7 +61,20 @@ interface Album {
   title: string
   eventDate?: string | null
   totalImages?: number
+  sourceFolderPath?: string
+  needsSync?: number
+  isOrphaned?: number
 }
+
+const nf = (n: number): string => n.toLocaleString()
+const firstName = (s: string): string => s.split(' ')[0]
+const initials = (s: string): string =>
+  s
+    .split(/\s|&/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
 
 const album = ref<Album | null>(null)
 const images = ref<Image[]>([])
@@ -69,163 +83,152 @@ const error = ref<string | null>(null)
 const showFavoritesOnly = ref(false)
 const gridLoading = ref(false)
 
-// Client Name Filter State
+// Client filter ("Picked by")
 const clientNames = ref<string[]>([])
 const selectedClientName = ref<string>('')
 const isFavoritesLoaded = ref(false)
 const isLoadingFavorites = ref(false)
 
-// Share Link State
+// Share link
 const showShareModal = ref(false)
 const shareLink = ref('')
 const isGeneratingLink = ref(false)
-const shareError = ref<string | null>(null)
 const copied = ref(false)
+const showShareNext = ref(false)
 
-// Notes Sidebar State
+// Notes panel
 const showNotesSidebar = ref(false)
 const currentNotesImage = ref<Image | null>(null)
+let notesReturnFocus: HTMLElement | null = null
 
 // Lightbox
 let lightbox: PhotoSwipeLightbox | null = null
+const galleryEl = ref<HTMLElement | null>(null)
 
-// Pagination State
+// "Picked by" tooltip
+const tip = ref<{ left: number; top: number; names: string[] } | null>(null)
+
+// Pagination
 const page = ref(1)
 const PAGE_SIZE = 50
 const loadMoreTrigger = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
 
-// Selection State
+// Selection
 const selectedImageIds = ref<Set<number>>(new Set())
 const isSelectionMode = computed(() => selectedImageIds.value.size > 0)
+const copying = ref(false)
 
-function toggleSelection(imageId: number) {
-  if (selectedImageIds.value.has(imageId)) {
-    selectedImageIds.value.delete(imageId)
-  } else {
-    selectedImageIds.value.add(imageId)
-  }
-  // Force update reactor
-  selectedImageIds.value = new Set(selectedImageIds.value)
+function toggleSelection(imageId: number): void {
+  const next = new Set(selectedImageIds.value)
+  if (next.has(imageId)) next.delete(imageId)
+  else next.add(imageId)
+  selectedImageIds.value = next
 }
 
-function selectAll() {
-  // Select all currently filtered images
-  const allIds = filteredImages.value.map(img => img.id)
-  allIds.forEach(id => selectedImageIds.value.add(id))
-  // Force update
-  selectedImageIds.value = new Set(selectedImageIds.value)
+function selectAll(): void {
+  selectedImageIds.value = new Set([
+    ...selectedImageIds.value,
+    ...filteredImages.value.map((img) => img.id)
+  ])
 }
 
-function clearSelection() {
-  selectedImageIds.value.clear()
+function clearSelection(): void {
   selectedImageIds.value = new Set()
 }
 
-// Handle image click - if in selection mode, toggle selection, otherwise open lightbox
-function handleImageClick(event: MouseEvent, image: Image) {
-  if (isSelectionMode.value) {
-    event.preventDefault()
-    toggleSelection(image.id)
-  }
-  // Default behavior (lightbox) happens if not blocked
-}
-
-async function copySelectedImages() {
-  if (selectedImageIds.value.size === 0) return
-  
+async function copySelectedImages(): Promise<void> {
+  if (selectedImageIds.value.size === 0 || copying.value) return
+  copying.value = true
   try {
-    const ids = Array.from(selectedImageIds.value)
-    // We should probably show a loading state here
-    
-    // Call API
-    const result = await window.api.albums.copyImages(albumId, ids)
-    
+    const result = await window.api.albums.copyImages(albumId, Array.from(selectedImageIds.value))
     if (result.success) {
-      // Show success notification or toast (using native alert for now or status update)
-      console.log(`Successfully copied ${result.count} images.`)
-      
-      alert(`Successfully copied ${result.count} images to destination.`)
+      const missing = result.errorCount
+        ? ` ${nf(result.errorCount)} originals weren't found in the album folder.`
+        : ''
+      const dir = result.destinationDir
+      toast(
+        `Copied ${nf(result.count || 0)} photos.${missing}`,
+        dir ? { label: 'Show in Finder', run: () => window.api.shell.openFolder(dir) } : undefined
+      )
       clearSelection()
-    } else {
-      if (result.error !== 'Operation canceled') {
-         console.error('Copy failed:', result.error)
-         alert(`Failed to copy images: ${result.error}`)
-      }
+    } else if (result.error !== 'Operation canceled') {
+      toast(`Couldn't copy the photos: ${result.error}`)
     }
   } catch (err) {
-    console.error('Failed to copy images:', err)
-    alert('An unexpected error occurred while copying images.')
+    toast(`Couldn't copy the photos: ${err instanceof Error ? err.message : String(err)}`)
+  } finally {
+    copying.value = false
   }
 }
 
-// Computed
 const filteredImages = computed(() => {
   if (!showFavoritesOnly.value) return images.value
   return images.value.filter((img) => img.isFavorite)
 })
 
-const displayedImages = computed(() => {
-  return filteredImages.value.slice(0, page.value * PAGE_SIZE)
+const displayedImages = computed(() => filteredImages.value.slice(0, page.value * PAGE_SIZE))
+
+const favoritedPhotosCount = computed(() => images.value.filter((img) => img.isFavorite).length)
+
+// Per-client pick counts, taken from the unfiltered favorites response
+const clientCounts = ref<Record<string, number>>({})
+
+const processingCount = computed(
+  () => images.value.filter((img) => getDisplayStatus(img.uploadStatus) === 'Processing').length
+)
+
+const statusLine = computed(() => {
+  if (processingCount.value)
+    return { dot: 'brand', text: `Adding ${nf(processingCount.value)} new` }
+  if (album.value?.isOrphaned) return { dot: 'bad', text: 'Folder missing' }
+  if (album.value?.needsSync) return { dot: 'warn', text: 'Folder changed' }
+  return { dot: 'ok', text: 'Synced' }
 })
 
-const favoritedPhotosCount = computed(() => {
-  return images.value.filter((img) => img.isFavorite).length
+const barTitle = computed(() => {
+  if (!showFavoritesOnly.value) return 'All photos'
+  return selectedClientName.value
+    ? `${firstName(selectedClientName.value)}'s picks`
+    : 'Client picks'
 })
 
 const formattedEventDate = computed(() => {
   if (!album.value?.eventDate) return undefined
-  return new Date(album.value.eventDate).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
+  return new Date(album.value.eventDate).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
   })
 })
 
-// Setup Intersection Observer for Infinite Scroll
+// Infinite scroll
 function setupObserver(): void {
   if (observer) observer.disconnect()
-
   observer = new IntersectionObserver(
     (entries) => {
-      const target = entries[0]
-      if (target.isIntersecting) {
-        if (displayedImages.value.length < filteredImages.value.length) {
-          page.value++
-        }
+      if (entries[0].isIntersecting && displayedImages.value.length < filteredImages.value.length) {
+        page.value++
       }
     },
-    {
-      root: null,
-      rootMargin: '200px', // Load before reaching bottom
-      threshold: 0.1
-    }
+    { root: null, rootMargin: '200px', threshold: 0.1 }
   )
-
-  if (loadMoreTrigger.value) {
-    observer.observe(loadMoreTrigger.value)
-  }
+  if (loadMoreTrigger.value) observer.observe(loadMoreTrigger.value)
 }
 
-// Watch for loading trigger visibility
+// Re-observe after each page so a trigger that stays in view keeps loading
 watch(
-  () => [loadMoreTrigger.value, filteredImages.value.length],
+  () => [loadMoreTrigger.value, filteredImages.value.length, displayedImages.value.length],
   () => {
     if (loadMoreTrigger.value) setupObserver()
   },
   { flush: 'post' }
 )
 
-
-
-// Get thumbnail path for an image (stored in .thumbnails subfolder)
-// Falls back to original if thumbnail doesn't exist
+// Thumbnail lives in a .thumbnails subfolder; falls back to the original on error
 function getThumbnailPath(localFilePath: string): string {
-  // localFilePath: /path/to/album/image.webp
-  // thumbnail:     /path/to/album/.thumbnails/image.webp
   const lastSlash = localFilePath.lastIndexOf('/')
   if (lastSlash === -1) return localFilePath
-
   const dir = localFilePath.substring(0, lastSlash)
   const filename = localFilePath.substring(lastSlash + 1)
   return `${dir}/.thumbnails/${filename}`
@@ -235,15 +238,12 @@ async function loadAlbumImages(): Promise<void> {
   loading.value = true
   error.value = null
   page.value = 1
+  isFavoritesLoaded.value = false
 
   try {
-    // Load album details
     const albumResult = await window.api.albums.get(albumId)
-    if (albumResult.success) {
-      album.value = albumResult.album
-    }
+    if (albumResult.success) album.value = albumResult.album
 
-    // Load images with favorites
     const imagesResult = await window.api.albums.getImages(albumId)
     if (imagesResult.success) {
       images.value = imagesResult.images || []
@@ -251,140 +251,130 @@ async function loadAlbumImages(): Promise<void> {
       error.value = imagesResult.error || 'Failed to load images'
     }
 
-    // Load client names for filter dropdown (fetch without filter first) - NON-BLOCKING
-    // Use setTimeout to ensure UI renders first (skeleton disappears) before triggering this
+    // Non-blocking: let the grid render before fetching picks
     setTimeout(() => {
       loadFavorites()
     }, 100)
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to load album'
-    error.value = message
+    error.value = err instanceof Error ? err.message : 'Failed to load album'
   } finally {
     loading.value = false
-    // Initialize lightbox after DOM update
     await nextTick()
-    initLightbox()
     setupObserver()
   }
 }
 
-// Load favorites from API and update images with favoritedBy info
+// Fetch picks and merge who-picked, notes and comments into the images
 async function loadFavorites(clientNameFilter?: string): Promise<void> {
-  if (isLoadingFavorites.value) return // Prevent duplicate calls
+  if (isLoadingFavorites.value) return
   isLoadingFavorites.value = true
-  
+
   try {
     const result = await window.api.api.getFavorites(albumId, clientNameFilter)
     if (result.success) {
-      // Update clientNames if not filtering (to get all clients)
-      if (!clientNameFilter && result.clientNames) {
-        clientNames.value = result.clientNames
+      // Only the unfiltered response carries every client
+      if (!clientNameFilter) {
+        if (result.clientNames) clientNames.value = result.clientNames
+        const counts: Record<string, number> = {}
+        for (const fav of result.favorites || [])
+          for (const name of new Set((fav.comments || []).map((c) => c.clientName)))
+            counts[name] = (counts[name] || 0) + 1
+        clientCounts.value = counts
       }
 
-      // Build a map of filename -> client names who favorited
-      const favoritedByMap = new Map<string, string[]>()
-      if (result.favorites) {
-        for (const fav of result.favorites) {
-          const baseName = getBaseName(fav.originalFilename)
-          // Extract unique client names from comments
-          const clients =
-            fav.comments
-              ?.map((c: Comment) => c.clientName)
-              .filter((name: string, idx: number, arr: string[]) => arr.indexOf(name) === idx) || []
-          favoritedByMap.set(baseName, clients)
-        }
+      const favMap = new Map<string, { by: string[]; comments: Comment[]; notesCount: number }>()
+      for (const fav of result.favorites || []) {
+        const comments = fav.comments || []
+        favMap.set(getBaseName(fav.originalFilename), {
+          by: [...new Set(comments.map((c) => c.clientName))],
+          comments,
+          notesCount: fav.notesCount || comments.filter((c) => c.notes?.trim()).length
+        })
       }
 
-      // Update images with favoritedBy info
       images.value = images.value.map((img) => {
-        const imgBaseName = getBaseName(img.originalFilename)
-        const favoritedBy = favoritedByMap.get(imgBaseName)
-
-        // Update favorite related fields
-        const isFavorite = favoritedBy && favoritedBy.length > 0
-
+        const fav = favMap.get(getBaseName(img.originalFilename))
         return {
           ...img,
-          isFavorite: isFavorite || false, // Ensure boolean
-          favoritedBy: favoritedBy || [],
-          favoriteCount: favoritedBy ? favoritedBy.length : 0
+          isFavorite: !!fav && fav.by.length > 0,
+          favoritedBy: fav?.by || [],
+          favoriteCount: fav?.by.length || 0,
+          comments: fav?.comments || img.comments || [],
+          notesCount: fav?.notesCount || img.notesCount || 0
         }
       })
 
       isFavoritesLoaded.value = true
+    } else if (result.error) {
+      toast(`Couldn't load client picks: ${result.error}`)
     }
   } catch (err) {
-    console.error('Failed to load favorites:', err)
+    toast(`Couldn't load client picks: ${err instanceof Error ? err.message : String(err)}`)
   } finally {
     isLoadingFavorites.value = false
   }
 }
 
-// Helper to get base filename without extension
 function getBaseName(filename: string): string {
   const lastDot = filename.lastIndexOf('.')
   return lastDot > 0 ? filename.substring(0, lastDot) : filename
 }
 
-// Handle client filter change
+async function waitForFavorites(): Promise<void> {
+  if (isFavoritesLoaded.value) return
+  gridLoading.value = true
+  if (!isLoadingFavorites.value) {
+    await loadFavorites()
+  } else {
+    await new Promise<void>((resolve) => {
+      const unwatch = watch(isLoadingFavorites, (v) => {
+        if (!v) {
+          unwatch()
+          resolve()
+        }
+      })
+    })
+  }
+  gridLoading.value = false
+}
+
+// Server-side client filter, as before: refetch favorites for that client
 async function onClientFilterChange(): Promise<void> {
   gridLoading.value = true
   await loadFavorites(selectedClientName.value || undefined)
-
-  gridLoading.value = false // Ensure loading is off so DOM renders gallery
-  
-  // Destroy and reinitialize lightbox
-  if (lightbox) {
-    lightbox.destroy()
-    lightbox = null
-  }
-
-  await nextTick()
-  initLightbox()
+  gridLoading.value = false
 }
 
-async function toggleShowFavorites(): Promise<void> {
-  // If we want to show favorites but they haven't loaded yet, wait for them
-  if (!showFavoritesOnly.value && !isFavoritesLoaded.value) {
-    gridLoading.value = true
-    // If not currently loading, trigger load
-    if (!isLoadingFavorites.value) {
-      await loadFavorites()
-    } else {
-      // Wait for existing load to finish
-      await new Promise<void>((resolve) => {
-        const unwatch = watch(isLoadingFavorites, (newVal) => {
-          if (!newVal) {
-            unwatch()
-            resolve()
-          }
-        })
-      })
-    }
-    gridLoading.value = false
+async function viewAll(): Promise<void> {
+  showFavoritesOnly.value = false
+  page.value = 1
+  if (selectedClientName.value) {
+    selectedClientName.value = ''
+    await onClientFilterChange()
   }
+}
 
-  showFavoritesOnly.value = !showFavoritesOnly.value
-  page.value = 1 // Always reset to page 1 when toggling view mode
-  
-  // Re-init lightbox for new content
-  if (lightbox) {
-    lightbox.destroy()
-    lightbox = null
-  }
-  await nextTick()
-  initLightbox()
+async function viewFav(): Promise<void> {
+  await waitForFavorites()
+  showFavoritesOnly.value = true
+  page.value = 1
+}
+
+async function pickClient(name: string): Promise<void> {
+  selectedClientName.value = selectedClientName.value === name ? '' : name
+  showFavoritesOnly.value = true
+  page.value = 1
+  clearSelection()
+  await onClientFilterChange()
 }
 
 async function generateShareLink(): Promise<void> {
   isGeneratingLink.value = true
-  shareError.value = null
   copied.value = false
+  showShareNext.value = false
 
-  // Check local storage first
   const storageKey = `shareLink_album_${albumId}`
   const cachedLink = localStorage.getItem(storageKey)
-
   if (cachedLink) {
     shareLink.value = cachedLink
     showShareModal.value = true
@@ -399,11 +389,10 @@ async function generateShareLink(): Promise<void> {
       localStorage.setItem(storageKey, result.shareLink.shareUrl)
       showShareModal.value = true
     } else {
-      shareError.value = result.error || 'Failed to generate share link'
+      toast(result.error || 'Failed to generate share link')
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to generate share link'
-    shareError.value = message
+    toast(err instanceof Error ? err.message : 'Failed to generate share link')
   } finally {
     isGeneratingLink.value = false
   }
@@ -412,41 +401,44 @@ async function generateShareLink(): Promise<void> {
 async function copyShareLink(): Promise<void> {
   try {
     await navigator.clipboard.writeText(shareLink.value)
-    copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
   } catch {
-    // Fallback for older browsers
     const textArea = document.createElement('textarea')
     textArea.value = shareLink.value
     document.body.appendChild(textArea)
     textArea.select()
     document.execCommand('copy')
     document.body.removeChild(textArea)
-    copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
   }
+  copied.value = true
+  showShareNext.value = true
+  setTimeout(() => {
+    copied.value = false
+  }, 1800)
 }
 
 function openShareLink(): void {
   window.open(shareLink.value, '_blank')
 }
 
-async function showOriginalInFolder(imageId: number): Promise<void> {
+async function showOriginalInFolder(image: Image): Promise<void> {
   try {
-    const result = await window.api.shell.showItemInFolder(albumId, imageId)
-    if (!result.success) {
-      console.error('Failed to show in folder:', result.error)
-    }
+    const result = await window.api.shell.showItemInFolder(albumId, image.id)
+    if (!result.success) toast(`Couldn't show ${image.originalFilename}: ${result.error}`)
   } catch (err) {
-    console.error('Failed to show in folder:', err)
+    toast(
+      `Couldn't show ${image.originalFilename}: ${err instanceof Error ? err.message : String(err)}`
+    )
   }
 }
 
+async function showAlbumFolder(): Promise<void> {
+  if (!album.value?.sourceFolderPath) return
+  const result = await window.api.shell.openFolder(album.value.sourceFolderPath)
+  if (!result.success) toast(`Couldn't open the folder: ${result.error}`)
+}
+
 function openNotesSidebar(image: Image): void {
+  notesReturnFocus = document.activeElement as HTMLElement | null
   currentNotesImage.value = image
   showNotesSidebar.value = true
 }
@@ -454,6 +446,31 @@ function openNotesSidebar(image: Image): void {
 function closeNotesSidebar(): void {
   showNotesSidebar.value = false
   currentNotesImage.value = null
+  notesReturnFocus?.focus()
+}
+
+// In selection mode a click selects instead of opening the lightbox
+function handleImageClick(event: MouseEvent, image: Image): void {
+  if (isSelectionMode.value) {
+    event.preventDefault()
+    event.stopPropagation() // keep PhotoSwipe's gallery click handler from opening
+    toggleSelection(image.id)
+  }
+}
+
+const ICON = (paths: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`
+
+// The image behind the current PhotoSwipe slide
+function slideImage(pswp: PhotoSwipe): Image | undefined {
+  const anchor = pswp.currSlide?.data.element as HTMLAnchorElement | undefined
+  if (!anchor) return undefined
+  const imageSrc = anchor.href
+  return images.value.find(
+    (img) =>
+      `file://${img.localFilePath}` === imageSrc ||
+      imageSrc.startsWith(`file://${img.localFilePath}`)
+  )
 }
 
 function initLightbox(): void {
@@ -469,38 +486,66 @@ function initLightbox(): void {
     padding: { top: 0, bottom: 0, left: 0, right: 0 },
     bgOpacity: 0.95,
     showHideOpacity: true,
-    arrowPrevSVG:
-      '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>',
-    arrowNextSVG:
-      '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>',
-    closeSVG:
-      '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
-    zoomSVG:
-      '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>'
+    counter: false, // replaced by the filename + counter element below
+    arrowPrevSVG: ICON('<path d="m15 18-6-6 6-6"/>'),
+    arrowNextSVG: ICON('<path d="m9 18 6-6-6-6"/>'),
+    closeSVG: ICON('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+    zoomSVG: ICON(
+      '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/>'
+    )
   })
 
-  // Add Notes Button to Lightbox
   lightbox.on('uiRegister', () => {
-    lightbox!.pswp!.ui!.registerElement({
+    const ui = lightbox!.pswp!.ui!
+
+    // Filename + "N / total", top left
+    ui.registerElement({
+      name: 'lb-info',
+      order: 5,
+      appendTo: 'bar',
+      onInit: (el, pswp) => {
+        const f = document.createElement('span')
+        f.className = 'f'
+        const c = document.createElement('span')
+        c.className = 'c num'
+        el.append(f, c)
+        pswp.on('change', () => {
+          f.textContent = slideImage(pswp)?.originalFilename || ''
+          c.textContent = `${pswp.currIndex + 1} / ${nf(pswp.getNumItems())}`
+        })
+      }
+    })
+
+    // Who picked this photo
+    ui.registerElement({
+      name: 'lb-picked',
+      order: 8,
+      appendTo: 'bar',
+      onInit: (el, pswp) => {
+        el.className += ' status'
+        pswp.on('change', () => {
+          const by = slideImage(pswp)?.favoritedBy || []
+          el.hidden = by.length === 0
+          el.innerHTML = ICON(
+            '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>'
+          )
+          el.append(by.map(firstName).join(', '))
+        })
+      }
+    })
+
+    // Notes button opens the notes panel
+    ui.registerElement({
       name: 'notes-button',
       order: 9,
       isButton: true,
       tagName: 'button',
-      html: '<div class="pswp-custom-icon pswp-notes-icon flex items-center justify-center w-full h-full"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>',
+      title: 'Client notes',
+      ariaLabel: 'Client notes',
+      html: ICON('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
       onClick: (_event, _el, pswp) => {
-        const currSlide = pswp.currSlide
-        if (currSlide && currSlide.data.element) {
-          const anchor = currSlide.data.element as HTMLAnchorElement
-          const imageSrc = anchor.href
-          const image = images.value.find(
-            (img) =>
-              `file://${img.localFilePath}` === imageSrc ||
-              imageSrc.startsWith(`file://${img.localFilePath}`)
-          )
-          if (image) {
-            openNotesSidebar(image)
-          }
-        }
+        const image = slideImage(pswp)
+        if (image) openNotesSidebar(image)
       }
     })
   })
@@ -508,28 +553,51 @@ function initLightbox(): void {
   lightbox.init()
 }
 
+// Re-init whenever the #gallery element is (re)created
+watch(
+  galleryEl,
+  (el) => {
+    if (el) initLightbox()
+  },
+  { flush: 'post' }
+)
+
+function showTip(e: Event, names: string[]): void {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  tip.value = {
+    left: Math.max(8, Math.min(r.right - 150, innerWidth - 216)),
+    top: r.bottom + 6,
+    names
+  }
+}
+
+// Capture phase, ahead of PhotoSwipe's own keys: while the notes panel is open,
+// Esc closes the panel only and the lightbox underneath doesn't move
+function onKeydown(e: KeyboardEvent): void {
+  if (!showNotesSidebar.value) return
+  if (!['Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'z'].includes(e.key)) return
+  e.stopImmediatePropagation()
+  if (e.key === 'Escape') closeNotesSidebar()
+}
+
 const onAlbumStatusChanged = (_e: unknown, data: { albumId: string; needsSync: number }): void => {
   if (data.albumId === albumId && data.needsSync) {
     window.api.albums.get(albumId).then((result) => {
-      if (result.success) {
-        album.value = result.album
-      }
+      if (result.success) album.value = result.album
     })
   }
 }
 
 onMounted(() => {
   loadAlbumImages()
-
-  if (window.api && window.api.on) {
-    window.api.on('album:status-changed', onAlbumStatusChanged)
-  }
+  window.addEventListener('keydown', onKeydown, true)
+  if (window.api && window.api.on) window.api.on('album:status-changed', onAlbumStatusChanged)
 })
 
 onUnmounted(() => {
-  if (window.api && window.api.off) {
-    window.api.off('album:status-changed', onAlbumStatusChanged)
-  }
+  window.removeEventListener('keydown', onKeydown, true)
+  if (window.api && window.api.off) window.api.off('album:status-changed', onAlbumStatusChanged)
+  observer?.disconnect()
   if (lightbox) {
     lightbox.destroy()
     lightbox = null
@@ -539,559 +607,370 @@ onUnmounted(() => {
 
 <template>
   <AppLayout>
-    <div class="flex h-full flex-col overflow-hidden bg-slate-50 text-slate-900">
-      <!-- Loading State (Skeleton) -->
-      <div v-if="loading" class="flex-1 flex flex-col md:flex-row overflow-hidden animate-fade-in">
-        <!-- Left Sidebar Skeleton -->
-        <aside
-          class="w-full md:w-80 lg:w-96 border-b md:border-b-0 md:border-r border-slate-200 bg-white p-6 flex flex-col gap-6 shrink-0"
-        >
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <div class="h-4 w-20 bg-slate-200 rounded animate-pulse"></div>
-              <div class="h-6 w-16 bg-emerald-50 rounded-full animate-pulse"></div>
-            </div>
-            <div class="h-10 w-3/4 bg-slate-200 rounded mb-2 animate-pulse"></div>
-            <div class="h-4 w-1/2 bg-slate-200 rounded animate-pulse"></div>
-          </div>
-
-          <div class="bg-slate-50 rounded-2xl p-5 border border-slate-100 shadow-inner">
-            <div
-              class="h-10 w-full bg-white rounded-xl border border-slate-200 animate-pulse"
-            ></div>
-          </div>
-        </aside>
-
-        <!-- Right Grid Skeleton -->
-        <main class="flex-1 overflow-hidden bg-slate-50 p-4 md:p-8">
-          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            <div
-              v-for="i in 10"
-              :key="i"
-              class="aspect-[4/5] rounded-xl bg-slate-200 animate-pulse"
-            ></div>
-          </div>
-        </main>
+    <!-- Loading -->
+    <div v-if="loading" class="gallery">
+      <div class="g-side">
+        <div class="card">
+          <div class="skel" style="height: 12px; width: 40%; border-radius: 6px"></div>
+          <div
+            class="skel"
+            style="height: 28px; width: 80%; border-radius: 8px; margin: 16px 0"
+          ></div>
+          <div class="skel" style="height: 36px; border-radius: 99px"></div>
+        </div>
       </div>
-
-      <!-- Error State -->
-      <div
-        v-else-if="error"
-        class="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto px-4"
-      >
-        <div class="text-6xl mb-6">😕</div>
-        <h1 class="text-3xl font-bold mb-4 text-slate-900">Failed to Load Album</h1>
-        <p class="text-slate-500 mb-8 leading-relaxed">{{ error }}</p>
-        <Button variant="primary" @click="loadAlbumImages">Try Again</Button>
+      <div class="g-main">
+        <div class="photos" aria-busy="true">
+          <div v-for="i in 18" :key="i" class="ph skel"></div>
+        </div>
       </div>
+    </div>
 
-      <!-- Main Content Area (Split View) -->
-      <div v-else class="flex-1 flex flex-col md:flex-row overflow-hidden animate-fade-in">
-        <!-- Left Sidebar -->
-        <aside
-          class="w-full md:w-80 lg:w-96 border-b md:border-b-0 md:border-r border-slate-200 bg-white p-6 flex flex-col gap-6 shrink-0 overflow-y-auto z-10 shadow-sm md:shadow-none"
-        >
-          <!-- Back Button -->
-          <button
-            class="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors w-fit"
-            @click="router.back()"
-          >
-            <ArrowLeft class="h-4 w-4" />
-            Back to Albums
-          </button>
+    <!-- Error -->
+    <div v-else-if="error" class="page">
+      <div style="padding: 16px 8px 0">
+        <RouterLink class="back" to="/albums"><ArrowLeft />Albums</RouterLink>
+      </div>
+      <div class="card empty">
+        <h2>Couldn't load {{ album?.title || 'this album' }}</h2>
+        <p>{{ error }} The photos on this computer are fine.</p>
+        <button class="btn primary" @click="loadAlbumImages"><RotateCw />Try again</button>
+      </div>
+    </div>
 
-          <!-- Album Info -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <div class="text-xs font-bold text-indigo-600 uppercase tracking-wider">Album</div>
-              <div
-                class="flex items-center gap-1.5 text-emerald-600 text-[10px] font-medium bg-emerald-50 px-2 py-1 rounded-full"
-              >
-                <CheckCircle2 class="h-3 w-3" />
-                Synced
-              </div>
-            </div>
-            <h1 class="text-3xl font-serif italic text-slate-900 mb-2">
-              {{ album?.title || 'Album' }}
-            </h1>
-            <p class="text-sm text-slate-400 font-medium">
-              <template v-if="formattedEventDate">{{ formattedEventDate }} • </template>
-              {{ images.length }} Photos
-            </p>
-          </div>
-
-          <!-- Actions Card -->
-          <div class="bg-slate-50 rounded-2xl p-5 border border-slate-100 shadow-inner space-y-3">
-            <!-- Favorites Toggle -->
-            <button
-              class="w-full flex items-center justify-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl shadow-sm border transition-all duration-200"
-              :class="
-                showFavoritesOnly
-                  ? 'bg-rose-50 text-rose-600 border-rose-100 ring-2 ring-rose-100'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-              "
-              @click="toggleShowFavorites"
+    <div v-else class="gallery">
+      <div class="g-side">
+        <div class="card">
+          <RouterLink class="back" to="/albums"><ArrowLeft />Albums</RouterLink>
+          <div class="label">
+            <span>Album</span>
+            <span class="status"
+              ><span class="dot" :class="statusLine.dot"></span>{{ statusLine.text }}</span
             >
-              <Heart class="h-4 w-4" :fill="showFavoritesOnly ? 'currentColor' : 'none'" />
-              <span>{{
-                showFavoritesOnly ? 'Show All Images' : `Show Favorites (${favoritedPhotosCount})`
-              }}</span>
-            </button>
-
-            <!-- Client Filter Dropdown -->
-            <div v-if="clientNames.length > 0" class="relative">
-              <label class="text-xs font-medium text-slate-500 mb-1.5 block"
-                >Filter by Client</label
-              >
-              <div class="relative">
-                <select
-                  v-model="selectedClientName"
-                  :disabled="isLoadingFavorites"
-                  class="w-full appearance-none bg-white border border-slate-200 rounded-xl px-4 py-2.5 pr-10 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  @change="onClientFilterChange"
-                >
-                  <option v-if="isLoadingFavorites" value="">Loading clients...</option>
-                  <option v-else value="">All Clients ({{ clientNames.length }})</option>
-                  <option v-for="name in clientNames" :key="name" :value="name">
-                    {{ name }}
-                  </option>
-                </select>
-                <div v-if="isLoadingFavorites" class="absolute right-3 top-1/2 -translate-y-1/2">
-                   <Loader2 class="h-4 w-4 text-indigo-500 animate-spin" />
-                </div>
-                <ChevronDown
-                  v-else
-                  class="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none"
-                />
-              </div>
-            </div>
-
-            <!-- Share Button -->
+          </div>
+          <h1>{{ album?.title || 'Album' }}</h1>
+          <div style="color: var(--ink-3); font-size: 14px" class="num">
+            <template v-if="formattedEventDate">{{ formattedEventDate }} · </template
+            >{{ nf(images.length) }} photos
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 20px">
             <button
-              class="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5"
-              :disabled="isGeneratingLink"
+              class="btn primary"
+              style="flex: 1"
+              :disabled="!networkStore.isOnline || isGeneratingLink"
               @click="generateShareLink"
             >
-              <Share2 v-if="!isGeneratingLink" class="h-4 w-4" />
-              <RefreshCw v-else class="h-4 w-4 animate-spin" />
-              <span>Share Album</span>
+              <span v-if="isGeneratingLink" class="spin"></span><Link v-else />Share with client
             </button>
-
-            <!-- Refresh Button -->
             <button
-              class="w-full flex items-center justify-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors"
-              :disabled="loading"
+              class="icon-btn"
+              aria-label="Reload photos"
+              title="Reload photos"
               @click="loadAlbumImages"
             >
-              <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
-              <span>Refresh</span>
+              <RefreshCw />
             </button>
-          </div>
-        </aside>
-
-        <!-- Right Grid Area -->
-        <main class="flex-1 overflow-y-auto bg-slate-50 relative">
-          <!-- Selection Header (Sticky) -->
-          <div
-            v-if="isSelectionMode"
-            class="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 md:px-8 py-3 flex items-center justify-between shadow-sm animate-fade-in"
-          >
-            <div class="flex items-center gap-4">
-              <button
-                class="p-2 -ml-2 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"
-                title="Cancel Selection"
-                @click="clearSelection"
-              >
-                <div class="h-5 w-5 flex items-center justify-center font-bold">✕</div>
-              </button>
-              <div class="text-sm font-bold text-slate-700">
-                <span class="text-indigo-600">{{ selectedImageIds.size }}</span> selected
-              </div>
-              <div class="h-4 w-px bg-slate-200"></div>
-              <button
-                class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors"
-                @click="selectAll"
-              >
-                Select All
-              </button>
-            </div>
-
-            <div class="flex items-center gap-2">
-              <button
-                class="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold shadow-sm hover:bg-indigo-700 transition-colors"
-                @click="copySelectedImages"
-              >
-                <Copy class="h-4 w-4" />
-                <span>Copy to...</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="p-4 md:p-8">
-            <!-- Grid Loading State -->
-            <div
-              v-if="gridLoading"
-              class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
-            >
-              <div
-                v-for="i in 10"
-                :key="i"
-                class="aspect-[4/5] rounded-xl bg-slate-200 animate-pulse"
-              ></div>
-            </div>
-
-            <!-- Empty State -->
-            <div
-              v-else-if="filteredImages.length === 0"
-              class="h-full flex flex-col items-center justify-center text-center p-8 opacity-60"
-            >
-              <div
-                class="w-20 h-20 bg-slate-200 rounded-full flex items-center justify-center mb-6 text-4xl"
-              >
-                {{ showFavoritesOnly ? '💔' : '📷' }}
-              </div>
-              <h2 class="text-xl font-bold text-slate-900 mb-2">
-                {{ showFavoritesOnly ? 'No Favorites Yet' : 'No Photos Found' }}
-              </h2>
-              <p class="text-slate-500 max-w-xs">
-                {{
-                  showFavoritesOnly
-                    ? 'Clients have not favorited any photos in this album yet.'
-                    : 'This album seems to be empty.'
-                }}
-              </p>
-              <button
-                v-if="showFavoritesOnly"
-                class="mt-6 px-6 py-2 bg-white border border-slate-200 rounded-full text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
-                @click="toggleShowFavorites"
-              >
-                View All Photos
-              </button>
-            </div>
-
-            <!-- Image Grid (Photoswipe) -->
-            <div
-              v-else
-              id="gallery"
-              class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-20"
-            >
-              <div
-                v-for="image in displayedImages"
-                :key="image.id"
-                class="group relative aspect-[4/5] rounded-xl overflow-hidden bg-slate-200 shadow-sm hover:shadow-md transition-all duration-300 select-none"
-                :class="{ 'ring-2 ring-indigo-500 ring-offset-2': selectedImageIds.has(image.id) }"
-              >
-                <a
-                    :href="`file://${image.localFilePath}`"
-                    :data-pswp-width="image.width || 1920"
-                    :data-pswp-height="image.height || 1280"
-                    target="_blank"
-                    class="block w-full h-full cursor-pointer"
-                    @click.capture="handleImageClick($event, image)"
-                >
-                  <!-- Failed State Placeholder -->
-                  <div
-                    v-if="getDisplayStatus(image.uploadStatus) === 'Failed'"
-                    class="w-full h-full flex flex-col items-center justify-center bg-slate-100 text-slate-400 p-4"
-                  >
-                    <ImageOff class="h-10 w-10 mb-2 opacity-50" />
-                    <span class="text-xs font-medium text-center">Image Failed</span>
-                  </div>
-
-                  <!-- Actual Image -->
-                  <img
-                    v-else
-                    :src="`file://${getThumbnailPath(image.localFilePath)}`"
-                    :alt="image.originalFilename"
-                    loading="lazy"
-                    class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                    @error="
-                      (e) => ((e.target as HTMLImageElement).src = `file://${image.localFilePath}`)
-                    "
-                  />
-
-                  <!-- Gradient Overlay -->
-                  <div
-                    class="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                    :class="{ 'opacity-100': selectedImageIds.has(image.id) }"
-                  ></div>
-                </a>
-
-                <!-- Selection Checkbox (Top Left) -->
-                <div 
-                    class="absolute top-3 left-3 z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                    :class="{ 'opacity-100': selectedImageIds.has(image.id) || isSelectionMode }"
-                    @click.stop
-                >
-                    <div 
-                        class="h-6 w-6 rounded-full border-2 flex items-center justify-center cursor-pointer transition-colors"
-                        :class="selectedImageIds.has(image.id) ? 'bg-indigo-500 border-indigo-500' : 'bg-black/30 border-white hover:bg-black/50'"
-                        @click="toggleSelection(image.id)"
-                    >
-                        <Check v-if="selectedImageIds.has(image.id)" class="h-3.5 w-3.5 text-white stroke-[3]" />
-                    </div>
-                </div>
-
-                <!-- Favorite Badge (Top Right) -->
-                <div v-if="image.isFavorite" class="absolute top-3 right-3 group/fav z-10 pointer-events-none">
-                  <div
-                    class="h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-rose-500 text-white shadow-lg"
-                  >
-                    <Heart class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
-                    <span v-if="(image.favoriteCount || 0) > 0" class="text-xs font-bold">{{
-                      image.favoriteCount
-                    }}</span>
-                  </div>
-                  <!-- Who favorited tooltip -->
-                  <div
-                    v-if="image.favoritedBy && image.favoritedBy.length > 0"
-                    class="absolute top-full right-0 mt-1.5 opacity-0 group-hover/fav:opacity-100 transition-opacity pointer-events-none"
-                  >
-                    <div
-                      class="bg-slate-800/95 backdrop-blur-sm text-white text-xs rounded-lg px-3 py-2 shadow-xl whitespace-nowrap"
-                    >
-                      <div class="font-medium text-slate-300 mb-1">Favorited by:</div>
-                      <div v-for="name in image.favoritedBy" :key="name" class="text-white">
-                        {{ name }}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Notes Badge (Top Left - Shifted when selection active) -->
-                <button
-                  v-if="(image.notesCount || 0) > 0"
-                  class="absolute top-3 h-8 rounded-full flex items-center justify-center px-2 gap-1.5 min-w-8 bg-indigo-500 text-white shadow-md z-10 hover:bg-indigo-600 transition-colors"
-                  :class="isSelectionMode || selectedImageIds.has(image.id) ? 'left-11' : 'left-3'"
-                  @click.stop.prevent="openNotesSidebar(image)"
-                >
-                  <MessageSquare class="h-3.5 w-3.5 shrink-0" fill="currentColor" />
-                  <span class="text-xs font-bold">{{ image.notesCount }}</span>
-                </button>
-
-                <!-- Image Info (Bottom) - Show on hover -->
-                <div
-                  class="absolute bottom-3 left-3 right-3 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                  v-if="!isSelectionMode"
-                >
-                  <p class="text-white text-xs font-medium truncate flex-1 mr-2">
-                    {{ image.originalFilename }}
-                  </p>
-                  <button
-                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-sm transition-all hover:bg-white/40"
-                    title="Show Original in Folder"
-                    @click.stop.prevent="showOriginalInFolder(image.id)"
-                  >
-                    <FolderOpen class="h-3.5 w-3.5" />
-                  </button>
-                </div>
-
-                <!-- Upload Status Badge -->
-                <div
-                  v-if="image.uploadStatus !== 'complete'"
-                  class="absolute bottom-3 right-3 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider shadow-sm backdrop-blur-md z-10"
-                  :class="{
-                    'bg-blue-500/80 text-white': getDisplayStatus(image.uploadStatus) === 'Processing',
-                    'bg-red-500/80 text-white': getDisplayStatus(image.uploadStatus) === 'Failed'
-                  }"
-                >
-                  {{ getDisplayStatus(image.uploadStatus) }}
-                </div>
-              </div>
-            </div>
-            
-            <!-- Infinite Scroll Trigger -->
-            <div ref="loadMoreTrigger" class="h-10 w-full flex items-center justify-center p-4">
-              <Loader2
-                v-if="displayedImages.length < filteredImages.length"
-                class="h-6 w-6 text-slate-400 animate-spin"
-              />
-            </div>
-          </div>
-        </main>
-      </div>
-
-      <!-- Notes Sidebar -->
-      <NotesSidebar
-        :is-open="showNotesSidebar"
-        :image="currentNotesImage"
-        @close="closeNotesSidebar"
-      />
-
-      <!-- Share Link Modal -->
-      <Modal :show="showShareModal" title="Share Album" @close="showShareModal = false">
-        <div class="space-y-6">
-          <!-- Header with icon -->
-          <div class="flex flex-col items-center text-center">
-            <div
-              class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 shadow-lg shadow-indigo-500/30"
-            >
-              <Link2 class="h-8 w-8 text-white" />
-            </div>
-            <h3 class="text-lg font-semibold text-gray-900">Your share link is ready!</h3>
-            <p class="mt-1 text-sm text-gray-500">
-              Share this link with your clients to let them view and favorite photos
-            </p>
-          </div>
-
-          <!-- Link Display -->
-          <div class="rounded-xl bg-gray-50 p-4">
-            <div class="flex items-center gap-3">
-              <div
-                class="flex-1 overflow-hidden rounded-lg border border-gray-200 bg-white px-4 py-3"
-              >
-                <p class="truncate text-sm font-medium text-gray-700">{{ shareLink }}</p>
-              </div>
-              <button
-                class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition-all"
-                :class="
-                  copied
-                    ? 'bg-green-500 text-white shadow-lg shadow-green-500/30'
-                    : 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30 hover:shadow-xl'
-                "
-                @click="copyShareLink"
-              >
-                <Check v-if="copied" class="h-5 w-5" />
-                <Copy v-else class="h-5 w-5" />
-              </button>
-            </div>
-            <p v-if="copied" class="mt-2 text-center text-sm font-medium text-green-600">
-              ✓ Copied to clipboard!
-            </p>
-          </div>
-
-          <!-- Actions -->
-          <div class="flex gap-3">
-            <button
-              class="flex flex-1 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
-              @click="openShareLink"
-            >
-              <ExternalLink class="h-4 w-4" />
-              Open in Browser
-            </button>
-            <button
-              class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl"
-              @click="showShareModal = false"
-            >
-              Done
-            </button>
-          </div>
-
-          <!-- Share Error -->
-          <div
-            v-if="shareError"
-            class="rounded-xl border border-red-200 bg-red-50 p-4 text-center text-sm text-red-600"
-          >
-            {{ shareError }}
           </div>
         </div>
-      </Modal>
+
+        <div class="card" :style="clientNames.length ? 'padding-bottom:8px' : ''">
+          <div class="seg" role="group" aria-label="Show" style="width: 100%">
+            <button style="flex: 1" :aria-pressed="!showFavoritesOnly" @click="viewAll">
+              All <span class="n num">{{ nf(images.length) }}</span>
+            </button>
+            <button style="flex: 1" :aria-pressed="showFavoritesOnly" @click="viewFav">
+              <Heart style="width: 16px; height: 16px" />Picks
+              <span
+                v-if="isLoadingFavorites && !isFavoritesLoaded"
+                class="spin"
+                style="width: 12px; height: 12px"
+              ></span>
+              <span v-else class="n num">{{ nf(favoritedPhotosCount) }}</span>
+            </button>
+          </div>
+          <template v-if="clientNames.length">
+            <div style="margin: 16px 0 8px; font-size: 13px; color: var(--ink-3)">Picked by</div>
+            <div class="people">
+              <button
+                v-for="name in clientNames"
+                :key="name"
+                class="person"
+                :aria-pressed="selectedClientName === name"
+                @click="pickClient(name)"
+              >
+                <span class="avatar">{{ initials(name) }}</span
+                >{{ name }}
+                <span class="n num">{{ nf(clientCounts[name] || 0) }}</span>
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <section class="g-main" aria-label="Photos">
+        <div v-if="isSelectionMode" class="g-bar sel" role="toolbar" aria-label="Selection">
+          <button class="icon-btn sm" aria-label="Clear selection" @click="clearSelection">
+            <X />
+          </button>
+          <span class="t num">{{ nf(selectedImageIds.size) }} selected</span>
+          <button class="btn sm ghost" style="margin-left: auto" @click="selectAll">
+            Select all {{ nf(filteredImages.length) }}
+          </button>
+          <button class="btn sm primary" :disabled="copying" @click="copySelectedImages">
+            <span v-if="copying" class="spin"></span><Copy v-else />Copy
+            {{ nf(selectedImageIds.size) }} to folder…
+          </button>
+        </div>
+        <div v-else class="g-bar">
+          <span class="t">{{ barTitle }}</span>
+          <span class="m num">{{ nf(filteredImages.length) }}</span>
+        </div>
+
+        <div v-if="gridLoading" class="photos" aria-busy="true">
+          <div v-for="i in 18" :key="i" class="ph skel"></div>
+        </div>
+
+        <div v-else-if="images.length === 0" class="empty">
+          <h2>No photos in this album</h2>
+          <p>
+            Drop photos into <b>{{ album?.sourceFolderPath || 'its folder' }}</b
+            >. They upload on their own.
+          </p>
+          <button v-if="album?.sourceFolderPath" class="btn ghost" @click="showAlbumFolder">
+            <FolderOpen />Show in Finder
+          </button>
+        </div>
+
+        <div v-else-if="filteredImages.length === 0" class="empty">
+          <h2>No picks yet</h2>
+          <p>When your client hearts a photo on their link, it shows up here</p>
+          <button class="btn ghost" @click="viewAll">View all photos</button>
+        </div>
+
+        <template v-else>
+          <div id="gallery" ref="galleryEl" class="photos" :class="{ selecting: isSelectionMode }">
+            <div
+              v-for="image in displayedImages"
+              :key="image.id"
+              class="ph"
+              :class="{
+                on: selectedImageIds.has(image.id),
+                failed: getDisplayStatus(image.uploadStatus) === 'Failed'
+              }"
+            >
+              <a
+                :href="`file://${image.localFilePath}`"
+                :data-pswp-width="image.width || 1920"
+                :data-pswp-height="image.height || 1280"
+                target="_blank"
+                :aria-label="
+                  image.originalFilename +
+                  (image.favoritedBy?.length
+                    ? ', picked by ' + image.favoritedBy.map(firstName).join(', ')
+                    : '')
+                "
+                style="
+                  display: grid;
+                  place-items: center;
+                  width: 100%;
+                  height: 100%;
+                  color: inherit;
+                  text-decoration: none;
+                "
+                @click.capture="handleImageClick($event, image)"
+              >
+                <span v-if="getDisplayStatus(image.uploadStatus) === 'Failed'"
+                  ><ImageOff /><br />{{ image.originalFilename }}<br />couldn't be read</span
+                >
+                <img
+                  v-else
+                  :src="`file://${getThumbnailPath(image.localFilePath)}`"
+                  :alt="image.originalFilename"
+                  loading="lazy"
+                  @error="
+                    (e) => ((e.target as HTMLImageElement).src = `file://${image.localFilePath}`)
+                  "
+                />
+              </a>
+              <span v-if="getDisplayStatus(image.uploadStatus) === 'Failed'" class="chip"
+                >Failed</span
+              >
+              <button
+                class="sel-ctl"
+                :aria-pressed="selectedImageIds.has(image.id)"
+                :aria-label="`Select ${image.originalFilename}`"
+                @click.stop="toggleSelection(image.id)"
+              >
+                <Check />
+              </button>
+              <div class="chips">
+                <span
+                  v-if="image.favoritedBy?.length"
+                  class="chip fav"
+                  tabindex="0"
+                  :aria-label="`Picked by ${image.favoritedBy.join(', ')}`"
+                  @pointerenter="showTip($event, image.favoritedBy)"
+                  @pointerleave="tip = null"
+                  @focus="showTip($event, image.favoritedBy)"
+                  @blur="tip = null"
+                >
+                  <Heart />{{ image.favoritedBy.length }}
+                </span>
+                <button
+                  v-if="(image.notesCount || 0) > 0"
+                  class="chip"
+                  :aria-label="`${image.notesCount} client notes`"
+                  @click.stop="openNotesSidebar(image)"
+                >
+                  <MessageSquare />{{ image.notesCount }}
+                </button>
+              </div>
+              <span v-if="getDisplayStatus(image.uploadStatus) === 'Processing'" class="chip proc">
+                <span
+                  class="spin brand"
+                  style="width: 12px; height: 12px; border-width: 1.5px"
+                ></span
+                >Processing
+              </span>
+              <div class="fname">
+                <span>{{ image.originalFilename }}</span>
+                <button
+                  aria-label="Show original in Finder"
+                  title="Show original in Finder"
+                  @click.stop="showOriginalInFolder(image)"
+                >
+                  <FolderSearch />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div
+            v-if="displayedImages.length < filteredImages.length"
+            ref="loadMoreTrigger"
+            class="loadmore"
+          >
+            <span class="spin"></span>Loading more photos
+          </div>
+        </template>
+      </section>
     </div>
+
+    <Teleport to="body">
+      <div v-if="tip" class="tip" :style="{ left: `${tip.left}px`, top: `${tip.top}px` }">
+        <b>Picked by</b>
+        <template v-for="(n, i) in tip.names" :key="n"><br v-if="i" />{{ n }}</template>
+      </div>
+    </Teleport>
+
+    <NotesSidebar
+      :is-open="showNotesSidebar"
+      :image="currentNotesImage"
+      @close="closeNotesSidebar"
+    />
+
+    <Modal
+      :show="showShareModal"
+      title="Client link"
+      :sub="album?.title"
+      @close="showShareModal = false"
+    >
+      <p>
+        Send this to your client. They can view the photos, heart their picks and leave notes. No
+        account needed.
+      </p>
+      <div class="input-row">
+        <input class="input mono" readonly :value="shareLink" aria-label="Client link" />
+        <button class="btn primary" @click="copyShareLink">
+          <Check v-if="copied" /><Copy v-else />{{ copied ? 'Copied' : 'Copy' }}
+        </button>
+      </div>
+      <p v-if="showShareNext" style="font-size: 14px">
+        <Check style="width: 16px; height: 16px; color: var(--ok); vertical-align: -3px" /> Copied.
+        Paste it in WhatsApp or email. Their hearts and notes appear in this album as they pick.
+      </p>
+      <template #footer>
+        <button class="btn ghost" @click="openShareLink"><ExternalLink />Open in browser</button>
+        <button class="btn primary" @click="showShareModal = false">Done</button>
+      </template>
+    </Modal>
   </AppLayout>
 </template>
 
 <style>
-/* Animations */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* PhotoSwipe chrome in the mock's lightbox look (.lb) */
+.pswp {
+  --pswp-bg: oklch(15% 0.005 255);
+  --pswp-root-z-index: 60; /* under the notes panel (70) */
+  font-family: inherit;
 }
-
-.animate-fade-in {
-  animation: fadeIn 0.5s ease-out forwards;
-}
-
-/* Photoswipe UI Overrides */
-.pswp__button {
-  background: none !important;
-  transition: all 0.2s ease;
-  opacity: 0.8;
-}
-
-.pswp__button:hover {
-  opacity: 1;
-  transform: scale(1.1);
-}
-
-.pswp__button svg {
-  stroke: white !important;
-  fill: none !important;
-  width: 24px !important;
-  height: 24px !important;
-}
-
-.pswp__button--arrow--left,
-.pswp__button--arrow--right {
-  background: rgba(255, 255, 255, 0.1) !important;
-  backdrop-filter: blur(10px);
-  border-radius: 50%;
-  width: 48px !important;
-  height: 48px !important;
-  margin-top: -24px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-}
-
-.pswp__button--arrow--left:hover,
-.pswp__button--arrow--right:hover {
-  background: rgba(255, 255, 255, 0.2) !important;
-}
-
-.pswp__button--close,
-.pswp__button--zoom {
-  background: rgba(255, 255, 255, 0.1) !important;
-  backdrop-filter: blur(10px);
-  border-radius: 12px;
-  width: 44px !important;
-  height: 44px !important;
-  margin: 10px 10px 0 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 0 !important;
-}
-
-.pswp__button--close:hover,
-.pswp__button--zoom:hover {
-  background: rgba(255, 255, 255, 0.2) !important;
-}
-
-.pswp-custom-icon {
-  display: flex;
+.pswp__top-bar {
+  height: auto;
+  padding: 16px;
+  gap: 8px;
   align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
+  font-size: 13px;
 }
-
-.pswp__button--notes-button {
-  background: rgba(255, 255, 255, 0.1) !important;
-  backdrop-filter: blur(10px);
-  border-radius: 12px;
-  width: 44px !important;
-  height: 44px !important;
-  margin: 10px 10px 0 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+.pswp__lb-info {
+  margin-right: auto;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
 }
-
-.pswp__button--notes-button:hover {
-  background: rgba(255, 255, 255, 0.2) !important;
+.pswp__lb-info .f {
+  color: oklch(85% 0 0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-.pswp__counter {
-  font-family: 'Inter', sans-serif;
-  font-weight: 500;
-  opacity: 0.8;
-  margin-top: 15px;
-  margin-left: 20px;
+.pswp__lb-info .c {
+  color: oklch(62% 0 0);
+  margin-left: 8px;
+}
+.pswp__lb-picked {
+  color: oklch(80% 0 0);
+  margin-right: 8px;
+}
+.pswp__lb-picked[hidden] {
+  display: none;
+}
+.pswp__lb-picked svg {
+  width: 16px;
+  height: 16px;
+  fill: white;
+  stroke: white;
+}
+.pswp__button,
+.pswp__button:hover,
+.pswp__button:focus,
+.pswp__button:active {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: oklch(25% 0.005 255);
+  color: oklch(90% 0 0);
+  opacity: 1;
+}
+.pswp__button:hover {
+  background: oklch(32% 0.005 255);
+  color: white;
+}
+.pswp__button svg {
+  width: 18px;
+  height: 18px;
+}
+.pswp--zoomed-in .pswp__button--zoom {
+  background: white;
+  color: var(--ink);
+}
+.pswp__button--arrow {
+  margin-top: -18px;
+}
+.pswp__button--arrow--prev {
+  left: 20px;
+}
+.pswp__button--arrow--next {
+  right: 20px;
 }
 </style>

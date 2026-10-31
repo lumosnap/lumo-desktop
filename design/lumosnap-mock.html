@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LumoSnap Mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Permanent+Marker&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<style>
+/* Grey paper, white prints, one violet from the logo. Black pill = the one action that matters on a view. */
+:root {
+  --canvas: oklch(94.6% 0.003 255);
+  --card: oklch(99.5% 0.001 255);
+  --inset: oklch(96.4% 0.003 255);
+  --inset-2: oklch(93% 0.004 255);
+  --line: oklch(91.8% 0.004 255);
+  --line-2: oklch(86% 0.005 255);
+  --ink: oklch(21% 0.01 255);
+  --ink-2: oklch(42% 0.01 255);
+  --ink-3: oklch(52% 0.008 255);
+  --brand: oklch(52% 0.16 255);
+  --brand-soft: oklch(85% 0.06 255);
+  --brand-wash: oklch(96% 0.025 255);
+  --ok: oklch(60% 0.15 152);
+  --warn: oklch(72% 0.15 70);
+  --warn-ink: oklch(48% 0.11 60);
+  --bad: oklch(55% 0.2 27);
+  --r-card: 22px;
+  --r-inset: 14px;
+  --r-ctl: 12px;
+  --lift: 0 1px 2px oklch(20% 0.01 255 / .05), 0 8px 24px -12px oklch(20% 0.01 255 / .12);
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --spring: cubic-bezier(.34, 1.45, .5, 1);
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--canvas); color: var(--ink);
+  font: 400 14px/1.45 Outfit, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; min-width: 960px;
+}
+button, input, select { font: inherit; color: inherit; }
+b, strong { font-weight: 500; }
+button { cursor: pointer; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 8px; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+i[data-lucide], svg.lucide { width: 18px; height: 18px; stroke-width: 1.75; flex: none; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- shell ---------- */
+.app { display: grid; grid-template-columns: 232px 1fr; height: 100vh; }
+.side { display: flex; flex-direction: column; padding: 24px 12px 12px; gap: 4px; margin: 16px 0 16px 16px; background: var(--card); border-radius: var(--r-card); }
+.mark { display: flex; align-items: center; gap: 8px; padding: 0 8px 24px; font-size: 18px; font-weight: 500; letter-spacing: -.01em; }
+.mark img { width: 24px; height: 24px; border-radius: 6px; }
+.nav a {
+  display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px;
+  border-radius: 10px; text-decoration: none; color: var(--ink-2);
+}
+.nav a:hover { background: var(--inset); }
+.nav a[aria-current] { background: var(--inset); color: var(--ink); font-weight: 500; }
+.nav a .count { margin-left: auto; color: var(--ink-3); font-size: 13px; }
+.side-foot { margin-top: auto; display: grid; gap: 8px; }
+.side > .desk-cap + .side-foot { margin-top: 0; }
+.usage { background: var(--inset); border-radius: 10px; padding: 16px 16px 12px; }
+.usage-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--ink-3); }
+.usage b { font-weight: 500; color: var(--ink); font-size: 15px; }
+.usage .bar { margin: 8px 0 8px; background: var(--inset-2); }
+.usage a { display: inline-block; padding: 4px 0; font-size: 13px; color: var(--brand); text-decoration: none; font-weight: 500; }
+.who { display: flex; align-items: center; gap: 8px; padding: 8px 8px; border-radius: 10px; text-decoration: none; }
+.who:hover { background: var(--inset); }
+.who small { display: block; color: var(--ink-3); font-size: 12px; }
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: var(--inset-2); color: var(--ink-2); font-weight: 500; font-size: 14px;
+}
+.avatar.lg { width: 76px; height: 76px; font-size: 30px; font-weight: 300; background: var(--ink); color: var(--card); }
+.avatar.brand { background: var(--ink); color: var(--card); }
+
+.main { overflow-y: auto; padding: 16px 16px 40px 8px; position: relative; }
+.page { max-width: 1480px; }
+.head { display: flex; align-items: flex-end; gap: 12px; padding: 16px 8px 24px; }
+.head .label { color: var(--ink-3); font-size: 13px; }
+.head h1 { margin: 2px 0 0; font-size: 30px; font-weight: 400; letter-spacing: -.02em; line-height: 1.1; }
+.head .meta { color: var(--ink-3); margin-left: 4px; font-size: 13px; padding-bottom: 4px; }
+.head .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* ---------- surfaces ---------- */
+.card { background: var(--card); border-radius: var(--r-card); padding: 24px; }
+.card h2 { margin: 0; font-size: 18px; font-weight: 400; letter-spacing: -.01em; }
+.card .sub { color: var(--ink-3); font-size: 13px; margin-top: 2px; }
+.inset { background: var(--inset); border-radius: var(--r-inset); padding: 16px 16px; }
+.rule { border: 0; border-top: 1px dashed var(--line-2); margin: 16px -24px; }
+.stack { display: grid; gap: 16px; }
+
+/* ---------- controls ---------- */
+.btn {
+  height: 36px; padding: 0 16px; border-radius: 999px; border: 1px solid transparent;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-weight: 500; white-space: nowrap; text-decoration: none; transition: background .12s, transform .12s var(--ease);
+}
+.btn:active:not(:disabled) { transform: scale(.98); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: var(--ink); color: var(--card); }
+.btn.primary:hover:not(:disabled) { background: oklch(30% 0.01 255); }
+.btn.ghost { background: var(--card); border-color: var(--line-2); }
+.btn.ghost:hover:not(:disabled) { background: var(--inset); }
+.btn.quiet { background: var(--inset); }
+.btn.quiet:hover:not(:disabled) { background: var(--inset-2); }
+.btn.danger { background: var(--bad); color: white; }
+.btn.danger-ghost { background: var(--card); border-color: var(--line-2); color: var(--bad); }
+.btn.sm { height: 32px; padding: 0 16px; font-size: 13px; }
+.btn.wide { width: 100%; }
+.icon-btn {
+  width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--inset);
+  display: inline-grid; place-items: center; color: var(--ink-2);
+}
+.icon-btn:hover { background: var(--inset-2); color: var(--ink); }
+.icon-btn.plain { background: transparent; }
+.icon-btn.plain:hover { background: var(--inset); }
+.icon-btn.sm { width: 32px; height: 32px; }
+.icon-btn.sm svg { width: 16px; height: 16px; }
+.link { color: var(--brand); text-decoration: none; font-weight: 500; background: none; border: 0; padding: 0; }
+.link:hover { text-decoration: underline; }
+
+.seg { display: inline-flex; background: var(--inset); padding: 4px; border-radius: var(--r-ctl); gap: 2px; }
+.seg button { border: 0; background: transparent; height: 32px; padding: 0 16px; border-radius: 8px; color: var(--ink-2); display: inline-flex; gap: 8px; align-items: center; }
+.seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: var(--lift); }
+.seg button .n { color: var(--ink-3); font-size: 12px; }
+
+.field { display: grid; gap: 8px; }
+.field label, .field .lbl { font-size: 13px; color: var(--ink-2); }
+.field .hint { font-size: 12px; color: var(--ink-3); }
+.input {
+  height: 40px; padding: 0 16px; border-radius: var(--r-ctl); border: 1px solid transparent;
+  background: var(--inset); width: 100%; outline: none;
+}
+.input:hover { border-color: var(--line-2); }
+.input:focus { border-color: var(--brand); background: var(--card); box-shadow: 0 0 0 3px var(--brand-wash); }
+.input[readonly] { color: var(--ink-2); }
+.input[readonly]:focus { box-shadow: none; border-color: var(--line-2); background: var(--inset); }
+.input.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+.input-row { display: flex; gap: 8px; }
+select.input { appearance: none; padding-right: 36px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23666' stroke-width='1.75' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--ink-3); flex: none; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); } .dot.brand { background: var(--brand); }
+.status { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.tag { display: inline-flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line-2); font-size: 12px; color: var(--ink-2); background: var(--card); }
+
+/* bars: the progress language, from the sleep and flight references */
+/* each fill spans the whole track and is scaled to its share, so a change tweens transform, never width */
+.bar { position: relative; height: 6px; border-radius: 99px; background: var(--inset-2); overflow: hidden; isolation: isolate; }
+.bar > span { position: absolute; inset: 0; transform-origin: left; transform: scaleX(var(--p, 0)); background: var(--brand); transition: transform .5s var(--ease); }
+.bar > span.pending { background: var(--brand-soft); z-index: -1; }
+.bar > span.warn { background: var(--warn); }
+.bar .notch { position: absolute; top: 0; bottom: 0; width: 4px; margin-left: -2px; background: var(--bad); }
+.bar.lg { height: 8px; }
+
+.spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--inset-2); border-top-color: var(--ink); animation: spin .8s linear infinite; flex: none; }
+.spin.brand { border-top-color: var(--brand); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.skel { background: linear-gradient(90deg, var(--inset) 0, var(--inset-2) 40%, var(--inset) 80%); background-size: 300% 100%; animation: shimmer 1.4s linear infinite; border-radius: var(--r-inset); }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+
+/* ---------- banners ---------- */
+.banner { display: flex; align-items: center; gap: 12px; margin: 4px 8px 0; padding: 8px 8px 8px 16px; border-radius: var(--r-inset); background: var(--card); font-size: 14px; }
+.banner p { margin: 0; flex: 1; color: var(--ink-2); }
+.banner p b { color: var(--ink); font-weight: 500; }
+.banner.offline { background: var(--ink); color: var(--card); }
+.banner.offline p { color: oklch(85% 0.005 255); }
+.banner.offline p b { color: var(--card); }
+
+/* ---------- albums ---------- */
+.grid-albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 16px; padding: 0 8px; }
+.album { background: var(--card); border-radius: var(--r-card); padding: 8px; position: relative; text-decoration: none; display: block; transition: box-shadow .2s var(--ease); }
+.album:hover { box-shadow: var(--lift); }
+.album[aria-disabled="true"] { cursor: default; }
+.cover { aspect-ratio: 4 / 3; border-radius: var(--r-inset); overflow: hidden; position: relative; background: var(--inset); }
+.cover img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .6s var(--ease); }
+.album:hover .cover img { transform: scale(1.025); }
+.cover .empty-cover { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); }
+.cover.muted img { filter: grayscale(1) opacity(.55); }
+.cover .flag { position: absolute; top: 8px; left: 8px; }
+.cover .flag .tag { background: oklch(99% 0 0 / .92); border: 0; backdrop-filter: blur(8px); }
+.cover .uploading { position: absolute; left: 8px; right: 8px; bottom: 8px; background: oklch(99% 0 0 / .94); border-radius: 12px; padding: 8px 12px; font-size: 12px; backdrop-filter: blur(8px); }
+.cover .uploading .row { display: flex; justify-content: space-between; margin-bottom: 8px; color: var(--ink-2); }
+.album .info { display: flex; align-items: flex-start; gap: 8px; padding: 12px 4px 8px 8px; }
+.album .info .t { font-size: 15px; }
+.album .info .m { font-size: 13px; color: var(--ink-3); }
+.album .info .hint { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+.album .info .icon-btn { margin-left: auto; }
+.menu { position: fixed; z-index: 50; background: var(--card); border-radius: 16px; padding: 8px; min-width: 196px; box-shadow: 0 2px 4px oklch(20% 0 0 / .06), 0 18px 40px -12px oklch(20% 0 0 / .25); }
+.menu button { display: flex; width: 100%; align-items: center; gap: 8px; height: 36px; border: 0; background: none; padding: 0 12px; border-radius: 8px; text-align: left; }
+.menu button:hover, .menu button:focus-visible { background: var(--inset); outline: none; }
+.menu button.bad { color: var(--bad); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 8px; }
+.empty { text-align: center; padding: 80px 20px; margin: 0 8px; }
+.empty h2 { font-size: 22px; font-weight: 400; margin: 16px 0 8px; letter-spacing: -.01em; }
+.empty p { color: var(--ink-3); margin: 0 auto 24px; max-width: 46ch; }
+.empty .art { display: inline-grid; grid-template-columns: repeat(3, 44px); gap: 8px; }
+.empty .art span { height: 32px; border-radius: 8px; background: var(--inset-2); }
+.empty .art span:nth-child(5) { background: var(--brand-soft); }
+
+/* upload widget: the signature */
+.up-pill { display: inline-flex; align-items: center; gap: 12px; height: 36px; padding: 0 16px 0 12px; border-radius: 999px; background: var(--card); border: 1px solid var(--line-2); }
+.up-pill .bar { width: 84px; }
+.up-pill .lbl { font-size: 13px; color: var(--ink-2); }
+.up-pop { position: fixed; width: 380px; z-index: 30; background: var(--card); border-radius: var(--r-card); padding: 16px; box-shadow: 0 2px 4px oklch(20% 0 0 / .06), 0 24px 50px -16px oklch(20% 0 0 / .28); }
+.up-pop .who-line { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+.up-pop .thumb { width: 40px; height: 40px; border-radius: 12px; object-fit: cover; }
+.up-pop .meter { background: var(--inset); border-radius: var(--r-inset); padding: 12px 16px 16px; }
+.up-pop .meter-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.up-pop .big { color: var(--brand); font-size: 20px; letter-spacing: -.01em; }
+.up-pop .cap { font-size: 12px; color: var(--ink-3); }
+.stages { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 12px; }
+.stages div { padding: 0 2px; }
+.stages div + div { border-left: 1px solid var(--line); padding-left: 12px; }
+.stages b { display: block; font-weight: 400; font-size: 18px; }
+.stages small { color: var(--ink-3); font-size: 12px; }
+.stages .bad b { color: var(--bad); }
+
+/* ---------- gallery ---------- */
+.gallery { display: grid; grid-template-columns: 300px 1fr; gap: 16px; padding: 16px 8px 0; align-items: start; }
+.g-side { position: sticky; top: 0; display: grid; gap: 16px; }
+.back { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; color: var(--ink-3); text-decoration: none; font-size: 13px; margin-bottom: 16px; }
+.back:hover { color: var(--ink); }
+.g-side h1 { font-size: 28px; font-weight: 400; letter-spacing: -.02em; margin: 4px 0 2px; line-height: 1.15; }
+.g-side .label { display: flex; justify-content: space-between; color: var(--ink-3); font-size: 13px; }
+.people { margin: 0 -24px -8px; }
+.person { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; background: none; padding: 8px 24px; text-align: left; border-top: 1px solid var(--line); }
+.person:hover { background: var(--inset); }
+.person[aria-pressed="true"] { background: var(--brand-wash); }
+.person .avatar { width: 32px; height: 32px; font-size: 13px; }
+.person .n { margin-left: auto; color: var(--ink-3); font-size: 13px; }
+.person:last-child { border-radius: 0 0 var(--r-card) var(--r-card); }
+.g-main { background: var(--card); border-radius: var(--r-card); padding: 12px; min-height: 70vh; }
+.g-bar { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 8px 0 12px; }
+.g-bar .t { font-size: 15px; }
+.g-bar .m { color: var(--ink-3); font-size: 13px; }
+.g-bar.sel { background: var(--ink); color: var(--card); border-radius: 10px; margin-bottom: 8px; }
+.g-bar.sel .icon-btn { background: oklch(32% 0.01 255); color: var(--card); }
+.g-bar.sel .btn.ghost { background: transparent; color: var(--card); border-color: oklch(40% 0.01 255); }
+.g-bar.sel .btn.primary { background: var(--card); color: var(--ink); }
+.photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.ph { position: relative; aspect-ratio: 3 / 2; border-radius: 10px; overflow: hidden; background: var(--inset); cursor: zoom-in; }
+.ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph .sel-ctl { position: absolute; top: 8px; left: 8px; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid white; background: oklch(0% 0 0 / .18); display: grid; place-items: center; opacity: 0; transition: opacity .12s; padding: 0; color: white; }
+.ph .sel-ctl svg { width: 16px; height: 16px; opacity: 0; }
+.ph:hover .sel-ctl, .ph:focus-within .sel-ctl, .selecting .ph .sel-ctl { opacity: 1; }
+.ph.on .sel-ctl { background: var(--brand); border-color: var(--brand); }
+.ph.on .sel-ctl svg { opacity: 1; }
+.ph.on { outline: 3px solid var(--brand); outline-offset: -3px; }
+.ph.on img { transform: scale(.94); border-radius: 6px; }
+.ph img { transition: transform .18s var(--ease); }
+.ph .chips { position: absolute; right: 8px; top: 8px; display: flex; gap: 4px; }
+.chip { height: 24px; padding: 0 8px; border-radius: 99px; border: 0; display: inline-flex; align-items: center; gap: 4px; background: oklch(99% 0 0 / .92); font-size: 12px; color: var(--ink); backdrop-filter: blur(6px); }
+.chip svg { width: 16px; height: 16px; }
+.chip.fav svg { fill: var(--ink); stroke: var(--ink); }
+.ph .fname { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; padding: 24px 8px 8px 8px; background: linear-gradient(transparent, oklch(0% 0 0 / .55)); color: white; font-size: 12px; opacity: 0; transition: opacity .15s; }
+.ph:hover .fname { opacity: 1; }
+.ph .fname button { margin-left: auto; background: none; border: 0; color: white; padding: 4px; border-radius: 6px; display: grid; }
+.ph .fname button:hover { background: oklch(100% 0 0 / .18); }
+.ph .fname svg { width: 16px; height: 16px; }
+.ph.failed { cursor: default; display: grid; place-items: center; text-align: center; color: var(--ink-3); font-size: 12px; }
+.ph.failed .chip { position: absolute; left: 8px; bottom: 8px; color: var(--bad); }
+.ph .proc { position: absolute; left: 8px; bottom: 8px; }
+.tip { position: fixed; z-index: 40; max-width: 200px; background: var(--ink); color: var(--card); border-radius: 12px; padding: 8px 12px; font-size: 12px; min-width: 150px; pointer-events: none; }
+.tip b { font-weight: 500; display: block; margin-bottom: 4px; color: oklch(80% 0.01 255); font-size: 12px; }
+.loadmore { display: flex; justify-content: center; align-items: center; gap: 8px; padding: 24px; color: var(--ink-3); font-size: 13px; }
+
+/* delight piece: the print stack. Every delivered photo as a 6x4 print, piled up on a desk. */
+.desk { position: relative; flex: 1; min-height: 200px; margin-top: 10px; }
+.pile { position: absolute; left: 0; right: 0; bottom: 0; height: 176px; } /* a still zone: entering it unfolds the pile once */
+.pile .edge { transform-origin: bottom; position: absolute; left: calc(50% - 58px); width: 116px; bottom: 8px; height: var(--h); border-radius: 2px;
+  background: repeating-linear-gradient(to bottom, #fff 0 1px, oklch(88% 0.004 255) 1px 2px); box-shadow: 0 3px 8px -4px oklch(20% 0 0 / .35); }
+.print { position: absolute; width: 116px; aspect-ratio: 3 / 2; padding: 0; border: 0; background: none; border-radius: 2px; cursor: grab; touch-action: none; transition: transform .5s var(--spring); }
+/* the button is the still hit area; only the paper moves, so a pushed print never slips out from under the pointer */
+.print .paper { display: block; width: 100%; height: 100%; perspective: 700px; transition: transform .35s var(--spring);
+  --sh: 0 1px 2px oklch(20% 0 0 / .14), 0 8px 16px -10px oklch(20% 0 0 / .4); }
+/* turn a loose print over: the back has the album name in marker, as people write on prints */
+.print .flip { position: relative; display: block; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform .6s cubic-bezier(.3, 1.25, .5, 1); }
+.print.flipped .flip { transform: rotateY(180deg); }
+.print .face { position: absolute; inset: 0; border-radius: 2px; backface-visibility: hidden; -webkit-backface-visibility: hidden; box-shadow: var(--sh); transition: box-shadow .3s; }
+.print .front { padding: 5px; background: #fff; }
+.print .back { transform: rotateY(180deg); display: grid; place-content: center; gap: 3px; padding: 8px; text-align: center;
+  background: oklch(96.5% 0.012 85) repeating-linear-gradient(118deg, transparent 0 11px, oklch(93% 0.012 85 / .7) 11px 12px);
+  font: 15px/1.05 'Permanent Marker', 'Marker Felt', cursive; color: oklch(27% 0.04 262); }
+.print .back span { transform: rotate(var(--hand)); }
+.print .back small { font-size: 11px; opacity: .7; transform: rotate(var(--hand)); }
+.print img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.print:focus-visible { outline-offset: 3px; }
+.pile .print { left: calc(50% - 58px); bottom: calc(8px + var(--h) + var(--y)); transform: translateX(var(--x)) rotate(var(--r)); }
+/* the pile unfolds when the hand enters its zone and stays open until it leaves */
+.pile.open .print { transform: translate(calc(var(--x) + var(--fx)), calc(var(--k) * -3px)) rotate(calc(var(--r) * 2.2)); }
+/* a print under the top one slides out, as if a finger pushed it from the pile */
+.pile.ready .print:not(.top):hover .paper, .pile .print:not(.top):focus-visible .paper { transform: translate(var(--out), -9px) rotate(calc(var(--r) * 1.4)); --sh: 0 2px 4px oklch(20% 0 0 / .14), 0 14px 22px -12px oklch(20% 0 0 / .45); }
+.pile.ready .print.top:hover .paper, .pile .print.top:focus-visible .paper { transform: translateY(-7px) rotate(-1.2deg); --sh: 0 2px 4px oklch(20% 0 0 / .14), 0 16px 24px -12px oklch(20% 0 0 / .45); }
+/* a print reached by keyboard comes to the front, like lifting it to look */
+.pile .print:focus-visible { z-index: 5; }
+.print.loose { z-index: 3; transform: rotate(var(--r)); }
+.print.loose:hover .paper, .print.loose:focus-visible .paper { transform: translateY(-3px) scale(1.03); }
+.print.dragging { z-index: 10; cursor: grabbing; transition: none; transform: rotate(var(--dr)) scale(1.07) !important; }
+.print.dragging .paper { transform: none !important; --sh: 0 4px 8px oklch(20% 0 0 / .12), 0 26px 36px -16px oklch(20% 0 0 / .5); }
+.print.blank { border: 1.5px dashed var(--line-2); cursor: default; }
+.print.drop { animation: drop .8s var(--spring) both; }
+@keyframes drop { from { transform: translate(-10px, -70px) rotate(-16deg); opacity: 0; } 30% { opacity: 1; } }
+.tidy { position: absolute; top: 0; right: 4px; z-index: 4; font-size: 12px; padding: 4px 6px; }
+.desk-cap { margin: 6px 6px 10px; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.desk-cap b { display: block; font-weight: 500; font-size: 14px; color: var(--ink); }
+.desk-cap .which { display: block; height: 2.8em; overflow: hidden; /* fixed, so a caption change never moves the pile under the pointer */ margin-top: 4px; color: var(--ink-2); }
+.album.flash { animation: flash 1.8s var(--ease); }
+@keyframes flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 15%, 55% { box-shadow: 0 0 0 3px var(--brand), var(--lift); } 35% { box-shadow: 0 0 0 6px var(--brand-soft), var(--lift); } }
+.check-row { display: flex; align-items: center; gap: 8px; margin-top: 16px; min-height: 32px; font-size: 14px; cursor: pointer; }
+.check-row input { width: 24px; height: 24px; accent-color: var(--ink); margin: 0; }
+
+/* lightbox */
+.lb { position: fixed; inset: 0; z-index: 60; background: oklch(15% 0.005 255); color: white; display: grid; grid-template-rows: auto 1fr; }
+.lb-top { display: flex; align-items: center; gap: 8px; padding: 16px 16px; font-size: 13px; }
+.lb-top .f { color: oklch(85% 0 0); }
+.lb-top .c { color: oklch(62% 0 0); margin-left: 8px; }
+.lb-top .sp { flex: 1; }
+.lb .icon-btn { background: oklch(25% 0.005 255); color: oklch(90% 0 0); }
+.lb .icon-btn:hover { background: oklch(32% 0.005 255); color: white; }
+.lb .icon-btn[aria-pressed="true"] { background: white; color: var(--ink); }
+.lb-stage { position: relative; display: grid; place-items: center; overflow: hidden; padding: 0 80px 40px; }
+.lb-stage img { max-width: 100%; max-height: calc(100vh - 110px); border-radius: 4px; transition: transform .25s var(--ease); }
+.lb-stage img.zoom { transform: scale(1.8); cursor: zoom-out; }
+.lb-nav { position: absolute; top: 50%; transform: translateY(-50%); }
+.lb-nav.prev { left: 20px; } .lb-nav.next { right: 20px; }
+
+/* notes panel */
+.notes { position: fixed; top: 16px; right: 16px; bottom: 16px; width: 360px; z-index: 70; background: var(--card); border-radius: var(--r-card); display: flex; flex-direction: column; box-shadow: 0 30px 60px -20px oklch(0% 0 0 / .35); animation: slideIn .28s var(--ease); color: var(--ink); }
+@keyframes slideIn { from { transform: translateX(24px); opacity: 0; } }
+.notes header { display: flex; align-items: flex-start; padding: 20px 16px 16px 24px; }
+.notes header h2 { margin: 0; font-size: 18px; font-weight: 400; }
+.notes header small { color: var(--ink-3); font-size: 13px; }
+.notes header .icon-btn { margin-left: auto; }
+.notes .list { flex: 1; overflow-y: auto; padding: 0 16px; display: grid; gap: 8px; align-content: start; }
+.note { background: var(--inset); border-radius: var(--r-inset); padding: 16px; }
+.note .h { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.note .h .avatar { width: 28px; height: 28px; font-size: 12px; background: var(--card); }
+.note .h small { color: var(--ink-3); margin-left: auto; font-size: 12px; }
+.note p { margin: 0; color: var(--ink-2); }
+.notes footer { padding: 16px 24px; color: var(--ink-3); font-size: 13px; border-top: 1px solid var(--line); }
+
+/* ---------- settings ---------- */
+.settings { display: grid; grid-template-columns: 240px minmax(0, 760px); gap: 16px; padding: 0 8px; align-items: start; }
+.tabs { background: var(--card); border-radius: var(--r-card); padding: 8px; display: grid; gap: 2px; position: sticky; top: 0; }
+.tabs a { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 14px; text-decoration: none; color: var(--ink-2); }
+.tabs a:hover { background: var(--inset); }
+.tabs a[aria-current] { background: var(--inset); color: var(--ink); }
+.tabs hr { border: 0; border-top: 1px solid var(--line); margin: 8px 4px; }
+.tabs button.out { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border: 0; background: none; border-radius: 14px; color: var(--ink-2); }
+.tabs button.out:hover { background: var(--inset); }
+.profile-top { text-align: center; padding: 28px 24px 24px; }
+.profile-top h2 { margin-top: 16px; font-size: 20px; }
+.form2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.lock { font-size: 12px; color: var(--ink-3); display: inline-flex; gap: 4px; align-items: center; }
+.lock svg { width: 16px; height: 16px; }
+.row-actions { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
+.saved { color: var(--ok); font-size: 13px; display: inline-flex; gap: 8px; align-items: center; }
+.path-row { display: flex; align-items: center; gap: 12px; }
+.path-row .p { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 0; counter-reset: s; }
+.steps li { display: flex; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); counter-increment: s; color: var(--ink-2); }
+.steps li:first-child { border-top: 0; }
+.steps li::before { content: counter(s); width: 24px; height: 24px; border-radius: 50%; background: var(--inset); color: var(--ink); display: grid; place-items: center; font-size: 12px; flex: none; }
+.plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.plan { border: 1px solid var(--line); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+.plan.current { background: var(--inset); border-color: transparent; }
+.plan .p { font-size: 22px; letter-spacing: -.01em; margin-top: 8px; }
+.plan .p small { font-size: 13px; color: var(--ink-3); }
+.plan .d { color: var(--ink-3); font-size: 13px; flex: 1; margin-bottom: 12px; }
+.note-line { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--ink-2); padding: 8px 12px; border-radius: var(--r-ctl); background: oklch(96% 0.04 80); }
+.note-line svg { color: var(--warn-ink); margin-top: 1px; width: 16px; height: 16px; }
+.danger-list { margin: 8px 0 16px; padding-left: 16px; color: var(--ink-2); }
+.danger-list li { margin: 2px 0; }
+
+/* ---------- bookings ---------- */
+.book-wrap { padding: 0 8px; display: grid; gap: 16px; }
+.next-shoot { display: grid; grid-template-columns: 170px 1fr auto; gap: 24px; align-items: center; }
+.next-shoot .date small { color: var(--ink-3); font-size: 13px; display: block; }
+.next-shoot .date b { font-weight: 300; font-size: 44px; letter-spacing: -.03em; line-height: 1; }
+.next-shoot .who-b { border-left: 1px solid var(--line); padding-left: 24px; }
+.next-shoot .who-b .t { font-size: 18px; }
+.next-shoot .who-b .m { color: var(--ink-3); font-size: 14px; display: flex; gap: 16px; margin-top: 4px; }
+.next-shoot .who-b .m span { display: inline-flex; gap: 8px; align-items: center; }
+.next-shoot .who-b svg { width: 16px; height: 16px; }
+table.bk { width: 100%; border-collapse: collapse; }
+.bk th { text-align: left; font-weight: 400; color: var(--ink-3); font-size: 12px; padding: 0 12px 8px; }
+.bk td { white-space: nowrap; }
+.bk td.d { white-space: normal; width: 100%; max-width: 0; }
+.bk .more { max-width: 100% !important; }
+.bk td { padding: 16px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+.bk tr.det td { border-top: 0; padding-top: 0; }
+.bk .client { display: flex; gap: 12px; align-items: center; }
+.bk .client .avatar { width: 32px; height: 32px; font-size: 13px; }
+.bk .sm { color: var(--ink-3); font-size: 13px; }
+.tel { display: inline-block; padding: 4px 0; text-decoration: none; color: var(--ink); }
+.tel:hover { color: var(--brand); }
+.bk .more { background: none; border: 0; padding: 4px 0; min-height: 24px; color: var(--ink-2); text-align: left; display: inline-flex; gap: 8px; align-items: center; max-width: 260px; }
+.bk .more span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bk .more:hover { color: var(--ink); }
+.bk .more svg { width: 16px; height: 16px; transition: transform .2s var(--ease); }
+.bk .more[aria-expanded="true"] svg { transform: rotate(180deg); }
+.bk .detail { background: var(--inset); border-radius: var(--r-inset); padding: 16px 16px; color: var(--ink-2); max-width: 70ch; }
+
+/* ---------- auth ---------- */
+.auth { min-height: 100vh; display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; padding: 16px; }
+.sheet { background: var(--card); border-radius: var(--r-card); padding: 24px; display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 1fr; gap: 8px; position: relative; }
+.sheet img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block; min-height: 0; }
+.sheet img.pick { outline: 2.5px solid var(--brand); outline-offset: 3px; }
+.sheet .frame-no { position: absolute; left: 28px; bottom: 8px; font: 11px ui-monospace, Menlo, monospace; color: var(--ink-3); letter-spacing: .08em; }
+.auth-body { display: flex; flex-direction: column; justify-content: center; padding: 40px clamp(28px, 6vw, 88px); }
+.auth-body .mark { padding: 0 0 48px; }
+.steps-bar { display: flex; gap: 4px; margin-bottom: 24px; width: 120px; }
+.steps-bar span { flex: 1; height: 4px; border-radius: 9px; background: var(--inset-2); }
+.steps-bar span.on { background: var(--ink); }
+.auth-body .label { color: var(--ink-3); font-size: 13px; }
+.auth-body h1 { font-size: 36px; font-weight: 400; letter-spacing: -.025em; line-height: 1.1; margin: 8px 0 12px; max-width: 16ch; }
+.auth-body p.lede { color: var(--ink-2); max-width: 42ch; margin: 0 0 28px; font-size: 15px; }
+.auth-body .act { display: flex; gap: 8px; align-items: center; }
+.wait { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.code-card { background: var(--inset); border-radius: 18px; padding: 16px; max-width: 420px; }
+.code-card .top { display: flex; justify-content: space-between; color: var(--ink-3); font-size: 13px; margin-bottom: 8px; }
+.code { font: 400 26px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .14em; display: flex; align-items: center; justify-content: space-between; background: var(--card); border-radius: 12px; padding: 16px 8px 16px 16px; }
+.code-card .how { font-size: 13px; color: var(--ink-2); margin-top: 12px; }
+.err { color: var(--bad); font-size: 14px; display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+
+/* ---------- dialogs ---------- */
+dialog { border: 0; padding: 0; border-radius: var(--r-card); background: var(--card); color: var(--ink); width: 460px; max-width: calc(100vw - 32px); box-shadow: 0 40px 80px -30px oklch(0% 0 0 / .4); }
+dialog::backdrop { background: oklch(20% 0.01 255 / .32); backdrop-filter: blur(3px); }
+dialog[open] { animation: pop .22s var(--ease); }
+@keyframes pop { from { transform: translateY(8px) scale(.985); opacity: 0; } }
+.dlg-h { display: flex; align-items: flex-start; gap: 12px; padding: 24px 16px 0 24px; }
+.dlg-h h2 { margin: 0; font-size: 20px; font-weight: 400; letter-spacing: -.01em; }
+.dlg-h small { color: var(--ink-3); font-size: 13px; display: block; margin-top: 2px; }
+.dlg-h .icon-btn { margin-left: auto; }
+.dlg-b { padding: 16px 24px; display: grid; gap: 16px; }
+.dlg-b p { margin: 0; color: var(--ink-2); }
+.dlg-f { display: flex; gap: 8px; justify-content: flex-end; padding: 0 24px 24px; }
+.changes { display: grid; gap: 8px; }
+.changes details { background: var(--inset); border-radius: var(--r-ctl); }
+.changes summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; cursor: pointer; }
+.changes summary::-webkit-details-marker { display: none; }
+.changes summary .n { margin-left: auto; color: var(--ink-2); }
+.changes summary svg { width: 16px; height: 16px; color: var(--ink-3); transition: transform .2s var(--ease); }
+.changes details[open] summary svg { transform: rotate(90deg); }
+.changes ul { max-height: 168px; overflow-y: auto; margin: 0; padding: 0 16px 12px 40px; list-style: none; font: 12px/1.8 ui-monospace, Menlo, monospace; color: var(--ink-2); }
+.changes ul small { font-family: Outfit, sans-serif; color: var(--ink-3); }
+.flight { background: var(--inset); border-radius: 18px; padding: 16px; }
+.flight .ends { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--ink-2); }
+.flight .track { flex: 1; position: relative; height: 6px; background: var(--inset-2); border-radius: 9px; }
+.flight .track .fill { position: absolute; inset: 0; transform-origin: left; background: var(--brand); border-radius: 8px; transition: transform .4s var(--ease); }
+.flight .track .rail { position: absolute; inset: 0; transition: transform .4s var(--ease); }
+.flight .track .plane { position: absolute; top: 50%; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; background: var(--brand); color: white; display: grid; place-items: center; left: 0; box-shadow: 0 0 0 3px var(--inset); }
+.flight .track .plane svg { width: 16px; height: 16px; }
+.flight .box { margin-top: 16px; background: var(--card); border-radius: 12px; padding: 12px 16px; display: flex; justify-content: space-between; box-shadow: var(--lift); }
+.flight .box b { font-weight: 400; display: block; }
+.flight .box small { color: var(--ink-3); font-size: 12px; }
+.flight .box .r { text-align: right; }
+
+/* toast */
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 90; background: var(--ink); color: var(--card); border-radius: 999px; padding: 8px 8px 8px 16px; display: flex; align-items: center; gap: 16px; font-size: 14px; animation: toastIn .25s var(--ease); }
+.toast .link { color: oklch(82% 0.09 255); }
+.toast .icon-btn { background: transparent; color: oklch(80% 0 0); width: 28px; height: 28px; }
+@keyframes toastIn { from { transform: translate(-50%, 10px); opacity: 0; } }
+
+/* mock-only state panel: dashed so nobody mistakes it for product UI */
+.demo { position: fixed; right: 16px; bottom: 16px; z-index: 100; font-size: 12px; }
+.demo > button { border: 1.5px dashed var(--ink-3); background: oklch(99% 0 0 / .9); border-radius: 999px; height: 32px; padding: 0 16px; color: var(--ink-2); }
+.demo .pane { position: absolute; right: 0; bottom: 40px; width: 260px; background: var(--card); border: 1.5px dashed var(--ink-3); border-radius: 16px; padding: 16px; display: grid; gap: 8px; }
+.demo .pane h3 { margin: 0; font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.demo label { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.demo select { font-size: 12px; border: 1px solid var(--line-2); border-radius: 8px; padding: 4px 8px; background: var(--card); }
+.demo .links { display: flex; flex-wrap: wrap; gap: 8px; }
+.demo .links a { border: 1px solid var(--line-2); border-radius: 99px; padding: 2px 8px; text-decoration: none; color: var(--ink-2); }
+
+/* the side panel only sticks when it fits the window */
+@media (max-height: 960px) { .g-side { position: static; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .spin { animation: spin 1.6s linear infinite !important; }
+}
+@media (max-width: 1180px) {
+  .app { grid-template-columns: 214px 1fr; }
+  .gallery { grid-template-columns: 248px 1fr; }
+  .photos { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .next-shoot { grid-template-columns: 140px 1fr auto; }
+  .plans { grid-template-columns: 1fr 1fr; }
+  .settings { grid-template-columns: 200px minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="layer"></div>
+<dialog id="dlg"></dialog>
+<div id="live" class="vh" aria-live="polite"></div>
+
+<script>
+/* ---------------- data ---------------- */
+const img = (seed, w = 640, h = 480) => `https://picsum.photos/seed/lumo-${seed}/${w}/${h}`
+const ME = { name: 'Arjun Menon', biz: 'Northlight Studio', email: 'arjun@northlight.studio', phone: '+91 98470 21456', booking: 'https://lumosnap.com/book/northlight' }
+const ALBUMS = [
+  { id: 1, title: 'Ananya & Rohit', date: '26 Oct 2026', photos: 1248, seed: 'wed', status: 'uploading', folder: '~/Pictures/LumoSnap/Ananya & Rohit' },
+  { id: 2, title: "Meera's 1st birthday", date: '27 Oct 2026', photos: 342, seed: 'bday', status: 'sync', folder: "~/Pictures/LumoSnap/Meera's 1st birthday" },
+  { id: 3, title: 'Kovalam pre-wedding', date: '19 Oct 2026', photos: 486, seed: 'beach', status: 'ok', folder: '~/Pictures/LumoSnap/Kovalam pre-wedding' },
+  { id: 4, title: 'Tharavad family portraits', date: '11 Oct 2026', photos: 128, seed: 'fam', status: 'ok', folder: '~/Pictures/LumoSnap/Tharavad family portraits' },
+  { id: 5, title: 'Café Arabica menu', date: '3 Oct 2026', photos: 64, seed: 'cafe', status: 'ok', folder: '~/Pictures/LumoSnap/Café Arabica menu' },
+  { id: 6, title: 'Infopark offsite', date: '21 Sep 2026', photos: 512, seed: 'office', status: 'ok', folder: '~/Pictures/LumoSnap/Infopark offsite' },
+  { id: 7, title: 'Mattancherry walk', date: '8 Sep 2026', photos: 252, seed: 'street', status: 'orphan', folder: '~/Pictures/LumoSnap/Mattancherry walk' },
+  { id: 8, title: 'Fort Kochi street', date: 'Today', photos: 0, seed: null, status: 'ok', folder: '~/Pictures/LumoSnap/Fort Kochi street' }
+]
+const CLIENTS = [
+  { id: 'a', name: 'Ananya Pillai', n: 21 },
+  { id: 'r', name: 'Rohit Varma', n: 9 },
+  { id: 'l', name: 'Leela Pillai', n: 6 }
+]
+const NOTES = [
+  { who: 'Ananya Pillai', when: '28 Oct', text: 'Can we get this one in black and white too? For the album cover.' },
+  { who: 'Leela Pillai', when: '28 Oct', text: 'Please crop out the speaker stand on the right.' },
+  { who: 'Rohit Varma', when: '29 Oct', text: 'This is the one for the frame at home.' }
+]
+const BOOKINGS = {
+  upcoming: [
+    { name: 'Nikhil & Sara', type: 'Wedding', date: 'Mon, 2 Nov', loc: 'Bolgatty Palace, Kochi', phone: '+91 94470 11872', details: 'Ceremony at 10:30, reception from 18:00. Wants a second shooter for the haldi on Friday evening. Drone allowed on the lawn only.' },
+    { name: 'Revathi Krishnan', type: 'Maternity', date: 'Sat, 7 Nov', loc: 'Cherai Beach', phone: '+91 98950 30214', details: 'Golden hour, around 17:15. Partner and dog will join.' },
+    { name: 'Spice Route Hotels', type: 'Commercial', date: 'Wed, 11 Nov', loc: 'Fort Kochi', phone: '+91 484 221 9087', details: '' },
+    { name: 'Joseph family', type: 'Portrait', date: 'Tue, 17 Nov', loc: 'Studio, Panampilly Nagar', phone: '+91 97440 55120', details: 'Three generations, eleven people. Grandmother uses a wheelchair, so ground floor please.' },
+    { name: 'Diya Thomas', type: 'Graduation', date: 'Sun, 22 Nov', loc: 'St. Teresa’s College', phone: '+91 90370 88341', details: '' },
+    { name: 'Aswin & Gauri', type: 'Engagement', date: 'Tue, 1 Dec', loc: 'Thrissur', phone: '+91 94960 77013', details: 'Small function at home, about forty guests.' }
+  ],
+  past: [
+    { name: 'Ananya & Rohit', type: 'Wedding', date: 'Mon, 26 Oct', loc: 'Kumarakom', phone: '+91 98460 66210', details: '', album: 1 },
+    { name: 'Meera’s parents', type: 'Birthday', date: 'Tue, 27 Oct', loc: 'Kakkanad', phone: '+91 97456 12093', details: '' },
+    { name: 'Café Arabica', type: 'Commercial', date: 'Sat, 3 Oct', loc: 'MG Road, Kochi', phone: '+91 484 235 7781', details: 'New winter menu, 22 dishes.' }
+  ]
+}
+const FILES = n => `NLS_${String(4120 + n).padStart(5, '0')}.jpg`
+
+/* ---------------- state ---------------- */
+const S = {
+  signedIn: true, offline: false, lowStorage: true,
+  albums: 'ready', gallery: 'ready',
+  upload: { on: true, total: 480, compressed: 412, uploaded: 312, failed: 3, done: false }, upPos: null,
+  upOpen: false, menu: null, menuPos: null, dropPrint: false, flash: null, countFrom: null,
+  view: 'all', client: null, selected: new Set(), shown: 30,
+  lb: null, zoom: false, notesFor: null,
+  bookTab: 'upcoming', open: new Set(),
+  wait: false, authErr: false, saved: false, updates: 'idle',
+  requested: null, watchChanged: false
+}
+const nf = n => n.toLocaleString('en-IN')
+const initials = s => s.split(/\s|&/).filter(Boolean).slice(0, 2).map(w => w[0]).join('')
+const ic = (name, extra = '') => `<i data-lucide="${name}" ${extra}></i>`
+const $ = s => document.querySelector(s)
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+
+/* ---------------- print stack (delight piece) ---------------- */
+const STACK_KEY = 'lumo:hidePrintStack'
+try { S.hideStack = localStorage.getItem(STACK_KEY) === '1' } catch { S.hideStack = false }
+const PAPER_MM = 0.3 // one 6x4 print on photo paper
+const standWords = cm => cm >= 200 ? 'Taller than a light stand.' : cm >= 160 ? 'Almost a light stand.' : cm >= 80 ? 'About half a light stand.' : cm >= 40 ? 'A quarter of a light stand.' : 'Knee-high, so far.'
+const DESK_KEY = 'lumo:desk', HINT_KEY = 'lumo:deskHint'
+try { S.placed = JSON.parse(localStorage.getItem(DESK_KEY) || '{}') } catch { S.placed = {} }
+try { S.deskHint = localStorage.getItem(HINT_KEY) !== 'done' } catch { S.deskHint = true }
+const saveDesk = () => { try { localStorage.setItem(DESK_KEY, JSON.stringify(S.placed)); localStorage.setItem(HINT_KEY, 'done') } catch {} }
+const deskHint = () => S.deskHint ? 'Drag a print out, or click it to find its album' : ''
+function printBtn(a, style, cls) {
+  return `<button class="print ${cls}" style="${style}" data-id="${a.id}" title="${esc(a.title)}" aria-label="${esc(a.title)}, ${nf(a.photos)} photos. Enter finds the album, arrow keys move the print${S.placed[a.id] ? ', Space turns it over' : ''}."><span class="paper"><span class="flip"><span class="face front"><img src="${img(a.seed, 240, 160)}" alt="" draggable="false"></span><span class="face back" aria-hidden="true" style="--hand:${(a.id * 29) % 7 - 3}deg"><span>${esc(a.title)}</span><small>${a.date}</small></span></span></span></button>`
+}
+function stackHtml() {
+  if (S.hideStack) return ''
+  const total = ALBUMS.reduce((n, a) => n + a.photos, 0)
+  const cm = Math.round(total * PAPER_MM / 10)
+  const covers = ALBUMS.filter(a => a.seed && a.photos)
+  const h = Math.max(2, Math.min(24, Math.round(Math.sqrt(total) / 2.5)))
+  const cap = `<div class="desk-cap"><b class="num" id="stack-n">${nf(total)} photos delivered</b>As 6×4 prints, a pile ${cm} cm tall. ${standWords(cm)}<span class="which" id="stack-which" aria-live="polite">${deskHint()}</span></div>`
+  if (!covers.length) return `<div class="desk" aria-hidden="true"><div class="pile" style="--h:0px"><div class="print blank pile-blank" style="left:calc(50% - 58px);bottom:8px;transform:rotate(-2deg)"></div></div></div>
+    <div class="desk-cap"><b>Your first print</b>Every photo you deliver lands on this pile.</div>`
+  const loose = covers.filter(a => S.placed[a.id])
+  const pile = covers.filter(a => !S.placed[a.id]).slice(0, 5).reverse()
+  const top = pile.length - 1
+  const pilePrints = pile.map((a, k) => {
+    const rr = k === top ? -1.5 : ((a.id * 37) % 9 - 4) * 1.6, x = k === top ? 0 : ((a.id * 53) % 9 - 4) * 2
+    const out = (k - top / 2 > 0 ? 1 : -1) * 22 // same side the fan exposes it on
+    return printBtn(a, `--x:${x}px;--y:${k * 1.5}px;--r:${rr}deg;--fx:${(k - top / 2) * 10}px;--k:${k};--out:${out}px`, k === top ? `top ${S.dropPrint ? 'drop' : ''}` : '')
+  }).join('')
+  const loosePrints = loose.map(a => { const q = S.placed[a.id]; return printBtn(a, `left:${q.x}px;top:${q.y}px;--r:${q.r}deg`, 'loose') }).join('')
+  if (S.dropPrint) setTimeout(() => { S.dropPrint = false }, 900)
+  return `<div class="desk" id="desk" role="group" aria-label="Print stack: ${nf(total)} photos delivered, ${cm} cm as 6 by 4 prints">
+    <div class="pile ${S.pileOpen ? 'open' : ''} ${S.pileReady ? 'ready' : ''}" style="--h:${h}px"><span class="edge"></span>${pilePrints}</div>${loosePrints}
+    ${loose.length ? `<button class="link tidy" data-act="tidy">Tidy the pile</button>` : ''}
+  </div>${cap}`
+}
+function countUp() {
+  const el = $('#stack-n'); if (!el || S.countFrom == null) return
+  const from = S.countFrom, to = ALBUMS.reduce((n, a) => n + a.photos, 0), t0 = performance.now(); S.countFrom = null
+  const step = t => { const f = Math.min(1, (t - t0) / 900); el.textContent = `${nf(Math.round(from + (to - from) * (1 - Math.pow(1 - f, 3))))} photos delivered`; if (f < 1) requestAnimationFrame(step) }
+  matchMedia('(prefers-reduced-motion: reduce)').matches ? (el.textContent = `${nf(to)} photos delivered`) : requestAnimationFrame(step)
+}
+
+/* ---------------- shell ---------------- */
+function shell(active, body) {
+  const used = 8420, limit = 10000
+  return `<div class="app">
+  <aside class="side">
+    <div class="mark"><img src="../resources/icon.png" alt="">LumoSnap</div>
+    <nav class="nav" aria-label="Main">
+      <a href="#/albums" ${active === 'albums' ? 'aria-current="page"' : ''}>${ic('images')}Albums<span class="count num">${ALBUMS.length}</span></a>
+      <a href="#/bookings" ${active === 'bookings' ? 'aria-current="page"' : ''}>${ic('calendar-days')}Bookings<span class="count num">${BOOKINGS.upcoming.length}</span></a>
+      <a href="#/settings/profile" ${active === 'settings' ? 'aria-current="page"' : ''}>${ic('settings-2')}Settings</a>
+    </nav>
+    ${stackHtml()}
+    <div class="side-foot">
+      <div class="usage">
+        <div class="usage-row"><span>Pro plan</span><span class="num">${Math.round(used / limit * 100)}%</span></div>
+        <div class="bar" role="meter" aria-valuenow="${used}" aria-valuemax="${limit}" aria-label="Photos used"><span style="--p:${used / limit}"></span></div>
+        <div class="usage-row"><span><b class="num">${nf(used)}</b> of ${nf(limit)} photos</span></div>
+        <div style="margin-top:8px"><a href="#/settings/billing">See plans</a></div>
+      </div>
+      <a class="who" href="#/settings/profile"><span class="avatar brand">${ME.biz[0]}</span><span>${ME.biz}<small>${ME.email}</small></span></a>
+    </div>
+  </aside>
+  <main class="main" id="main">${banners()}${body}</main>
+</div>`
+}
+function banners() {
+  let h = ''
+  if (S.offline) h += `<div class="banner offline" role="status">${ic('wifi-off')}<p><b>You're offline.</b> Uploads and new albums wait until you reconnect. Your photos stay on this computer.</p></div>`
+  if (S.lowStorage && location.hash !== '#/settings/storage') h += `<div class="banner" role="status"><span class="dot warn"></span><p><b>12.4 GB left on Macintosh HD.</b> LumoSnap keeps compressed copies here until they upload.</p><a class="btn sm ghost" href="#/settings/storage">Change location</a><button class="icon-btn sm plain" data-act="dismissLow" aria-label="Dismiss storage warning">${ic('x')}</button></div>`
+  return h
+}
+
+/* ---------------- albums ---------------- */
+function uploadBar(u) {
+  const notches = [0.18, 0.41, 0.52].slice(0, u.failed).filter(p => p * u.total < u.uploaded)
+  return `<div class="bar lg" aria-hidden="true"><span style="--p:${u.uploaded / u.total}"></span><span class="pending" style="--p:${u.compressed / u.total}"></span>${notches.map(p => `<i class="notch" style="left:${p * 100}%"></i>`).join('')}</div>`
+}
+function albumsView() {
+  const u = S.upload
+  const pill = pillHtml()
+  let body
+  if (S.albums === 'loading') body = `<div class="grid-albums" aria-busy="true">${Array.from({ length: 8 }, () => `<div class="album"><div class="cover skel"></div><div style="padding:16px 8px 8px"><div class="skel" style="height:14px;width:60%;border-radius:6px"></div><div class="skel" style="height:12px;width:35%;border-radius:6px;margin-top:8px"></div></div></div>`).join('')}</div>`
+  else if (S.albums === 'error') body = `<div class="card empty"><h2>Couldn't read your albums</h2><p>LumoSnap couldn't open its library on this computer. Your photos and folders are safe.</p><button class="btn primary" data-act="retryAlbums">${ic('rotate-cw')}Try again</button></div>`
+  else if (S.albums === 'empty') body = `<div class="card empty"><div class="art" aria-hidden="true">${'<span></span>'.repeat(9)}</div><h2>No albums yet</h2><p>An album is a folder of photos you share with one client. Make one from a folder you already have, or start empty and drop photos in.</p><button class="btn primary" data-act="newAlbum" ${S.offline ? 'disabled' : ''}>${ic('plus')}${S.offline ? 'Offline' : 'Create your first album'}</button></div>`
+  else body = `<div class="grid-albums">${ALBUMS.map(albumCard).join('')}</div>`
+  return shell('albums', `<div class="page">
+    <header class="head">
+      <div><div class="label">Library</div><h1>Albums</h1></div>
+      <span class="meta num">${S.albums === 'ready' ? `${nf(ALBUMS.reduce((a, b) => a + b.photos, 0))} photos` : ''}</span>
+      <div class="actions">
+        ${pill}
+        <button class="icon-btn" data-act="refresh" title="Check folders for changes" aria-label="Check folders for changes">${ic('refresh-cw')}</button>
+        <button class="btn ghost" data-act="toast" data-msg="Opened ~/Pictures/LumoSnap in Finder">${ic('folder-open')}Open watch folder</button>
+        <button class="btn primary" data-act="newAlbum" ${S.offline ? 'disabled title="New albums need a connection"' : ''}>${ic('plus')}${S.offline ? 'Offline' : 'New album'}</button>
+      </div>
+    </header>
+    ${body}
+  </div>${S.upOpen && u.on ? upPop() : ''}`)
+}
+function pillHtml() {
+  const u = S.upload
+  return u.on ? `<button class="up-pill" data-act="toggleUp" aria-expanded="${S.upOpen}">
+      ${u.done ? `${ic('circle-check', 'style="color:var(--ok)"')}<span class="lbl">Ready to share</span>` :
+      `<span class="bar" aria-hidden="true"><span style="--p:${u.uploaded / u.total}"></span><span class="pending" style="--p:${u.compressed / u.total}"></span></span><span class="lbl num">${S.offline ? 'Paused, offline' : `Uploading ${nf(u.uploaded)} of ${nf(u.total)}`}</span>`}
+    </button>` : ''
+}
+function overlayHtml() {
+  const u = S.upload
+  return `<div class="uploading"><div class="row"><span>${S.offline ? 'Paused' : `Adding ${nf(u.total)} new`}</span><span class="num">${nf(u.uploaded)} / ${nf(u.total)}</span></div>${uploadBar(u)}</div>`
+}
+function albumCard(a) {
+  const u = S.upload
+  const uploading = a.status === 'uploading' && u.on && !u.done
+  const flag = a.status === 'sync' ? `<span class="tag"><span class="dot warn"></span>Folder changed</span>`
+    : a.status === 'orphan' ? `<span class="tag"><span class="dot bad"></span>Folder missing</span>` : ''
+  const cover = a.seed ? `<img src="${img(a.seed, 640, 480)}" alt="" loading="lazy">` : `<div class="empty-cover">${ic('image-plus')}</div>`
+  const hint = !a.photos ? `<div class="hint">Drop photos into its folder to fill it</div>`
+    : a.status === 'orphan' ? `<div class="hint">Client link still works. Use “Find folder” if you moved it.</div>` : ''
+  return `<div class="album ${S.flash === a.id ? 'flash' : ''}" ${uploading ? 'aria-disabled="true"' : ''} data-act="${uploading ? '' : 'openAlbum'}" data-id="${a.id}" tabindex="0" role="link" aria-label="${esc(a.title)}">
+    <div class="cover ${a.status === 'orphan' ? 'muted' : ''}">${cover}
+      ${flag ? `<div class="flag">${flag}</div>` : ''}
+      ${uploading ? overlayHtml() : ''}
+    </div>
+    <div class="info">
+      <div><div class="t">${esc(a.title)}</div><div class="m num">${a.photos ? nf(a.photos) + ' photos' : 'Empty'}${uploading ? `, ${nf(u.total)} new` : ''} · ${a.date}</div>${hint}</div>
+      <button class="icon-btn sm plain" data-act="menu" data-id="${a.id}" aria-label="More for ${esc(a.title)}" aria-haspopup="menu">${ic('more-horizontal')}</button>
+    </div>
+  </div>`
+}
+function menuHtml() {
+  const a = ALBUMS.find(x => x.id === S.menu); if (!a) return ''
+  const { x, y, up } = S.menuPos
+  return `<div class="menu" role="menu" style="position:fixed;left:${x}px;${up ? `bottom:${innerHeight - y}px` : `top:${y}px`}">
+    ${a.status === 'orphan' ? `<button role="menuitem" data-act="relink" data-id="${a.id}">${ic('folder-search')}Find folder…</button>` : `<button role="menuitem" data-act="toast" data-msg="Opened ${esc(a.folder)} in Finder">${ic('folder-open')}Show in Finder</button>`}
+    ${a.status === 'sync' ? `<button role="menuitem" data-act="sync" data-id="${a.id}">${ic('refresh-cw')}Review folder changes</button>` : ''}
+    <hr><button role="menuitem" class="bad" data-act="delAlbum" data-id="${a.id}">${ic('trash-2')}Delete album…</button></div>`
+}
+function upPop() {
+  const u = S.upload, a = ALBUMS[0]
+  if (u.done) {
+    const { top, right } = S.upPos || { top: 92, right: 24 }
+    return `<div class="up-pop" role="dialog" aria-label="Upload finished" style="top:${top}px;right:${right}px">
+    <div class="who-line"><img class="thumb" src="${img('wed', 120, 120)}" alt=""><div><div>${a.title}</div><div class="sub" style="color:var(--ink-3);font-size:13px">Uploaded just now</div></div>
+      <button class="icon-btn sm plain" style="margin-left:auto" data-act="toggleUp" aria-label="Close">${ic('x')}</button></div>
+    <div class="meter"><div class="meter-top"><span class="big num" style="color:var(--ok)">${nf(a.photos)} photos online</span></div>
+      <div class="bar lg"><span style="--p:1;background:var(--ok)"></span></div></div>
+    <p style="margin:16px 0 0;color:var(--ink-2);font-size:14px">${u.failed ? `${u.failed} files were skipped. ` : ''}Ananya and Rohit can start picking as soon as they have the link.</p>
+    <div style="display:flex;gap:8px;margin-top:16px"><button class="btn ghost" style="flex:1" data-act="doneUp">Later</button><button class="btn primary" style="flex:1" data-act="share" data-id="${a.id}">${ic('link')}Share with client</button></div>
+  </div>`
+  }
+  const pct = Math.round(u.uploaded / u.total * 100)
+  const { top, right } = S.upPos || { top: 92, right: 24 }
+  return `<div class="up-pop" role="dialog" aria-label="Upload progress" style="top:${top}px;right:${right}px">
+    <div class="who-line"><img class="thumb" src="${img('wed', 120, 120)}" alt=""><div><div>${a.title}</div><div class="sub" style="color:var(--ink-3);font-size:13px">${u.done ? 'Finished' : S.offline ? 'Paused until you reconnect' : `About ${Math.max(1, Math.round((u.total - u.uploaded) / 40))} min left`}</div></div>
+      <button class="icon-btn sm plain" style="margin-left:auto" data-act="toggleUp" aria-label="Close">${ic('x')}</button></div>
+    <div class="meter">
+      <div class="meter-top"><span class="big num">${pct}%</span><span class="cap num">${nf(u.uploaded)} of ${nf(u.total)} sent</span></div>
+      ${uploadBar(u)}
+    </div>
+    <div class="stages">
+      <div><b class="num">${nf(u.uploaded)}</b><small>Sent</small></div>
+      <div><b class="num">${nf(u.compressed - u.uploaded)}</b><small>Ready</small></div>
+      <div><b class="num">${nf(Math.max(0, u.total - u.compressed - u.failed))}</b><small>Compressing</small></div>
+      <div class="${u.failed ? 'bad' : ''}"><b class="num">${u.failed}</b><small>Failed</small></div>
+    </div>
+    ${u.failed ? `<div class="inset" style="margin-top:16px;display:flex;align-items:center;gap:8px;font-size:13px"><span class="dot bad"></span><span style="flex:1">${u.failed} files couldn't be read and were skipped</span><button class="btn sm ghost" data-act="showFailed">Show files</button></div>` : ''}
+  </div>`
+}
+
+/* ---------------- gallery ---------------- */
+// Frames every client hearted: the ones that end up framed at home.
+const ALL_PICKED = [4, 16, 44, 92]
+let CUR = null // the open album; only albums whose link was shared have picks
+const picksOn = () => !CUR || CUR.id === 1 || CUR.id === 3
+function photoMeta(i) {
+  const favBy = !picksOn() ? [] : ALL_PICKED.includes(i) ? CLIENTS : i % 4 === 0 ? CLIENTS.slice(0, 1 + (i * 7) % 2) : i % 9 === 2 ? [CLIENTS[1]] : []
+  return { i, file: FILES(i), favBy, notes: picksOn() && i % 7 === 3 ? 1 + i % 3 : 0, failed: i === 9, proc: i === 10 }
+}
+const upNow = a => a.status === 'uploading' && S.upload.on && !S.upload.done
+function galleryView(id) {
+  const a = CUR = ALBUMS.find(x => x.id === +id) || ALBUMS[2]
+  const total = a.photos || 0
+  if (S.gallery === 'loading') return shell('albums', `<div class="gallery"><div class="g-side"><div class="card"><div class="skel" style="height:12px;width:40%;border-radius:6px"></div><div class="skel" style="height:28px;width:80%;border-radius:8px;margin:16px 0"></div><div class="skel" style="height:36px;border-radius:99px"></div></div></div><div class="g-main"><div class="photos" aria-busy="true">${'<div class="ph skel"></div>'.repeat(18)}</div></div></div>`)
+  if (S.gallery === 'error') return shell('albums', `<div class="page"><div style="padding:16px 8px 0"><a class="back" href="#/albums">${ic('arrow-left')}Albums</a></div><div class="card empty"><h2>Couldn't load ${esc(a.title)}</h2><p>The connection to LumoSnap timed out after 30 seconds. The photos on this computer are fine.</p><button class="btn primary" data-act="retryGallery">${ic('rotate-cw')}Try again</button></div></div>`)
+  const all = Array.from({ length: Math.min(S.shown, total) }, (_, i) => photoMeta(i))
+  let list = S.view === 'fav' ? all.filter(p => p.favBy.length && (!S.client || p.favBy.some(c => c.id === S.client))) : all
+  const favCount = S.client ? CLIENTS.find(c => c.id === S.client).n : 36
+  const sel = S.selected.size
+  const bar = sel ? `<div class="g-bar sel" role="toolbar" aria-label="Selection">
+      <button class="icon-btn sm" data-act="clearSel" aria-label="Clear selection">${ic('x')}</button>
+      <span class="t num">${nf(S.allSel && S.view === 'all' ? total : sel)} selected</span>
+      <button class="btn sm ghost" data-act="selAll" style="margin-left:auto">Select all ${nf(S.view === 'fav' ? list.length : total)}</button>
+      <button class="btn sm primary" data-act="copyTo" data-n="${S.allSel && S.view === 'all' ? total : sel}">${ic('copy')}Copy ${nf(S.allSel && S.view === 'all' ? total : sel)} to folder…</button></div>`
+    : `<div class="g-bar"><span class="t">${S.view === 'fav' ? (S.client ? `${CLIENTS.find(c => c.id === S.client).name.split(' ')[0]}'s picks` : 'Client picks') : 'All photos'}</span><span class="m num">${nf(S.view === 'fav' ? favCount : total)}</span></div>`
+  const grid = !total ? `<div class="empty"><h2>No photos in this album</h2><p>Drop photos into <b>${esc(a.folder)}</b>. They upload on their own.</p><button class="btn ghost" data-act="toast" data-msg="Opened the folder in Finder">${ic('folder-open')}Show in Finder</button></div>`
+    : !list.length ? `<div class="empty"><h2>No picks yet</h2><p>When your client hearts a photo on their link, it shows up here</p><button class="btn ghost" data-act="viewAll">View all photos</button></div>`
+    : `<div class="photos ${sel ? 'selecting' : ''}">${list.map(tile).join('')}</div>${S.view === 'all' && S.shown < total ? `<div class="loadmore" id="more"><span class="spin"></span>Loading more photos</div>` : ''}`
+  return shell('albums', `<div class="gallery">
+    <div class="g-side">
+      <div class="card">
+        <a class="back" href="#/albums">${ic('arrow-left')}Albums</a>
+        <div class="label"><span>Album</span><span class="status"><span class="dot ${upNow(a) ? 'brand' : a.status === 'sync' ? 'warn' : 'ok'}"></span>${upNow(a) ? `Adding ${nf(S.upload.total)} new, ${nf(S.upload.uploaded)} sent` : a.status === 'sync' ? 'Folder changed' : 'Synced'}</span></div>
+        <h1>${esc(a.title)}</h1>
+        <div style="color:var(--ink-3);font-size:14px" class="num">${a.date} · ${nf(total)} photos</div>
+        <div style="display:flex;gap:8px;margin-top:20px">
+          <button class="btn primary" style="flex:1" data-act="share" data-id="${a.id}" ${S.offline ? 'disabled' : ''}>${ic('link')}Share with client</button>
+          <button class="icon-btn" data-act="toast" data-msg="Album refreshed" aria-label="Reload photos" title="Reload photos">${ic('refresh-cw')}</button>
+        </div>
+      </div>
+      <div class="card"${picksOn() ? ' style="padding-bottom:8px"' : ''}>
+        <div class="seg" role="group" aria-label="Show" style="width:100%">
+          <button style="flex:1" aria-pressed="${S.view === 'all'}" data-act="viewAll">All <span class="n num">${nf(total)}</span></button>
+          <button style="flex:1" aria-pressed="${S.view === 'fav'}" data-act="viewFav">${ic('heart', 'style="width:16px;height:16px"')}Picks <span class="n num">${picksOn() ? 36 : 0}</span></button>
+        </div>
+        ${picksOn() ? '<div style="margin:16px 0 8px;font-size:13px;color:var(--ink-3)">Picked by</div>' : ''}
+        <div class="people">
+          ${!picksOn() ? '' : CLIENTS.map(c => `<button class="person" aria-pressed="${S.client === c.id}" data-act="client" data-id="${c.id}"><span class="avatar">${initials(c.name)}</span>${c.name}<span class="n num">${c.n}</span></button>`).join('')}
+        </div>
+      </div>
+    </div>
+    <section class="g-main" aria-label="Photos">${bar}${grid}</section>
+  </div>`)
+}
+function tile(p) {
+  const on = S.selected.has(p.i)
+  if (p.failed) return `<div class="ph failed"><span>${ic('image-off')}<br>${p.file}<br>couldn't be read</span><span class="chip">Failed</span></div>`
+  return `<div class="ph ${on ? 'on' : ''}" data-act="openLb" data-i="${p.i}" tabindex="0" role="button" aria-label="${p.file}${p.favBy.length ? ', picked by ' + p.favBy.map(c => c.name.split(' ')[0]).join(', ') : ''}">
+    <img src="${img('p' + p.i, 480, 320)}" alt="${p.file}" loading="lazy">
+    <button class="sel-ctl" data-act="sel" data-i="${p.i}" aria-pressed="${on}" aria-label="Select ${p.file}">${ic('check')}</button>
+    <div class="chips">
+      ${p.favBy.length ? `<span class="chip fav" data-tip="${esc(p.favBy.map(c => c.name).join('|'))}" tabindex="0" aria-label="Picked by ${p.favBy.map(c => c.name).join(', ')}">${ic('heart')}${p.favBy.length}</span>` : ''}
+      ${p.notes ? `<button class="chip" data-act="notes" data-i="${p.i}" aria-label="${p.notes} client notes">${ic('message-square')}${p.notes}</button>` : ''}
+    </div>
+    ${p.proc ? `<span class="chip proc"><span class="spin brand" style="width:12px;height:12px;border-width:1.5px"></span>Processing</span>` : ''}
+    <div class="fname"><span>${p.file}</span><button data-act="toast" data-msg="Showed ${p.file} in Finder" aria-label="Show original in Finder" title="Show original in Finder">${ic('folder-search')}</button></div>
+  </div>`
+}
+function lightbox() {
+  const p = photoMeta(S.lb), total = 1248
+  return `<div class="lb" role="dialog" aria-modal="true" aria-label="${p.file}">
+    <div class="lb-top"><span class="f">${p.file}</span><span class="c num">${S.lb + 1} / ${nf(total)}</span><span class="sp"></span>
+      ${p.favBy.length ? `<span class="status" style="color:oklch(80% 0 0);margin-right:8px">${ic('heart', 'style="width:16px;height:16px;fill:white;stroke:white"')}${p.favBy.map(c => c.name.split(' ')[0]).join(', ')}</span>` : ''}
+      <button class="icon-btn" data-act="notes" data-i="${S.lb}" aria-label="Client notes" title="Client notes">${ic('message-square')}</button>
+      <button class="icon-btn" data-act="zoom" aria-pressed="${S.zoom}" aria-label="Zoom" title="Zoom (Z)">${ic(S.zoom ? 'zoom-out' : 'zoom-in')}</button>
+      <button class="icon-btn" data-act="closeLb" aria-label="Close" title="Close (Esc)">${ic('x')}</button></div>
+    <div class="lb-stage">
+      <img class="${S.zoom ? 'zoom' : ''}" data-act="zoom" src="${img('p' + S.lb, 1500, 1000)}" alt="${p.file}">
+      <button class="icon-btn lb-nav prev" data-act="lbPrev" aria-label="Previous photo" ${S.lb === 0 ? 'disabled' : ''}>${ic('chevron-left')}</button>
+      <button class="icon-btn lb-nav next" data-act="lbNext" aria-label="Next photo">${ic('chevron-right')}</button>
+    </div></div>`
+}
+function notesPanel() {
+  const p = photoMeta(S.notesFor)
+  const list = NOTES.slice(0, p.notes)
+  return `<aside class="notes" role="dialog" aria-label="Client notes">
+    <header><div><h2>Client notes</h2><small>${p.file}</small></div><button class="icon-btn sm" data-act="closeNotes" aria-label="Close notes">${ic('x')}</button></header>
+    <div class="list">${list.length ? list.map(n => `<div class="note"><div class="h"><span class="avatar">${initials(n.who)}</span>${n.who}<small>${n.when}</small></div><p>${esc(n.text)}</p></div>`).join('')
+      : `<div class="empty" style="padding:64px 8px"><p>No notes on this photo. Clients add them from their link.</p></div>`}</div>
+    <footer class="num">${list.length ? `${list.length} note${list.length > 1 ? 's' : ''} from clients` : 'No notes'}</footer></aside>`
+}
+
+/* ---------------- bookings ---------------- */
+function bookingsView() {
+  const n = BOOKINGS.upcoming[0]
+  const rows = BOOKINGS[S.bookTab]
+  return shell('bookings', `<div class="page">
+    <header class="head"><div><div class="label">Clients</div><h1>Bookings</h1></div>
+      <div class="actions"><button class="btn ghost" data-act="bookingLink">${ic('link')}Booking link</button></div></header>
+    <div class="book-wrap">
+      ${S.bookTab === 'upcoming' ? `<div class="card next-shoot">
+        <div class="date"><small>Monday, in 4 days</small><b>2 Nov</b></div>
+        <div class="who-b"><div class="sub" style="margin:0 0 2px">Next shoot</div><div class="t">${n.name}</div>
+          <div class="m"><span class="tag">${n.type}</span><span>${ic('map-pin')}${n.loc}</span><span>${ic('phone')}<a class="tel" href="tel:${n.phone.replace(/\s/g, '')}">${n.phone}</a></span></div></div>
+        <button class="btn ghost" data-act="expandFirst">Read details</button>
+      </div>` : ''}
+      <div class="card" style="padding:8px 8px 4px">
+        <div style="padding:8px 8px 16px"><div class="seg" role="group" aria-label="Bookings">
+          <button aria-pressed="${S.bookTab === 'upcoming'}" data-act="bookTab" data-t="upcoming">Upcoming <span class="n num">${BOOKINGS.upcoming.length}</span></button>
+          <button aria-pressed="${S.bookTab === 'past'}" data-act="bookTab" data-t="past">Past <span class="n num">${BOOKINGS.past.length}</span></button></div></div>
+        <table class="bk"><thead><tr><th>Client</th><th>Shoot</th><th>Date and place</th><th>Phone</th><th>Details</th></tr></thead><tbody>
+        ${rows.map((b, i) => {
+          const k = S.bookTab + i, open = S.open.has(k)
+          return `<tr><td><div class="client"><span class="avatar">${initials(b.name)}</span>${b.name}</div></td>
+            <td><span class="tag">${b.type}</span></td>
+            <td>${b.date}<div class="sm">${b.loc}</div></td>
+            <td class="ph-n"><a class="tel num" href="tel:${b.phone.replace(/\s/g, '')}">${b.phone}</a></td>
+            <td class="d">${b.album ? `<a class="link" href="#/albums/${b.album}">Open the album</a>` : b.details ? `<button class="more" data-act="expand" data-k="${k}" aria-expanded="${open}"><span>${esc(b.details)}</span>${ic('chevron-down')}</button>` : '<span class="sm">None given</span>'}</td></tr>
+            ${open ? `<tr class="det"><td></td><td colspan="4"><div class="detail">${esc(b.details)}</div></td></tr>` : ''}`
+        }).join('')}
+        </tbody></table>
+      </div>
+    </div></div>`)
+}
+
+/* ---------------- settings ---------------- */
+const TABS = [['profile', 'user-round', 'Profile'], ['watch', 'folder-sync', 'Watch folder'], ['billing', 'receipt', 'Plan and billing'], ['storage', 'hard-drive', 'Storage and data'], ['updates', 'download', 'Updates']]
+function settingsView(tab) {
+  tab = TABS.some(t => t[0] === tab) ? tab : 'profile'
+  const panels = { profile: pProfile, watch: pWatch, billing: pBilling, storage: pStorage, updates: pUpdates }
+  return shell('settings', `<div class="page">
+    <header class="head"><div><div class="label">Account</div><h1>Settings</h1></div></header>
+    <div class="settings">
+      <nav class="tabs" aria-label="Settings">${TABS.map(([k, i, l]) => `<a href="#/settings/${k}" ${k === tab ? 'aria-current="page"' : ''}>${ic(i)}${l}</a>`).join('')}
+        <hr><button class="out" data-act="signOut">${ic('log-out')}Sign out</button></nav>
+      <div class="stack">${panels[tab]()}</div>
+    </div></div>`)
+}
+function pProfile() {
+  return `<div class="card profile-top"><span class="avatar lg" style="margin:0 auto">${ME.biz[0]}</span><h2>${ME.biz}</h2><div class="sub">${ME.name} · ${ME.email}</div></div>
+  <form class="card" data-form="profile">
+    <h2>Details clients see</h2><div class="sub">On your booking page and shared albums</div>
+    <div class="form2">
+      <div class="field"><label for="f-biz">Business name</label><input class="input" id="f-biz" value="${ME.biz}"></div>
+      <div class="field"><label for="f-ph">Phone</label><input class="input" id="f-ph" type="tel" value="${ME.phone}"></div>
+      <div class="field"><span class="lbl">Full name <span class="lock">${ic('lock')}From Google</span></span><input class="input" value="${ME.name}" readonly aria-label="Full name, managed by Google"></div>
+      <div class="field"><span class="lbl">Email <span class="lock">${ic('lock')}From Google</span></span><input class="input" value="${ME.email}" readonly aria-label="Email, managed by Google"></div>
+    </div>
+    <div class="row-actions"><button class="btn primary" type="submit">Save changes</button>${S.saved ? `<span class="saved">${ic('check')}Saved</span>` : ''}</div>
+  </form>
+  <div class="card"><h2>Sidebar</h2>
+    <label class="check-row"><input type="checkbox" data-pref="stack" ${S.hideStack ? '' : 'checked'}>Show the print stack</label></div>
+  <div class="card"><h2>Booking page</h2><div class="sub">Clients pick a date and tell you about the shoot. Requests land in Bookings.</div>
+    <div class="input-row" style="margin-top:16px"><input class="input mono" readonly value="${ME.booking}" aria-label="Booking page link"><button class="btn primary" data-act="copy" data-v="${ME.booking}">${ic('copy')}Copy</button><button class="btn ghost" data-act="toast" data-msg="Opened booking page in your browser">Open</button></div></div>`
+}
+function pWatch() {
+  return `<div class="card"><h2>Watch folder</h2><div class="sub">Each folder you make inside it becomes an album</div>
+    <div class="inset path-row" style="margin-top:16px">${ic('folder')}<span class="p">~/Pictures/LumoSnap</span><button class="btn sm ghost" data-act="changeWatch">Change…</button></div>
+    ${S.watchChanged ? `<div class="note-line" style="margin-top:8px">${ic('triangle-alert')}<span>Albums you already made stay as they are. LumoSnap stops watching the old folder for new ones.</span></div>` : ''}
+    <div style="margin-top:12px"><button class="btn ghost" data-act="toast" data-msg="Opened ~/Pictures/LumoSnap in Finder">${ic('folder-open')}Show in Finder</button></div>
+    <hr class="rule">
+    <div style="font-size:13px;color:var(--ink-3);margin-bottom:8px">How it works</div>
+    <ol class="steps"><li>Make a folder inside the watch folder, named after the shoot.</li><li>Copy your edited photos into it, straight from Lightroom or the card.</li><li>LumoSnap makes the album and uploads. Share the link when the bar fills.</li></ol></div>`
+}
+function pBilling() {
+  const plans = [['Starter', 'Free', '', '500 photos', 'One or two shoots to try it', 0], ['Pro', '₹799', '/mo', '10,000 photos', 'A busy month of weddings and portraits', 1], ['Studio', '₹1,999', '/mo', '50,000 photos', 'Several shooters, a full season online', 2]]
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><h2>Pro</h2><div class="sub">Renews 14 Jan 2027</div></div><span class="status"><span class="dot ok"></span>Active</span></div>
+    <div class="inset" style="margin-top:16px"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><span><span style="color:var(--brand);font-size:22px" class="num">8,420</span> <span style="color:var(--ink-3)">of 10,000 photos</span></span><span class="num" style="font-size:12px;color:var(--ink-3)">84% used</span></div>
+      <div class="bar lg"><span style="--p:.84"></span></div></div>
+    <div class="note-line" style="margin-top:8px">${ic('triangle-alert')}<span>About 1,580 photos left. That is roughly one wedding.</span></div></div>
+  <div class="card"><h2>Plans</h2><div class="sub">Prices include GST</div>
+    <div class="plans" style="margin-top:16px">${plans.map(([n, p, per, lim, d, k]) => `<div class="plan ${k === 1 ? 'current' : ''}"><div style="display:flex;justify-content:space-between">${n}${k === 1 ? '<span class="sub" style="margin:0">Your plan</span>' : ''}</div>
+      <div class="p num">${p}<small>${per}</small></div><div class="num" style="font-size:14px">${lim}</div><div class="d">${d}</div>
+      ${k === 2 ? (S.requested ? `<span class="saved">${ic('check')}Requested</span>` : `<button class="btn sm primary" data-act="upgrade">Request upgrade</button>`) : k === 0 ? '<span class="sub" style="margin:0">Lower than your usage</span>' : ''}</div>`).join('')}</div></div>`
+}
+function pStorage() {
+  return `<div class="card"><h2>Where photos wait before upload</h2><div class="sub">LumoSnap keeps a compressed copy of each photo here until it reaches the cloud</div>
+    <div class="inset path-row" style="margin-top:16px">${ic('hard-drive')}<span class="p">~/Library/Application Support/LumoSnap/cache</span><button class="btn sm ghost" data-act="changeStorage">Change…</button></div>
+    <div style="margin-top:16px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px"><span><b style="font-weight:500">12.4 GB</b> <span style="color:var(--ink-3)">free of 494 GB on Macintosh HD</span></span></div>
+      <div class="bar lg"><span class="warn" style="--p:.975"></span></div></div>
+    <div class="note-line" style="margin-top:12px">${ic('triangle-alert')}<span>Under 15 GB free. A large wedding may not fit. Pick a drive with more room.</span></div></div>
+  <div class="card"><h2>Reset LumoSnap on this computer</h2><div class="sub">Use this if the app is in a bad state. It removes:</div>
+    <ul class="danger-list"><li>All albums and their compressed copies</li><li>Settings and the watch folder choice</li><li>Your sign-in</li></ul>
+    <button class="btn danger-ghost" data-act="reset">${ic('trash-2')}Reset all data…</button></div>`
+}
+function pUpdates() {
+  const st = { idle: '', checking: `<span class="status"><span class="spin"></span>Checking…</span>`, latest: `<span class="saved">${ic('check')}You have the latest version</span>` }[S.updates]
+  return `<div class="card"><h2>LumoSnap 0.2.5-alpha</h2><div class="sub">Last checked today at 09:12</div>
+    <div class="row-actions"><button class="btn ghost" data-act="checkUpdates" ${S.updates === 'checking' ? 'disabled' : ''}>Check for updates</button>${st}</div></div>`
+}
+
+/* ---------------- auth ---------------- */
+function sheet(pickIdx) {
+  return `<div class="sheet" aria-hidden="true">${Array.from({ length: 12 }, (_, i) => `<img class="${i === pickIdx ? 'pick' : ''}" src="${img('sheet' + i, 360, 300)}" alt="">`).join('')}<span class="frame-no">NLS 04121 — 04132</span></div>`
+}
+function codeBlock() {
+  return `<div class="code-card"><div class="top"><span>Browser didn't open? Use a code.</span><span class="num">Expires in 9 min</span></div>
+    <div class="code"><span>KQ7M-4XPD</span><button class="btn sm ghost" data-act="copy" data-v="KQ7M-4XPD">${ic('copy')}Copy</button></div>
+    <div class="how">Go to <a class="link" href="#" data-act="finishAuth">lumosnap.com/device</a> on any device and enter it</div></div>`
+}
+function setupView(step) {
+  step = +step || 1
+  const bar = `<div class="steps-bar" aria-label="Step ${step} of 3">${[1, 2, 3].map(n => `<span class="${n <= step ? 'on' : ''}"></span>`).join('')}</div>`
+  let c
+  if (step === 1) c = `<div class="label">Step 1 of 3</div><h1>Your shoots, in your client's hands</h1>
+    <p class="lede">Put a folder of edited photos on this computer. LumoSnap compresses them, uploads them, and gives you one private link for the client.</p>
+    <div class="act"><a class="btn primary" href="#/setup/2">Get started</a></div>`
+  else if (step === 2) c = `<div class="label">Step 2 of 3</div><h1>Sign in to your account</h1>
+    <p class="lede">Your browser opens to sign in with Google. Albums and settings stay with this account, on any computer.</p>
+    ${S.wait ? `<div class="wait"><span class="spin brand"></span><span>Waiting for your browser…</span><button class="link" data-act="cancelAuth" style="margin-left:8px;color:var(--ink-3)">Cancel</button></div>${codeBlock()}`
+      : `<div class="act"><button class="btn primary" data-act="startAuth" ${S.offline ? 'disabled' : ''}>${ic('external-link')}${S.offline ? 'Offline' : 'Sign in with browser'}</button></div>`}
+    ${S.authErr ? `<div class="err">${ic('circle-alert')}Sign-in didn't finish. The code expired. Start again for a new one.</div>` : ''}`
+  else c = `<div class="label">Step 3 of 3</div><h1>You're set</h1>
+    <p class="lede">Signed in as ${ME.email}. Your first album starts with any folder of photos.</p>
+    <div class="act"><a class="btn primary" href="#/albums" data-act="signIn">Open LumoSnap</a></div>`
+  return `<div class="auth">${sheet(step === 3 ? 5 : -1)}<div class="auth-body"><div class="mark"><img src="../resources/icon.png" alt="">LumoSnap</div>${bar}${c}</div></div>`
+}
+function loginView() {
+  return `<div class="auth">${sheet(-1)}<div class="auth-body"><div class="mark"><img src="../resources/icon.png" alt="">LumoSnap</div>
+    <div class="label">Welcome back</div><h1>Sign in again</h1>
+    <p class="lede">You were signed out on this computer. Your albums and uploads pick up where they stopped.</p>
+    ${S.wait ? `<div class="wait"><span class="spin brand"></span><span>Waiting for your browser…</span><button class="link" data-act="cancelAuth" style="margin-left:8px;color:var(--ink-3)">Cancel</button></div>${codeBlock()}`
+      : `<div class="act"><button class="btn primary" data-act="startAuth" ${S.offline ? 'disabled' : ''}>${ic('external-link')}${S.offline ? 'Offline' : 'Sign in with browser'}</button></div>`}
+    ${S.authErr ? `<div class="err">${ic('circle-alert')}Sign-in didn't finish. The code expired. Start again for a new one.</div>` : ''}
+  </div></div>`
+}
+
+/* ---------------- dialogs ---------------- */
+const dlg = $('#dlg')
+function openDlg(html, wide) {
+  dlg.style.width = wide ? '540px' : ''
+  dlg.innerHTML = html; icons(); dlg.showModal()
+  const f = dlg.querySelector('[autofocus]'); f && f.focus()
+}
+dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close() })
+const dHead = (t, s = '') => `<div class="dlg-h"><div><h2>${t}</h2>${s ? `<small>${s}</small>` : ''}</div><button class="icon-btn sm plain" data-act="closeDlg" aria-label="Close">${ic('x')}</button></div>`
+
+function createAlbumDlg(folder) {
+  const helper = folder ? 'Photos stay in this folder. New ones you add here upload on their own.' : 'LumoSnap makes a new folder for it inside ~/Pictures/LumoSnap'
+  openDlg(`${dHead('New album')}
+  <form class="dlg-b" data-form="create">
+    <div class="field"><label for="a-name">Album name</label><input class="input" id="a-name" required placeholder="Meera's 1st birthday" value="${folder ? 'Vypin sunrise' : ''}" autofocus></div>
+    <div class="field"><span class="lbl">Photos from</span>
+      ${folder ? `<div class="inset path-row" style="padding:8px 8px 8px 16px">${ic('folder')}<span class="p">~/Pictures/Shoots/Vypin sunrise</span><button type="button" class="icon-btn sm plain" data-act="clearFolder" aria-label="Use a new folder instead">${ic('x')}</button></div>`
+      : `<button type="button" class="btn ghost" style="justify-content:flex-start" data-act="pickFolder">${ic('folder-open')}Choose a folder you already have…</button>`}
+      <span class="hint">${helper}</span></div>
+  </form>
+  <div class="dlg-f"><button class="btn ghost" data-act="closeDlg">Cancel</button><button class="btn primary" data-act="createAlbum" ${S.offline ? 'disabled' : ''}>${S.offline ? 'Offline' : 'Create album'}</button></div>`)
+}
+function deleteDlg(a) {
+  openDlg(`${dHead(`Delete “${esc(a.title)}”?`)}
+  <div class="dlg-b"><p>This removes ${nf(a.photos)} photos from LumoSnap and from this computer's cache. Your client's link stops working. Your original folder stays untouched. This can't be undone.</p>
+    <div class="field"><label for="del-in">Type <b>${esc(a.title)}</b> to confirm</label><input class="input" id="del-in" autocomplete="off" data-act-input="delMatch" data-name="${esc(a.title)}" autofocus></div></div>
+  <div class="dlg-f"><button class="btn ghost" data-act="closeDlg">Cancel</button><button class="btn danger" id="del-go" disabled data-act="doDelete" data-id="${a.id}">Delete album</button></div>`)
+}
+function shareDlg(a) {
+  const url = `https://lumosnap.com/a/${a.title.toLowerCase().replace(/[^a-z]+/g, '-').replace(/-$/, '')}-7f3k`
+  openDlg(`${dHead('Client link', esc(a.title))}
+  <div class="dlg-b"><p>Send this to your client. They can view the photos, heart their picks and leave notes. No account needed.</p>
+    <div class="input-row"><input class="input mono" readonly value="${url}" aria-label="Client link"><button class="btn primary" data-act="copy" data-v="${url}" id="cp">${ic('copy')}Copy</button></div>
+    <p id="share-next" hidden style="font-size:14px">${ic('check', 'style="width:16px;height:16px;color:var(--ok);vertical-align:-3px"')} Copied. Paste it in WhatsApp or email. Their hearts and notes appear in this album as they pick.</p></div>
+  <div class="dlg-f"><button class="btn ghost" data-act="toast" data-msg="Opened the client link in your browser">${ic('external-link')}Open in browser</button><button class="btn primary" data-act="closeDlg">Done</button></div>`)
+}
+function bookingDlg() {
+  openDlg(`${dHead('Booking link')}
+  <div class="dlg-b"><p>Put this on Instagram or WhatsApp. New requests show up in Bookings.</p>
+    <div class="input-row"><input class="input mono" readonly value="${ME.booking}" aria-label="Booking link"><button class="btn primary" data-act="copy" data-v="${ME.booking}">${ic('copy')}Copy</button></div></div>
+  <div class="dlg-f"><button class="btn ghost" data-act="closeDlg">Close</button><button class="btn primary" data-act="toast" data-msg="Opened booking page in your browser">${ic('external-link')}Open page</button></div>`)
+}
+function syncDlg(a, phase = 'check') {
+  if (phase === 'check') {
+    openDlg(`${dHead('Review folder changes', esc(a.title))}<div class="dlg-b"><div class="wait" style="margin:24px 0"><span class="spin"></span>Comparing the folder with the album…</div></div>`, true)
+    return setTimeout(() => dlg.open && syncDlg(a, 'list'), 900)
+  }
+  if (phase === 'list') {
+    const sec = (dot, label, n, items, open) => `<details ${open ? 'open' : ''}><summary>${ic('chevron-right')}<span class="dot ${dot}"></span>${label}<span class="n num">${n}</span></summary><ul>${items}</ul></details>`
+    const files = (from, n) => Array.from({ length: n }, (_, i) => `<li>${FILES(from + i)}</li>`).join('')
+    return openDlg(`${dHead('Review folder changes', esc(a.title))}
+    <div class="dlg-b"><p>The folder changed since the last upload. Nothing changes in the album until you sync.</p>
+      <div class="changes">
+        ${sec('brand', 'New photos', 18, files(400, 18), true)}
+        ${sec('', 'Edited', 4, files(212, 4), false)}
+        ${sec('', 'Renamed', 2, `<li>${FILES(14)} → cake-cutting-01.jpg</li><li>${FILES(15)} → cake-cutting-02.jpg</li>`, false)}
+        ${sec('bad', 'Removed from folder', 1, `<li>${FILES(88)} <small>leaves the album, with Ananya's heart on it</small></li>`, true)}
+        ${sec('', 'Skipped', 3, `<li>${FILES(300)} <small>same as ${FILES(299)}</small></li><li>IMG_2210.HEIC <small>format not supported</small></li><li>.DS_Store <small>not a photo</small></li>`, false)}
+      </div></div>
+    <div class="dlg-f"><button class="btn ghost" data-act="closeDlg">Cancel</button><button class="btn primary" data-act="runSync" data-id="${a.id}" ${S.offline ? 'disabled' : ''}>${S.offline ? 'Offline' : 'Sync 25 changes'}</button></div>`, true)
+  }
+  let k = 0
+  const draw = () => {
+    const pct = k / 25 * 100
+    if (k > 0 && k < 25 && dlg.querySelector('.plane')) {
+      dlg.querySelector('.fill').style.transform = `scaleX(${pct / 100})`
+      dlg.querySelector('.rail').style.transform = `translateX(${pct}%)`
+      dlg.querySelector('.track').setAttribute('aria-valuenow', k)
+      dlg.querySelector('.box .r b').textContent = `${k} of 25`
+      return
+    }
+    if (k >= 25) announce(`${a.title} is in sync`)
+    dlg.innerHTML = `${dHead(k < 25 ? 'Syncing' : 'In sync', esc(a.title))}
+    <div class="dlg-b"><div class="flight">
+      <div class="ends"><span>${ic('folder', 'style="width:16px"')} Folder</span><div class="track" role="progressbar" aria-valuenow="${k}" aria-valuemax="25"><span class="fill" style="transform:scaleX(${pct / 100})"></span><span class="rail" style="transform:translateX(${pct}%)"><span class="plane">${ic(k < 25 ? 'arrow-up' : 'check')}</span></span></div><span>Cloud ${ic('cloud', 'style="width:16px"')}</span></div>
+      <div class="box"><div><b>~/Pictures/LumoSnap</b><small>${esc(a.title)}</small></div><div class="r"><b class="num">${k} of 25</b><small>${k < 25 ? 'changes applied' : 'Done just now'}</small></div></div>
+    </div></div>
+    <div class="dlg-f">${k < 25 ? `<button class="btn ghost" data-act="closeDlg">Run in background</button>` : `<button class="btn primary" data-act="closeDlg" autofocus>Done</button>`}</div>`
+    icons()
+  }
+  draw()
+  const t = setInterval(() => {
+    k = Math.min(25, k + 2); draw()
+    if (k >= 25) { clearInterval(t); a.status = 'ok'; a.photos += 17; if (location.hash.startsWith('#/albums')) render() }
+  }, 220)
+}
+function confirmDlg(title, text, verb, onYes, danger) {
+  openDlg(`${dHead(title)}<div class="dlg-b"><p>${text}</p></div>
+  <div class="dlg-f"><button class="btn ghost" data-act="closeDlg" autofocus>Cancel</button><button class="btn ${danger ? 'danger' : 'primary'}" data-act="dlgYes">${verb}</button></div>`)
+  dlg._yes = onYes
+}
+
+/* ---------------- toast ---------------- */
+let toastT
+function toast(msg, action) {
+  const l = $('#layer')
+  l.querySelector('.toast')?.remove()
+  l.insertAdjacentHTML('beforeend', `<div class="toast" role="status">${msg}${action ? `<button class="link" data-act="${action[2] || 'toast'}" data-msg="${action[1]}">${action[0]}</button>` : ''}<button class="icon-btn" data-act="closeToast" aria-label="Dismiss">${ic('x')}</button></div>`)
+  icons(); clearTimeout(toastT); toastT = setTimeout(() => l.querySelector('.toast')?.remove(), 4200)
+}
+
+/* ---------------- actions ---------------- */
+const A = {
+  dismissLow() { S.lowStorage = false; render() },
+  toggleUp() {
+    S.upOpen = !S.upOpen
+    const r = $('.up-pill')?.getBoundingClientRect()
+    if (r) S.upPos = { top: r.bottom + 8, right: innerWidth - r.right }
+    render()
+  },
+  menu(el, e) {
+    e.stopPropagation(); S.menu = S.menu === +el.dataset.id ? null : +el.dataset.id
+    const r = el.getBoundingClientRect(), up = r.bottom + 170 > innerHeight
+    S.menuPos = { x: r.right - 196, y: up ? r.top - 6 : r.bottom + 6, up }
+    renderLayer(); document.querySelector('.menu button')?.focus()
+  },
+  openAlbum(el) { location.hash = '#/albums/' + el.dataset.id },
+  newAlbum() { createAlbumDlg(false) },
+  pickFolder() { createAlbumDlg(true) },
+  clearFolder() { createAlbumDlg(false) },
+  createAlbum() {
+    const v = $('#a-name').value.trim()
+    if (!v) { $('#a-name').focus(); $('#a-name').setCustomValidity('Give the album a name'); $('#a-name').reportValidity(); return }
+    ALBUMS.unshift({ id: Date.now() % 1e6, title: v, date: 'Today', photos: 0, seed: null, status: 'ok', folder: '~/Pictures/LumoSnap/' + v })
+    dlg.close(); S.albums = 'ready'; render(); toast(`Made “${esc(v)}”. Drop photos into its folder.`, ['Show in Finder', 'Opened the folder in Finder'])
+  },
+  delAlbum(el) { S.menu = null; render(); deleteDlg(ALBUMS.find(a => a.id === +el.dataset.id)) },
+  doDelete(el) { const i = ALBUMS.findIndex(a => a.id === +el.dataset.id); const [a] = ALBUMS.splice(i, 1); dlg.close(); render(); toast(`Deleted “${esc(a.title)}”`) },
+  reviewSync() { $('#layer .toast')?.remove(); syncDlg(ALBUMS.find(a => a.id === 2)) },
+  relink(el) { const a = ALBUMS.find(x => x.id === +el.dataset.id); a.status = 'ok'; S.menu = null; render(); toast(`Linked “${esc(a.title)}” to ~/Pictures/Archive/Mattancherry walk (mock)`) },
+  sync(el) { S.menu = null; render(); syncDlg(ALBUMS.find(a => a.id === +el.dataset.id)) },
+  runSync(el) { syncDlg(ALBUMS.find(a => a.id === +el.dataset.id), 'run') },
+  refresh(el) { el.innerHTML = '<span class="spin"></span>'; setTimeout(() => { render(); toast("Checked 8 folders. Meera's 1st birthday has changes.", ['Review', '', 'reviewSync']) }, 900) },
+  retryAlbums() { S.albums = 'loading'; render(); setTimeout(() => { S.albums = 'ready'; render() }, 900) },
+  doneUp() { S.upload.on = false; S.upOpen = false; render() },
+  showFailed() { S.upOpen = false; location.hash = '#/albums/1'; setTimeout(() => toast('NLS_04129.jpg and 2 others could not be read. Export them again from your editor.'), 50) },
+  share(el) { if (S.upOpen) { S.upOpen = false; if (S.upload.done) S.upload.on = false; render() } shareDlg(ALBUMS.find(a => a.id === +el.dataset.id)) },
+  viewAll() { S.view = 'all'; S.client = null; render() },
+  viewFav() { S.view = 'fav'; render() },
+  client(el) { const id = el.dataset.id; S.client = S.client === id ? null : id; S.view = 'fav'; S.selected.clear(); render() },
+  sel(el, e) { e.stopPropagation(); const i = +el.dataset.i; S.selected.has(i) ? S.selected.delete(i) : S.selected.add(i); render() },
+  selAll() { document.querySelectorAll('.ph[data-i]').forEach(p => S.selected.add(+p.dataset.i)); S.allSel = true; render() },
+  clearSel() { S.selected.clear(); S.allSel = false; render() },
+  copyTo(el) { if (el.disabled) return; el.disabled = true; const n = +el.dataset.n; S.selected.clear(); S.allSel = false; render(); toast(`Copied ${nf(n)} photos to ~/Desktop/Selects`, ['Show in Finder', 'Opened ~/Desktop/Selects in Finder']) },
+  tidy() {
+    // FLIP: note where each loose print is, tidy for real, then fly each one home from where it was
+    const before = {}
+    document.querySelectorAll('.print.loose').forEach(el => {
+      const b = el.querySelector('.paper').getBoundingClientRect()
+      before[el.dataset.id] = { x: b.left + b.width / 2, y: b.top + b.height / 2, r: S.placed[el.dataset.id]?.r || 0 }
+    })
+    S.placed = {}; S.pileOpen = S.pileReady = false; saveDesk(); render(true)
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return announce('All prints are back on the pile')
+    // Prints land a little crooked; the last one floats down like paper; then the pile is jogged square,
+    // the way you knock a stack of prints on the table to line up the edges.
+    const pile = $('.pile'), edge = $('.pile .edge')
+    const back = [...document.querySelectorAll('.pile .print')].filter(el => before[el.dataset.id]) // bottom to top
+    const GAP = 120, FLY = 640, FLOAT = 1050
+    const held = []
+    back.forEach((el, k) => {
+      const b = before[el.dataset.id], paper = el.querySelector('.paper'), n = paper.getBoundingClientRect()
+      const dx = b.x - (n.left + n.width / 2), dy = b.y - (n.top + n.height / 2)
+      const dr = b.r - (parseFloat(el.style.getPropertyValue('--r')) || 0), lean = dx > 0 ? 5 : -5
+      // where it lands before the jog: off by a few px and degrees
+      // varied per print, so it reads as a pile thrown together, not a pattern
+      const seed = +el.dataset.id * 7919 + k * 31, sr = k % 2 ? 1 : -1, sx = (seed >> 3) % 2 ? sr : -sr // leans alternate
+      const crooked = `translate(${sx * (7 + seed % 9)}px, ${-2 - (seed % 5)}px) rotate(${sr * (5 + (seed >> 2) % 6)}deg)`
+      const last = k === back.length - 1, delay = k * GAP
+      const frames = last ? [
+        { transform: `translate(${dx}px, ${dy}px) rotate(${dr}deg)` },
+        { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 46}px) rotate(${dr * 0.4 + lean}deg) scale(1.06)`, offset: 0.3 },
+        { transform: `translate(14px, -30px) rotate(9deg) scale(1.04)`, offset: 0.5 },
+        { transform: `translate(-10px, -16px) rotate(-7deg) scale(1.02)`, offset: 0.68 },
+        { transform: `translate(6px, -5px) rotate(4deg)`, offset: 0.84 },
+        { transform: crooked }
+      ] : [
+        { transform: `translate(${dx}px, ${dy}px) rotate(${dr}deg)` },
+        { transform: `translate(${dx * 0.55}px, ${dy * 0.55 - 34}px) rotate(${dr * 0.5 + lean}deg) scale(1.05)`, offset: 0.4 },
+        { transform: `translate(0, -12px) rotate(${lean * 0.4}deg) scale(1.02)`, offset: 0.78 },
+        { transform: crooked }
+      ]
+      const dur = last ? FLOAT : FLY
+      held.push({ paper, crooked, anim: paper.animate(frames, { duration: dur, delay, easing: last ? 'cubic-bezier(.35, .4, .45, 1)' : 'cubic-bezier(.3, .7, .4, 1)', fill: 'both' }) })
+      edge?.animate([{ transform: 'scaleY(1)' }, { transform: 'scaleY(.82)' }, { transform: 'scaleY(1)' }], { duration: 220, delay: delay + dur - 60, easing: 'ease-out' })
+    })
+    const HOLD = 520 // a beat to see the mess before the tap
+    const jogAt = (back.length - 1) * GAP + FLOAT + HOLD
+    setTimeout(() => {
+      // the jog: one tap down, and every crooked print snaps square together
+      pile?.animate([{ transform: 'none' }, { transform: 'translateY(4px) scaleY(.985)', offset: 0.35 }, { transform: 'translateY(-1px)', offset: 0.7 }, { transform: 'none' }], { duration: 300, easing: 'ease-out' })
+      edge?.animate([{ transform: 'scaleY(1)' }, { transform: 'scaleY(.7)', offset: 0.35 }, { transform: 'scaleY(1)' }], { duration: 300, easing: 'ease-out' })
+      held.forEach(({ paper, crooked, anim }) => {
+        paper.animate([{ transform: crooked }, { transform: 'translate(0, 1px) rotate(0.4deg)', offset: 0.6 }, { transform: 'none' }], { duration: 300, delay: 20, easing: 'cubic-bezier(.3, 1.4, .5, 1)', fill: 'backwards' })
+        anim.cancel()
+      })
+      const w = $('#stack-which'); if (w) { w.textContent = 'Back on the pile'; setTimeout(() => { if (w.textContent === 'Back on the pile') w.textContent = deskHint() }, 2200) }
+      announce('All prints are back on the pile')
+    }, jogAt)
+  },
+  findAlbum(id) {
+    S.flash = id
+    const go = () => {
+      const card = document.querySelector(`.album[data-id="${id}"]`); if (!card) return
+      card.classList.add('flash'); card.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+      setTimeout(() => { card.classList.remove('flash'); S.flash = null }, 1900)
+    }
+    if (!['#/albums', '', '#/'].includes(location.hash)) { location.hash = '#/albums'; setTimeout(go, 80) } else go()
+    announce(`Showing ${ALBUMS.find(a => a.id === id)?.title}`)
+  },
+  openLb(el) { if (S.selected.size) return A.sel(el.querySelector('.sel-ctl'), { stopPropagation() {} }); S.lb = +el.dataset.i; S.zoom = false; renderLayer(); $('.lb [data-act=closeLb]')?.focus() },
+  closeLb() { const i = S.lb; S.lb = null; renderLayer(); document.querySelector(`.ph[data-i="${i}"]`)?.focus() },
+  lbPrev() { if (S.lb > 0) { S.lb--; S.zoom = false; renderLayer() } },
+  lbNext() { S.lb++; S.zoom = false; renderLayer() },
+  zoom() { S.zoom = !S.zoom; renderLayer() },
+  notes(el, e) { e.stopPropagation(); S.back = el.closest('.lb') ? '.lb [data-act=notes]' : `.ph[data-i="${el.dataset.i}"] [data-act=notes]`; S.notesFor = +el.dataset.i; renderLayer(); $('.notes [data-act=closeNotes]')?.focus() },
+  closeNotes() { S.notesFor = null; renderLayer(); S.back && $(S.back)?.focus() },
+  retryGallery() { S.gallery = 'loading'; render(); setTimeout(() => { S.gallery = 'ready'; render() }, 900) },
+  bookTab(el) { S.bookTab = el.dataset.t; render() },
+  expand(el) { const k = el.dataset.k; S.open.has(k) ? S.open.delete(k) : S.open.add(k); render() },
+  expandFirst() { S.bookTab = 'upcoming'; S.open.add('upcoming0'); render() },
+  bookingLink() { bookingDlg() },
+  copy(el) { navigator.clipboard?.writeText(el.dataset.v).catch(() => {}); const nx = $('#share-next'); if (nx) nx.hidden = false; announce('Link copied'); el.innerHTML = `${ic('check')}Copied`; icons(); setTimeout(() => { el.innerHTML = `${ic('copy')}Copy`; icons() }, 1800) },
+  signOut() { confirmDlg('Sign out of LumoSnap?', 'Uploads in progress pause until you sign in again. Your albums stay on this computer.', 'Sign out', () => { S.signedIn = false; location.hash = '#/login' }) },
+  changeWatch() { S.watchChanged = true; render(); toast('Picked ~/Pictures/Clients 2026 (mock)') },
+  changeStorage() { confirmDlg('Move the upload cache?', 'Albums that are still uploading from the old location stop and need a fresh sync. Finished albums are not affected.', 'Choose new location…', () => toast('Picked /Volumes/Shoots SSD (mock)')) },
+  reset() {
+    openDlg(`${dHead('Reset all data?')}<div class="dlg-b"><p>This signs you out and removes every album, setting and cached photo from this computer. Photos already in the cloud stay there. This can't be undone.</p>
+      <div class="field"><label for="rs">Type <b>reset</b> to confirm</label><input class="input" id="rs" autocomplete="off" data-act-input="delMatch" data-name="reset" autofocus></div></div>
+      <div class="dlg-f"><button class="btn ghost" data-act="closeDlg">Cancel</button><button class="btn danger" id="del-go" disabled data-act="doReset">Reset all data</button></div>`)
+  },
+  doReset() { dlg.close(); S.signedIn = false; location.hash = '#/setup/1' },
+  upgrade() { S.requested = 'studio'; render(); toast('Upgrade requested. We email you when Studio is on.') },
+  checkUpdates() { S.updates = 'checking'; render(); setTimeout(() => { S.updates = 'latest'; render() }, 1300) },
+  startAuth() { S.wait = true; S.authErr = false; render() },
+  cancelAuth() { S.wait = false; render() },
+  finishAuth(el, e) { e.preventDefault(); S.wait = false; if (location.hash.startsWith('#/setup')) location.hash = '#/setup/3'; else { S.signedIn = true; location.hash = '#/albums' } },
+  signIn() { S.signedIn = true },
+  closeDlg() { dlg.close() },
+  dlgYes() { dlg.close(); dlg._yes && dlg._yes() },
+  toast(el) { if (S.menu !== null) { S.menu = null; renderLayer() } toast(el.dataset.msg) },
+  closeToast() { $('#layer .toast')?.remove() }
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]')
+  if (S.menu !== null && !e.target.closest('.menu') && !(el && el.dataset.act === 'menu')) { S.menu = null; if (!el) return render() }
+  if (S.upOpen && !e.target.closest('.up-pop, .up-pill')) { S.upOpen = false; if (!el) return render() }
+  if (!el || !A[el.dataset.act]) return
+  A[el.dataset.act](el, e)
+})
+document.addEventListener('input', e => {
+  if (e.target.dataset.actInput === 'delMatch') $('#del-go').disabled = e.target.value.trim() !== e.target.dataset.name
+})
+document.addEventListener('submit', e => {
+  e.preventDefault()
+  if (e.target.dataset.form === 'profile') { S.saved = true; ME.biz = $('#f-biz').value; render(); setTimeout(() => { S.saved = false; render() }, 2400) }
+  if (e.target.dataset.form === 'create') A.createAlbum()
+})
+document.addEventListener('keydown', e => {
+  if (e.target.matches?.('.desk .print:not(.blank)')) {
+    const mv = { ArrowLeft: [-12, 0], ArrowRight: [12, 0], ArrowUp: [0, -12], ArrowDown: [0, 12] }[e.key]
+    if (mv) { e.preventDefault(); return nudgePrint(e.target, ...mv) }
+    if (e.key === ' ' && e.target.classList.contains('loose')) { e.preventDefault(); return flipPrint(e.target, !e.target.classList.contains('flipped')) }
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); return A.findAlbum(+e.target.dataset.id) }
+  }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.album[tabindex], .ph[tabindex]')) { e.preventDefault(); e.target.click() }
+  if (S.lb !== null && !S.notesFor) {
+    if (e.key === 'Escape') A.closeLb()
+    if (e.key === 'ArrowRight') A.lbNext()
+    if (e.key === 'ArrowLeft') A.lbPrev()
+    if (e.key === 'z') A.zoom()
+  } else if (S.notesFor !== null && e.key === 'Escape') A.closeNotes()
+  else if (e.key === 'Escape' && (S.menu !== null || S.upOpen)) { S.menu = null; S.upOpen = false; render() }
+})
+
+document.addEventListener('scroll', () => { if (S.menu !== null) { S.menu = null; renderLayer() } }, true)
+
+/* print stack: drag a print out onto the desk; a press without moving finds its album */
+let drag = null
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest('.desk .print:not(.blank)'); if (!el || e.button !== 0) return
+  const d = $('#desk').getBoundingClientRect()
+  const inPile = el.parentElement.classList.contains('pile')
+  drag = { el, id: +el.dataset.id, sx: e.clientX, sy: e.clientY, ox: el.offsetLeft + (inPile ? el.parentElement.offsetLeft : 0), oy: el.offsetTop + (inPile ? el.parentElement.offsetTop : 0), d, moved: false }
+  el.setPointerCapture(e.pointerId)
+})
+document.addEventListener('pointermove', e => {
+  if (!drag) return
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy
+  if (!drag.moved && Math.hypot(dx, dy) < 5) return
+  if (!drag.moved) { drag.moved = true; flipPrint(drag.el, false); if (drag.el.parentElement.classList.contains('pile')) $('#desk').appendChild(drag.el); drag.el.classList.add('dragging'); drag.el.style.bottom = 'auto'; drag.el.style.setProperty('--dr', `${dx > 0 ? 5 : -5}deg`) }
+  drag.x = clamp(drag.ox + dx, -6, drag.d.width - 110); drag.y = clamp(drag.oy + dy, 0, drag.d.height - 80)
+  drag.el.style.left = drag.x + 'px'; drag.el.style.top = drag.y + 'px'
+})
+document.addEventListener('pointerup', () => {
+  if (!drag) return
+  const { id, moved, x, y } = drag; drag = null
+  if (!moved) {
+    const el = document.querySelector(`.desk .print[data-id="${id}"]`)
+    if (!el?.classList.contains('loose')) return A.findAlbum(id)
+    if (el.classList.contains('flipped')) return flipPrint(el, false)
+    if (S.clickT) { clearTimeout(S.clickT); S.clickT = null; return flipPrint(el, true) }
+    S.clickT = setTimeout(() => { S.clickT = null; A.findAlbum(id) }, 260)
+    return
+  }
+  S.placed[id] = { x: Math.round(x), y: Math.round(y), r: Math.round((Math.random() * 12 - 6) * 10) / 10 }
+  S.deskHint = false; S.pileOpen = S.pileReady = false; saveDesk(); render(true)
+})
+document.addEventListener('pointerover', e => {
+  const pile = e.target.closest?.('.pile'); if (!pile || S.pileOpen || drag) return
+  S.pileOpen = true; pile.classList.add('open'); clearTimeout(S.pileT)
+  S.pileT = setTimeout(() => { S.pileReady = true; $('.pile')?.classList.add('ready') }, 450)
+})
+document.addEventListener('pointerout', e => {
+  const pile = e.target.closest?.('.pile'); if (!pile || !S.pileOpen || drag || e.relatedTarget?.closest?.('.pile')) return
+  S.pileOpen = S.pileReady = false; clearTimeout(S.pileT); pile.classList.remove('open', 'ready')
+})
+document.addEventListener('pointerover', e => {
+  const el = e.target.closest('.desk .print:not(.blank)'), w = $('#stack-which'); if (!w || drag) return
+  const a = el && ALBUMS.find(x => x.id === +el.dataset.id)
+  w.textContent = a ? `${a.title} · ${nf(a.photos)} photos` : deskHint()
+  // a back print slides out toward the side the pointer came from
+  if (el && el.parentElement.classList.contains('pile') && !el.classList.contains('top')) {
+    const t = $('.pile .print.top .paper')?.getBoundingClientRect()
+    if (t) el.style.setProperty('--out', `${e.clientX < t.left + t.width / 2 ? -22 : 22}px`)
+  }
+})
+function nudgePrint(el, dx, dy) {
+  const id = +el.dataset.id, d = $('#desk')
+  const q = S.placed[id] || { x: el.offsetLeft + (el.parentElement.classList.contains('pile') ? el.parentElement.offsetLeft : 0), y: d.clientHeight - el.offsetHeight - 40, r: -3 }
+  S.placed[id] = { ...q, x: clamp(q.x + dx, -6, d.clientWidth - 110), y: clamp(q.y + dy, 0, d.clientHeight - 80) }
+  S.deskHint = false; saveDesk(); render(true); document.querySelector(`.desk .print[data-id="${id}"]`)?.focus()
+}
+
+function flipPrint(el, on) {
+  if (!el || el.classList.contains('flipped') === on) return
+  el.classList.toggle('flipped', on)
+  if (on) announce(`Back of the print: ${ALBUMS.find(a => a.id === +el.dataset.id)?.title}`)
+}
+// a turned print turns back when the pointer or focus leaves it
+document.addEventListener('pointerout', e => {
+  const el = e.target.closest?.('.print.flipped'); if (el && !el.contains(e.relatedTarget)) flipPrint(el, false)
+})
+document.addEventListener('focusout', e => { if (e.target.matches?.('.print.flipped')) flipPrint(e.target, false) })
+
+/* favourites tooltip */
+const tipAt = e => {
+  const t = e.target.closest('[data-tip]'); const l = $('#layer'); l.querySelector('.tip')?.remove()
+  if (!t) return
+  const r = t.getBoundingClientRect()
+  l.insertAdjacentHTML('beforeend', `<div class="tip" style="left:${Math.max(8, Math.min(r.right - 150, innerWidth - 216))}px;top:${r.bottom + 6}px"><b>Picked by</b>${t.dataset.tip.split('|').join('<br>')}</div>`)
+}
+document.addEventListener('pointerover', tipAt)
+document.addEventListener('focusin', tipAt)
+document.addEventListener('focusout', () => $('#layer .tip')?.remove())
+
+/* infinite scroll */
+function watchMore() {
+  const m = $('#more'); if (!m) return
+  new IntersectionObserver((en, o) => { if (en[0].isIntersecting) { o.disconnect(); setTimeout(() => { S.shown += 18; render(true) }, 700) } }, { root: $('#main') }).observe(m)
+}
+
+const announce = m => { $('#live').textContent = ''; setTimeout(() => $('#live').textContent = m, 50) }
+// Swap an element but let its bars glide from their old widths instead of jumping.
+function swap(el, html) {
+  if (!el) return
+  const old = [...el.querySelectorAll('.bar > span')].map(x => x.style.getPropertyValue('--p'))
+  const t = document.createElement('template'); t.innerHTML = html.trim()
+  const n = t.content.firstElementChild; if (!n) return el.remove()
+  const spans = [...n.querySelectorAll('.bar > span')], target = spans.map(x => x.style.getPropertyValue('--p'))
+  spans.forEach((x, i) => { if (old[i]) x.style.setProperty('--p', old[i]) })
+  el.replaceWith(n); n.offsetWidth
+  spans.forEach((x, i) => { x.style.setProperty('--p', target[i]) })
+}
+
+/* upload simulation */
+setInterval(() => {
+  const u = S.upload
+  if (!u.on || u.done || S.offline) return
+  u.compressed = Math.min(u.total, u.compressed + 9)
+  u.uploaded = Math.min(u.compressed, u.uploaded + 6)
+  if (u.uploaded >= u.total) { S.countFrom = ALBUMS.reduce((n, a) => n + a.photos, 0); S.dropPrint = true; u.done = true; ALBUMS[0].status = 'ok'; ALBUMS[0].photos += u.total - u.failed; announce(`Ananya & Rohit: all ${u.total - u.failed} photos uploaded. Ready to share.`) }
+  rerenderIfAlbums()
+}, 1200)
+function rerenderIfAlbums() {
+  if (!['#/albums', '', '#/'].includes(location.hash)) return
+  const u = S.upload, pill = $('.up-pill'), ov = $('.cover .uploading'), pop = $('.up-pop')
+  if (u.done || !u.on || !pill) return render(true)
+  swap(pill, pillHtml())
+  swap(ov, overlayHtml())
+  swap(pop, upPop())
+  icons()
+}
+
+/* ---------------- router ---------------- */
+function icons() { window.lucide && lucide.createIcons({ attrs: { 'stroke-width': 1.75 } }) }
+function renderLayer() {
+  const l = $('#layer'); const keep = l.querySelector('.toast')
+  l.innerHTML = (S.menu !== null ? menuHtml() : '') + (S.lb !== null ? lightbox() : '') + (S.notesFor !== null ? notesPanel() : '')
+  keep && l.appendChild(keep); l.appendChild(demo()); icons()
+}
+let last = ''
+function render(keepScroll) {
+  const [, r = 'albums', p] = (location.hash.slice(2) || 'albums').match(/^([^/]*)\/?(.*)$/) || []
+  if (r !== last) { S.selected.clear(); S.allSel = false; S.menu = null; S.upOpen = false; S.wait = false; S.lb = null; S.notesFor = null; if (r !== 'albums' || !p) S.shown = 30 }
+  const st = $('#main')?.scrollTop
+  const html = r === 'setup' ? setupView(p) : r === 'login' ? loginView()
+    : r === 'bookings' ? bookingsView() : r === 'settings' ? settingsView(p)
+    : r === 'albums' && p ? galleryView(p) : albumsView()
+  $('#root').innerHTML = html
+  document.title = 'LumoSnap Mock'
+  if (keepScroll && st && $('#main')) $('#main').scrollTop = st
+  last = r
+  renderLayer(); watchMore(); countUp()
+}
+window.addEventListener('hashchange', () => { if (location.hash.split('/')[2] !== undefined) S.view = 'all', S.client = null; render() })
+
+/* mock-only state panel */
+let demoOpen = false
+function demo() {
+  const d = document.createElement('div'); d.className = 'demo'
+  d.innerHTML = `<button data-demo="toggle">Mock states</button>${demoOpen ? `<div class="pane">
+    <h3>Jump to</h3><div class="links"><a href="#/setup/1">Setup</a><a href="#/login">Sign in</a><a href="#/albums">Albums</a><a href="#/albums/1">Gallery</a><a href="#/bookings">Bookings</a><a href="#/settings/profile">Settings</a></div>
+    <h3>App</h3>
+    <label>Offline <input type="checkbox" data-demo="offline" ${S.offline ? 'checked' : ''}></label>
+    <label>Low disk banner <input type="checkbox" data-demo="lowStorage" ${S.lowStorage ? 'checked' : ''}></label>
+    <label>Upload running <input type="checkbox" data-demo="upload" ${S.upload.on ? 'checked' : ''}></label>
+    <label>Sign-in error <input type="checkbox" data-demo="authErr" ${S.authErr ? 'checked' : ''}></label>
+    <label>Albums <select data-demo="albums">${['ready', 'loading', 'empty', 'error'].map(v => `<option ${S.albums === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+    <label>Gallery <select data-demo="gallery">${['ready', 'loading', 'error'].map(v => `<option ${S.gallery === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+  </div>` : ''}`
+  return d
+}
+document.addEventListener('change', e => {
+  if (e.target.dataset.pref === 'stack') { S.hideStack = !e.target.checked; try { localStorage.setItem(STACK_KEY, S.hideStack ? '1' : '0') } catch {} return render(true) }
+  const k = e.target.dataset.demo; if (!k) return
+  if (k === 'upload') Object.assign(S.upload, e.target.checked ? { on: true, done: false, compressed: 412, uploaded: 312, failed: 3 } : { on: false })
+  else if (k === 'albums' || k === 'gallery') S[k] = e.target.value
+  else S[k] = e.target.checked
+  render()
+})
+document.addEventListener('click', e => { if (e.target.dataset.demo === 'toggle') { demoOpen = !demoOpen; renderLayer() } })
+
+render()
+</script>
+</body>
+</html>
