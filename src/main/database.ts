@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, unlinkSync } from 'fs'
+import { randomUUID } from 'crypto'
 import { createLogger, getErrorMessage } from './logger'
 
 const logger = createLogger('Database')
@@ -22,6 +23,16 @@ export interface Album {
   needsSync: number // 0 or 1 (SQLite boolean)
   isOrphaned: number // 0 or 1 - true if source folder was deleted
   createdAt: string
+  sets_need_push?: number // migration 4: >0 = sets changed locally since the last full push
+}
+
+export interface AlbumSet {
+  id: string
+  albumId: string
+  name: string
+  position: number
+  coverImageId: number | null // local image id
+  imageIds: number[] // local image ids, in insertion order
 }
 
 export interface Image {
@@ -51,8 +62,7 @@ export interface Image {
   needs_push?: number | null // 1 = browse fields changed locally, not yet PATCHed to server
 }
 
-export function initDatabase(): void {
-  const dbPath = join(app.getPath('userData'), 'lumosnap.db')
+export function initDatabase(dbPath = join(app.getPath('userData'), 'lumosnap.db')): void {
   db = new Database(dbPath)
 
   // Enable foreign keys
@@ -118,6 +128,29 @@ const migrations: Array<(database: Database.Database) => void> = [
       ALTER TABLE images ADD COLUMN camera_id TEXT;
       ALTER TABLE images ADD COLUMN rating INTEGER;
       ALTER TABLE images ADD COLUMN needs_push INTEGER DEFAULT 0;
+    `)
+  },
+  // 4: photographer-defined sets. albums.sets_need_push counts unpushed mutations (0 = clean)
+  (database) => {
+    database.exec(`
+      CREATE TABLE album_sets (
+        id TEXT PRIMARY KEY,
+        album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        cover_image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_album_sets_album ON album_sets(album_id, position);
+      CREATE TABLE set_images (
+        set_id TEXT NOT NULL REFERENCES album_sets(id) ON DELETE CASCADE,
+        image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+        position INTEGER,
+        PRIMARY KEY (set_id, image_id)
+      );
+      CREATE INDEX idx_set_images_image ON set_images(image_id);
+      ALTER TABLE albums ADD COLUMN sets_need_push INTEGER DEFAULT 0;
     `)
   }
 ]
@@ -490,6 +523,169 @@ export function getImageStats(albumId: string): {
   })
 
   return stats
+}
+
+// Sets. Every mutation bumps albums.sets_need_push in the same transaction.
+
+function conn(): Database.Database {
+  if (!db) throw new Error('Database not initialized')
+  return db
+}
+
+function setAlbumId(setId: string): string {
+  const row = conn().prepare('SELECT album_id FROM album_sets WHERE id = ?').get(setId) as
+    | { album_id: string }
+    | undefined
+  if (!row) throw new Error('Set not found')
+  return row.album_id
+}
+
+function mutateSets(albumId: string, fn: (d: Database.Database, now: string) => void): void {
+  const d = conn()
+  d.transaction(() => {
+    fn(d, new Date().toISOString())
+    d.prepare('UPDATE albums SET sets_need_push = COALESCE(sets_need_push, 0) + 1 WHERE id = ?').run(
+      albumId
+    )
+  })()
+}
+
+export function listSets(albumId: string): AlbumSet[] {
+  const d = conn()
+  const sets = d
+    .prepare(
+      'SELECT id, album_id, name, position, cover_image_id FROM album_sets WHERE album_id = ? ORDER BY position, created_at'
+    )
+    .all(albumId) as Array<{
+    id: string
+    album_id: string
+    name: string
+    position: number
+    cover_image_id: number | null
+  }>
+  const members = d
+    .prepare(
+      `SELECT si.set_id, si.image_id FROM set_images si JOIN album_sets s ON s.id = si.set_id
+       WHERE s.album_id = ? ORDER BY si.position, si.rowid`
+    )
+    .all(albumId) as Array<{ set_id: string; image_id: number }>
+  const byId = new Map<string, number[]>(sets.map((s) => [s.id, []]))
+  for (const m of members) byId.get(m.set_id)!.push(m.image_id)
+  return sets.map((s) => ({
+    id: s.id,
+    albumId: s.album_id,
+    name: s.name,
+    position: s.position,
+    coverImageId: s.cover_image_id,
+    imageIds: byId.get(s.id)!
+  }))
+}
+
+// Only images from the set's own album are added; duplicates are ignored
+function insertMembers(d: Database.Database, setId: string, albumId: string, imageIds: number[]): void {
+  const stmt = d.prepare(
+    'INSERT OR IGNORE INTO set_images (set_id, image_id) SELECT ?, id FROM images WHERE id = ? AND albumId = ?'
+  )
+  for (const id of imageIds) stmt.run(setId, id, albumId)
+}
+
+export function createSet(albumId: string, name: string, imageIds: number[] = []): string {
+  const id = randomUUID()
+  mutateSets(albumId, (d, now) => {
+    const { next } = d
+      .prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM album_sets WHERE album_id = ?')
+      .get(albumId) as { next: number }
+    d.prepare(
+      'INSERT INTO album_sets (id, album_id, name, position, cover_image_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?)'
+    ).run(id, albumId, name, next, now, now)
+    insertMembers(d, id, albumId, imageIds)
+  })
+  return id
+}
+
+export function createSetFromMoment(albumId: string, momentId: string, name: string): string {
+  const ids = (
+    conn()
+      .prepare('SELECT id FROM images WHERE albumId = ? AND moment_id = ? ORDER BY captured_at, uploadOrder')
+      .all(albumId, momentId) as Array<{ id: number }>
+  ).map((r) => r.id)
+  return createSet(albumId, name, ids)
+}
+
+export function renameSet(setId: string, name: string): string {
+  const albumId = setAlbumId(setId)
+  mutateSets(albumId, (d, now) =>
+    d.prepare('UPDATE album_sets SET name = ?, updated_at = ? WHERE id = ?').run(name, now, setId)
+  )
+  return albumId
+}
+
+export function deleteSet(setId: string): string {
+  const albumId = setAlbumId(setId)
+  mutateSets(albumId, (d) => d.prepare('DELETE FROM album_sets WHERE id = ?').run(setId))
+  return albumId
+}
+
+/** Ids missing from orderedIds keep their relative order after the listed ones. */
+export function reorderSets(albumId: string, orderedIds: string[]): void {
+  const current = listSets(albumId).map((s) => s.id)
+  const order = [
+    ...orderedIds.filter((id) => current.includes(id)),
+    ...current.filter((id) => !orderedIds.includes(id))
+  ]
+  mutateSets(albumId, (d, now) => {
+    const stmt = d.prepare(
+      'UPDATE album_sets SET position = ?, updated_at = ? WHERE id = ? AND album_id = ?'
+    )
+    order.forEach((id, i) => stmt.run(i, now, id, albumId))
+  })
+}
+
+export function addImagesToSet(setId: string, imageIds: number[]): string {
+  const albumId = setAlbumId(setId)
+  mutateSets(albumId, (d, now) => {
+    insertMembers(d, setId, albumId, imageIds)
+    d.prepare('UPDATE album_sets SET updated_at = ? WHERE id = ?').run(now, setId)
+  })
+  return albumId
+}
+
+export function removeImagesFromSet(setId: string, imageIds: number[]): string {
+  const albumId = setAlbumId(setId)
+  mutateSets(albumId, (d, now) => {
+    const stmt = d.prepare('DELETE FROM set_images WHERE set_id = ? AND image_id = ?')
+    for (const id of imageIds) stmt.run(setId, id)
+    // A cover that left the set stops being the cover
+    d.prepare(
+      `UPDATE album_sets SET updated_at = ?, cover_image_id = CASE WHEN cover_image_id IN
+       (SELECT image_id FROM set_images WHERE set_id = ?) THEN cover_image_id END WHERE id = ?`
+    ).run(now, setId, setId)
+  })
+  return albumId
+}
+
+/** imageId must be in the set (or null to clear). */
+export function setSetCover(setId: string, imageId: number | null): string {
+  const albumId = setAlbumId(setId)
+  if (imageId != null) {
+    const member = conn()
+      .prepare('SELECT 1 FROM set_images WHERE set_id = ? AND image_id = ?')
+      .get(setId, imageId)
+    if (!member) throw new Error('Cover must be a photo in the set')
+  }
+  mutateSets(albumId, (d, now) =>
+    d
+      .prepare('UPDATE album_sets SET cover_image_id = ?, updated_at = ? WHERE id = ?')
+      .run(imageId, now, setId)
+  )
+  return albumId
+}
+
+/** Clears the dirty counter only if no mutation landed since `seen` was read. */
+export function clearSetsNeedPush(albumId: string, seen: number): void {
+  conn()
+    .prepare('UPDATE albums SET sets_need_push = 0 WHERE id = ? AND sets_need_push = ?')
+    .run(albumId, seen)
 }
 
 export function closeDatabase(): void {

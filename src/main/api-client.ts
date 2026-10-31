@@ -532,6 +532,20 @@ export const albumsApi = {
     })
   },
 
+  /** Replace the album's sets atomically. Image ids are server ids. */
+  async putSets(
+    albumId: string,
+    sets: Array<{
+      id: string
+      name: string
+      position: number
+      coverImageId: number | null
+      imageIds: number[]
+    }>
+  ): Promise<void> {
+    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/sets`, { method: 'PUT', body: { sets } })
+  },
+
   /**
    * Update existing images with new file references (for modified files)
    * Called after re-uploading modified files

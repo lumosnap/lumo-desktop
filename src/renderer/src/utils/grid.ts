@@ -141,3 +141,26 @@ export function flattenRows<T extends GroupableImage>(
   })
   return out
 }
+
+/** Images in a set, keeping their display order; null means no set filter. */
+export function inSet<T extends { id: number }>(
+  images: T[],
+  imageIds: readonly number[] | null
+): T[] {
+  if (!imageIds) return images
+  const ids = new Set(imageIds)
+  return images.filter((img) => ids.has(img.id))
+}
+
+/** `item` moved by `delta` places, clamped to the ends. */
+export function moved<T>(list: readonly T[], item: T, delta: number): T[] {
+  const from = list.indexOf(item)
+  const out = [...list]
+  if (from === -1) return out
+  const to = Math.max(0, Math.min(out.length - 1, from + delta))
+  out.splice(to, 0, ...out.splice(from, 1))
+  return out
+}
+
+// "Sat 31 Oct · 4:12–4:47 PM · 128 photos" -> "Sat 31 Oct · 4:12–4:47 PM"
+export const momentSetName = (label: string): string => label.replace(/ · [^·]* photos?$/, '')

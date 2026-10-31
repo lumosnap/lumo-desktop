@@ -10,7 +10,14 @@ import { BrowserWindow } from 'electron'
 import sharp from 'sharp'
 import { join, basename, extname } from 'path'
 import { existsSync } from 'fs'
-import { getAlbum, getAlbumImages, updateImagesBatch, Image } from './database'
+import {
+  getAlbum,
+  getAlbumImages,
+  updateImagesBatch,
+  listSets,
+  clearSetsNeedPush,
+  Image
+} from './database'
 import { albumsApi } from './api-client'
 import { groupImages } from './grouping'
 import { readExifSignals, thumbnailSignals, ImageSignals } from './image-signals'
@@ -151,6 +158,51 @@ async function regroupNow(albumId: string): Promise<void> {
   }
 
   await pushDirty(albumId)
+  await pushSets(albumId) // regroup runs when uploads finish, so newly uploaded set photos go up here
+}
+
+const SETS_PUSH_DEBOUNCE_MS = 2000
+const setsPushTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/** Debounced PUT of an album's sets after a local change. */
+export function scheduleSetsPush(albumId: string): void {
+  clearTimeout(setsPushTimers.get(albumId))
+  setsPushTimers.set(
+    albumId,
+    setTimeout(() => {
+      setsPushTimers.delete(albumId)
+      enqueue(`Push sets ${albumId}`, () => pushSets(albumId))
+    }, SETS_PUSH_DEBOUNCE_MS)
+  )
+}
+
+/**
+ * PUT all sets when the album's sets are dirty. Images without a serverId are left out and the
+ * album stays dirty, so a later push (e.g. after uploads finish) includes them.
+ */
+async function pushSets(albumId: string): Promise<void> {
+  const seen = getAlbum(albumId)?.sets_need_push ?? 0
+  if (!seen) return
+  const serverIds = new Map(getAlbumImages(albumId).map((r) => [r.id, r.serverId]))
+  let complete = true
+  const toServer = (id: number): number | null => {
+    const sid = serverIds.get(id) ?? null
+    if (sid == null) complete = false
+    return sid
+  }
+  const sets = listSets(albumId).map((s) => ({
+    id: s.id,
+    name: s.name,
+    position: s.position,
+    coverImageId: s.coverImageId == null ? null : toServer(s.coverImageId),
+    imageIds: s.imageIds.map(toServer).filter((id): id is number => id != null)
+  }))
+  await albumsApi.putSets(albumId, sets)
+  // A mutation during the PUT bumps the counter, so this no-ops and that one's push follows
+  if (complete) clearSetsNeedPush(albumId, seen)
+  log.info(
+    `Pushed ${sets.length} sets for ${albumId}${complete ? '' : ' (some photos not uploaded yet)'}`
+  )
 }
 
 /** PATCH rows marked needs_push. Failures stay marked and retry on the next run. */

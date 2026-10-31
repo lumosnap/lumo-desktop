@@ -17,7 +17,15 @@ import {
   X,
   ExternalLink,
   FolderOpen,
-  Layers
+  Layers,
+  Plus,
+  Minus,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Image as ImageIcon
 } from 'lucide-vue-next'
 import PhotoTile from '../components/PhotoTile.vue'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
@@ -29,8 +37,12 @@ import {
   columnsForWidth,
   flattenRows,
   orderForGrouping,
+  inSet,
+  moved,
+  momentSetName,
   GRID_GAP,
   type GroupableImage,
+  type Row,
   type Tile
 } from '../utils/grid'
 
@@ -182,11 +194,212 @@ async function copySelectedImages(): Promise<void> {
   }
 }
 
+// Sets: photographer-defined groups. The grid shows one set (or all photos), then picks on top.
+type SetsResult = Awaited<ReturnType<typeof window.api.sets.list>>
+type AlbumSet = Extract<SetsResult, { success: true }>['sets'][number]
+const sets = ref<AlbumSet[]>([])
+const activeSetId = ref<string | null>(null)
+const activeSet = computed(() => sets.value.find((s) => s.id === activeSetId.value) ?? null)
+
+function applySets(result: SetsResult): boolean {
+  if (!result.success) {
+    toast(`Couldn't update sets: ${result.error}`)
+    return false
+  }
+  sets.value = result.sets
+  if (activeSetId.value && !activeSet.value) activeSetId.value = null
+  return true
+}
+
+async function setsCall(call: Promise<SetsResult>, done?: string): Promise<boolean> {
+  try {
+    const ok = applySets(await call)
+    if (ok && done) toast(done)
+    return ok
+  } catch (err) {
+    toast(`Couldn't update sets: ${err instanceof Error ? err.message : String(err)}`)
+    return false
+  }
+}
+
+const loadSets = (): Promise<boolean> => setsCall(window.api.sets.list(albumId))
+
+function viewSet(id: string | null): void {
+  activeSetId.value = id
+  closePop()
+}
+
+// One popover at a time: a set's menu, "Add to set", or a name prompt
+type Pop =
+  | { kind: 'set'; set: AlbumSet }
+  | { kind: 'add' }
+  | { kind: 'name'; label: string; name: string; submit: (name: string) => Promise<boolean> }
+const pop = ref<Pop | null>(null)
+const popStyle = ref<Record<string, string>>({})
+const popEl = ref<HTMLElement>()
+const popBusy = ref(false)
+
+async function openPop(p: Pop, e?: Event): Promise<void> {
+  if (e) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const up = r.bottom + 240 > innerHeight
+    popStyle.value = {
+      left: `${Math.max(8, Math.min(r.left, innerWidth - 288))}px`,
+      ...(up ? { bottom: `${innerHeight - r.top + 6}px` } : { top: `${r.bottom + 6}px` })
+    }
+  }
+  pop.value = p
+  await nextTick()
+  ;(popEl.value?.querySelector('input') ?? popEl.value?.querySelector('button'))?.focus()
+}
+
+function closePop(): void {
+  pop.value = null
+}
+
+// Without an event the prompt takes the place of the popover that's open
+function promptName(
+  label: string,
+  name: string,
+  submit: (name: string) => Promise<boolean>,
+  e?: Event
+): void {
+  openPop({ kind: 'name', label, name, submit }, e)
+}
+
+async function submitName(): Promise<void> {
+  const p = pop.value
+  if (p?.kind !== 'name' || !p.name.trim() || popBusy.value) return
+  popBusy.value = true
+  try {
+    if (await p.submit(p.name.trim())) closePop()
+  } finally {
+    popBusy.value = false
+  }
+}
+
+function onDocPointer(e: PointerEvent): void {
+  const t = e.target as HTMLElement
+  if (pop.value && !t.closest?.('.menu, [aria-haspopup]')) closePop()
+}
+function onDocKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') closePop()
+}
+
+function newSet(e: Event): void {
+  promptName(
+    'New set',
+    '',
+    (name) =>
+      setsCall(
+        window.api.sets.create(albumId, name),
+        `Created “${name}”. Select photos and choose Add to set.`
+      ),
+    e
+  )
+}
+
+function renameSet(set: AlbumSet): void {
+  promptName('Rename set', set.name, (name) => setsCall(window.api.sets.rename(set.id, name)))
+}
+
+async function moveSet(set: AlbumSet, delta: number): Promise<void> {
+  closePop()
+  const order = moved(
+    sets.value.map((s) => s.id),
+    set.id,
+    delta
+  )
+  await setsCall(window.api.sets.reorder(albumId, order))
+}
+
+const selectedIds = (): number[] => Array.from(selectedImageIds.value)
+const photos = (n: number): string => `${nf(n)} ${n === 1 ? 'photo' : 'photos'}`
+
+async function addSelectedTo(set: AlbumSet): Promise<void> {
+  closePop()
+  const ids = selectedIds()
+  if (
+    await setsCall(
+      window.api.sets.addImages(set.id, ids),
+      `Added ${photos(ids.length)} to “${set.name}”`
+    )
+  )
+    clearSelection()
+}
+
+function newSetFromSelection(): void {
+  const ids = selectedIds()
+  promptName('New set', '', async (name) => {
+    const ok = await setsCall(
+      window.api.sets.create(albumId, name, ids),
+      `Added ${photos(ids.length)} to “${name}”`
+    )
+    if (ok) clearSelection()
+    return ok
+  })
+}
+
+async function removeSelectedFromSet(): Promise<void> {
+  const set = activeSet.value
+  if (!set) return
+  const ids = selectedIds()
+  if (
+    await setsCall(
+      window.api.sets.removeImages(set.id, ids),
+      `Removed ${photos(ids.length)} from “${set.name}”`
+    )
+  )
+    clearSelection()
+}
+
+async function useAsCover(): Promise<void> {
+  const set = activeSet.value
+  if (!set) return
+  if (
+    await setsCall(
+      window.api.sets.setCover(set.id, selectedIds()[0]),
+      `Cover for “${set.name}” set`
+    )
+  )
+    clearSelection()
+}
+
+function makeSetFromMoment(row: Extract<Row<Image>, { kind: 'header' }>, e: Event): void {
+  promptName(
+    'Make a set from this moment',
+    momentSetName(row.label),
+    (name) =>
+      setsCall(
+        window.api.sets.fromMoment(albumId, String(row.momentId), name),
+        `Created “${name}”`
+      ),
+    e
+  )
+}
+
+// Delete confirmation
+const setToDelete = ref<AlbumSet | null>(null)
+const deletingSet = ref(false)
+function askDeleteSet(set: AlbumSet): void {
+  closePop()
+  setToDelete.value = set
+}
+async function confirmDeleteSet(): Promise<void> {
+  const set = setToDelete.value
+  if (!set || deletingSet.value) return
+  deletingSet.value = true
+  if (await setsCall(window.api.sets.delete(set.id), `Deleted “${set.name}”`))
+    setToDelete.value = null
+  deletingSet.value = false
+}
+
 // Capture-time order when the album has moments, else upload order
 const orderedImages = computed(() => orderForGrouping(images.value))
 const filteredImages = computed(() => {
-  if (!showFavoritesOnly.value) return orderedImages.value
-  return orderedImages.value.filter((img) => img.isFavorite)
+  const inView = inSet(orderedImages.value, activeSet.value?.imageIds ?? null)
+  if (!showFavoritesOnly.value) return inView
+  return inView.filter((img) => img.isFavorite)
 })
 
 const grid = computed(() =>
@@ -291,10 +504,12 @@ const statusLine = computed(() => {
 })
 
 const barTitle = computed(() => {
-  if (!showFavoritesOnly.value) return 'All photos'
-  return selectedClientName.value
+  const base = activeSet.value?.name
+  if (!showFavoritesOnly.value) return base ?? 'All photos'
+  const picks = selectedClientName.value
     ? `${firstName(selectedClientName.value)}'s picks`
     : 'Client picks'
+  return base ? `${base} · ${picks}` : picks
 })
 
 const formattedEventDate = computed(() => {
@@ -344,6 +559,7 @@ async function loadAlbumImages(): Promise<void> {
 
 // Grouping changed in main: swap in the new fields in place, keeping picks and scroll position
 let offAnalyzed: (() => void) | null = null
+let offSetsChanged: (() => void) | null = null
 async function refreshGrouping(): Promise<void> {
   const result = await window.api.albums.getImages(albumId)
   if (!result.success || !result.images) return
@@ -719,6 +935,13 @@ onMounted(() => {
   offAnalyzed = window.api.albums.onAnalyzed((id) => {
     if (id === albumId && !loading.value) refreshGrouping()
   })
+  loadSets()
+  offSetsChanged = window.api.sets.onSetsChanged((id) => {
+    if (id === albumId) loadSets()
+  })
+  document.addEventListener('pointerdown', onDocPointer)
+  document.addEventListener('keydown', onDocKey)
+  document.addEventListener('scroll', closePop, true)
 })
 
 onUnmounted(() => {
@@ -727,6 +950,10 @@ onUnmounted(() => {
   resizeObserver.disconnect()
   bannerObserver.disconnect()
   offAnalyzed?.()
+  offSetsChanged?.()
+  document.removeEventListener('pointerdown', onDocPointer)
+  document.removeEventListener('keydown', onDocKey)
+  document.removeEventListener('scroll', closePop, true)
   if (lightbox) {
     lightbox.destroy()
     lightbox = null
@@ -845,6 +1072,22 @@ onUnmounted(() => {
           <button class="btn sm ghost" style="margin-left: auto" @click="selectAll">
             Select all {{ nf(filteredImages.length) }}
           </button>
+          <template v-if="activeSet">
+            <button v-if="selectedImageIds.size === 1" class="btn sm ghost" @click="useAsCover">
+              <ImageIcon />Use as cover
+            </button>
+            <button class="btn sm ghost" @click="removeSelectedFromSet">
+              <Minus />Remove from set
+            </button>
+          </template>
+          <button
+            class="btn sm ghost"
+            aria-haspopup="menu"
+            :aria-expanded="pop?.kind === 'add'"
+            @click="openPop({ kind: 'add' }, $event)"
+          >
+            <Plus />Add to set…
+          </button>
           <button class="btn sm primary" :disabled="copying" @click="copySelectedImages">
             <span v-if="copying" class="spin"></span><Copy v-else />Copy
             {{ nf(selectedImageIds.size) }} to folder…
@@ -864,6 +1107,36 @@ onUnmounted(() => {
           </button>
         </div>
 
+        <div v-if="images.length" class="set-bar" role="toolbar" aria-label="Sets">
+          <button class="btn sm ghost" :aria-pressed="!activeSet" @click="viewSet(null)">
+            All photos <span class="n num">{{ nf(images.length) }}</span>
+          </button>
+          <template v-for="s in sets" :key="s.id">
+            <button
+              class="btn sm ghost"
+              :aria-pressed="activeSetId === s.id"
+              @click="viewSet(s.id)"
+              @contextmenu.prevent="openPop({ kind: 'set', set: s }, $event)"
+            >
+              {{ s.name }} <span class="n num">{{ nf(s.imageIds.length) }}</span>
+            </button>
+            <button
+              v-if="activeSetId === s.id"
+              class="icon-btn sm plain"
+              aria-haspopup="menu"
+              :aria-expanded="pop?.kind === 'set'"
+              :aria-label="`Options for ${s.name}`"
+              :title="`Options for ${s.name}`"
+              @click="openPop({ kind: 'set', set: s }, $event)"
+            >
+              <MoreHorizontal />
+            </button>
+          </template>
+          <button class="btn sm ghost" aria-haspopup="dialog" @click="newSet">
+            <Plus />New set
+          </button>
+        </div>
+
         <div v-if="gridLoading" class="photos" aria-busy="true">
           <div v-for="i in 18" :key="i" class="ph skel"></div>
         </div>
@@ -877,6 +1150,15 @@ onUnmounted(() => {
           <button v-if="album?.sourceFolderPath" class="btn ghost" @click="showAlbumFolder">
             <FolderOpen />Show in Finder
           </button>
+        </div>
+
+        <div
+          v-else-if="filteredImages.length === 0 && activeSet && !showFavoritesOnly"
+          class="empty"
+        >
+          <h2>“{{ activeSet.name }}” is empty</h2>
+          <p>Select photos in All photos, then choose Add to set.</p>
+          <button class="btn ghost" @click="viewSet(null)">View all photos</button>
         </div>
 
         <div v-else-if="filteredImages.length === 0" class="empty">
@@ -902,6 +1184,14 @@ onUnmounted(() => {
                     "
                   >
                     {{ row.label }}
+                    <button
+                      v-if="row.momentId != null && !activeSet && !showFavoritesOnly"
+                      class="btn sm ghost g-make-set"
+                      aria-haspopup="dialog"
+                      @click="makeSetFromMoment(row, $event)"
+                    >
+                      <Plus />Make set
+                    </button>
                   </div>
                   <div
                     v-else
@@ -954,6 +1244,81 @@ onUnmounted(() => {
         <template v-for="(n, i) in tip.names" :key="n"><br v-if="i" />{{ n }}</template>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="pop"
+        ref="popEl"
+        class="menu"
+        :role="pop.kind === 'name' ? 'dialog' : 'menu'"
+        :aria-label="pop.kind === 'name' ? pop.label : undefined"
+        :style="popStyle"
+      >
+        <form v-if="pop.kind === 'name'" class="set-name" @submit.prevent="submitName">
+          <label for="set-name-in">{{ pop.label }}</label>
+          <div class="input-row">
+            <input
+              id="set-name-in"
+              v-model="pop.name"
+              class="input"
+              maxlength="120"
+              autocomplete="off"
+              placeholder="Set name"
+            />
+            <button class="btn primary" :disabled="!pop.name.trim() || popBusy">
+              <span v-if="popBusy" class="spin"></span>Save
+            </button>
+          </div>
+        </form>
+        <template v-else-if="pop.kind === 'add'">
+          <button v-for="s in sets" :key="s.id" role="menuitem" @click="addSelectedTo(s)">
+            {{ s.name }}<span class="n num">{{ nf(s.imageIds.length) }}</span>
+          </button>
+          <hr v-if="sets.length" />
+          <button role="menuitem" @click="newSetFromSelection"><Plus />New set…</button>
+        </template>
+        <template v-else>
+          <button role="menuitem" @click="renameSet(pop.set)"><Pencil />Rename…</button>
+          <button
+            role="menuitem"
+            :disabled="sets[0]?.id === pop.set.id"
+            @click="moveSet(pop.set, -1)"
+          >
+            <ChevronLeft />Move left
+          </button>
+          <button
+            role="menuitem"
+            :disabled="sets[sets.length - 1]?.id === pop.set.id"
+            @click="moveSet(pop.set, 1)"
+          >
+            <ChevronRight />Move right
+          </button>
+          <hr />
+          <button role="menuitem" class="bad" @click="askDeleteSet(pop.set)">
+            <Trash2 />Delete set…
+          </button>
+        </template>
+      </div>
+    </Teleport>
+
+    <Modal
+      :show="!!setToDelete"
+      :title="`Delete “${setToDelete?.name || ''}”?`"
+      @close="!deletingSet && (setToDelete = null)"
+    >
+      <p>
+        The {{ photos(setToDelete?.imageIds.length || 0) }} stay in the album. Only the set goes
+        away, here and on your client's link.
+      </p>
+      <template #footer>
+        <button class="btn ghost" :disabled="deletingSet" @click="setToDelete = null">
+          Cancel
+        </button>
+        <button class="btn danger" :disabled="deletingSet" autofocus @click="confirmDeleteSet">
+          <span v-if="deletingSet" class="spin"></span>Delete set
+        </button>
+      </template>
+    </Modal>
 
     <NotesSidebar
       :is-open="showNotesSidebar"
@@ -1010,9 +1375,58 @@ onUnmounted(() => {
   position: sticky;
   z-index: 2;
 }
-.stack-toggle[aria-pressed='true'] {
+.stack-toggle[aria-pressed='true'],
+.set-bar .btn[aria-pressed='true'] {
   background: var(--brand-wash);
   border-color: var(--brand-soft);
+}
+/* One line that scrolls sideways, so the gallery's offset never changes */
+.set-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 12px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.set-bar > * {
+  flex: none;
+}
+.set-bar .n,
+.menu .n {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.menu .n {
+  margin-left: auto;
+}
+.set-name {
+  display: grid;
+  gap: 8px;
+  width: 272px;
+  padding: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.set-name .btn {
+  width: auto;
+  flex: none;
+  height: 40px;
+  padding: 0 16px;
+}
+.menu button:disabled {
+  opacity: 0.4;
+  background: none;
+}
+.g-make-set {
+  margin-left: auto;
+  height: 28px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.g-moment:hover .g-make-set,
+.g-make-set:focus-visible {
+  opacity: 1;
 }
 /* The scrubber takes its own column, so the grid's width (and column count) leaves room for it */
 .g-browse {

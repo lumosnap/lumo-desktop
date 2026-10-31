@@ -1,11 +1,13 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { AppConfig } from '../main/config'
-import type { Album, Image } from '../main/database'
+import type { Album, AlbumSet, Image } from '../main/database'
 import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/sync'
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { Booking, ApiFavoriteImage } from '../main/api-client'
+
+type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
 
 type AuthUser = { id: string; email: string; name: string; image?: string }
 
@@ -120,6 +122,31 @@ const api = {
       ipcRenderer.invoke('album:retryFailed', albumId),
     forceRefresh: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('albums:forceRefresh')
+  },
+  sets: {
+    list: (albumId: string): Promise<SetsResult> => ipcRenderer.invoke('sets:list', albumId),
+    create: (albumId: string, name: string, imageIds?: number[]): Promise<SetsResult> =>
+      ipcRenderer.invoke('sets:create', albumId, name, imageIds),
+    rename: (setId: string, name: string): Promise<SetsResult> =>
+      ipcRenderer.invoke('sets:rename', setId, name),
+    delete: (setId: string): Promise<SetsResult> => ipcRenderer.invoke('sets:delete', setId),
+    reorder: (albumId: string, orderedIds: string[]): Promise<SetsResult> =>
+      ipcRenderer.invoke('sets:reorder', albumId, orderedIds),
+    addImages: (setId: string, imageIds: number[]): Promise<SetsResult> =>
+      ipcRenderer.invoke('sets:addImages', setId, imageIds),
+    removeImages: (setId: string, imageIds: number[]): Promise<SetsResult> =>
+      ipcRenderer.invoke('sets:removeImages', setId, imageIds),
+    setCover: (setId: string, imageId: number | null): Promise<SetsResult> =>
+      ipcRenderer.invoke('sets:setCover', setId, imageId),
+    fromMoment: (albumId: string, momentId: string, name: string): Promise<SetsResult> =>
+      ipcRenderer.invoke('sets:fromMoment', albumId, momentId, name),
+    // An album's sets changed in main; returns the unsubscribe
+    onSetsChanged: (callback: (albumId: string) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, data: { albumId: string }): void =>
+        callback(data.albumId)
+      ipcRenderer.on('album:setsChanged', handler)
+      return () => ipcRenderer.removeListener('album:setsChanged', handler)
+    }
   },
   sync: {
     detectChanges: (albumId: string): Promise<SyncResult> =>

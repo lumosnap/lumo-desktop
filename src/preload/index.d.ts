@@ -7,11 +7,13 @@ import type {
   ApiFavoriteImage,
   Booking
 } from '../main/api-client'
-import type { Album, Image } from '../main/database'
+import type { Album, AlbumSet, Image } from '../main/database'
 import type { AppConfig } from '../main/config'
 import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/sync'
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
+
+type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
 
 type AuthUser = { id: string; email: string; name: string; image?: string }
 
@@ -129,6 +131,18 @@ declare global {
         ) => Promise<{ success: boolean; progress?: UploadProgress; error?: string }>
         retryFailed: (albumId: string) => Promise<{ success: boolean; error?: string }>
         forceRefresh: () => Promise<{ success: boolean; error?: string }>
+      }
+      sets: {
+        list: (albumId: string) => Promise<SetsResult>
+        create: (albumId: string, name: string, imageIds?: number[]) => Promise<SetsResult>
+        rename: (setId: string, name: string) => Promise<SetsResult>
+        delete: (setId: string) => Promise<SetsResult>
+        reorder: (albumId: string, orderedIds: string[]) => Promise<SetsResult>
+        addImages: (setId: string, imageIds: number[]) => Promise<SetsResult>
+        removeImages: (setId: string, imageIds: number[]) => Promise<SetsResult>
+        setCover: (setId: string, imageId: number | null) => Promise<SetsResult>
+        fromMoment: (albumId: string, momentId: string, name: string) => Promise<SetsResult>
+        onSetsChanged: (callback: (albumId: string) => void) => () => void
       }
       sync: {
         detectChanges: (albumId: string) => Promise<SyncResult>

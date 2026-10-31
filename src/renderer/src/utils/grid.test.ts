@@ -3,6 +3,9 @@ import {
   columnsForWidth,
   flattenRows,
   momentLabel,
+  momentSetName,
+  moved,
+  inSet,
   orderForGrouping,
   type GroupableImage
 } from './grid'
@@ -105,5 +108,26 @@ describe('orderForGrouping', () => {
       img(4, { momentId: 'm', capturedAt: 0 })
     ]
     expect(order(list)).toEqual([4, 1, 3, 2])
+  })
+})
+
+describe('sets', () => {
+  it('inSet keeps display order and passes through without a set', () => {
+    const list = [img(3), img(1), img(2)]
+    expect(inSet(list, null)).toBe(list)
+    expect(inSet(list, [2, 3, 99]).map((i) => i.id)).toEqual([3, 2])
+    expect(inSet(list, [])).toEqual([])
+  })
+  it('moved clamps at the ends', () => {
+    expect(moved(['a', 'b', 'c'], 'b', -1)).toEqual(['b', 'a', 'c'])
+    expect(moved(['a', 'b', 'c'], 'b', 1)).toEqual(['a', 'c', 'b'])
+    expect(moved(['a', 'b', 'c'], 'a', -1)).toEqual(['a', 'b', 'c'])
+    expect(moved(['a', 'b'], 'x', 1)).toEqual(['a', 'b'])
+  })
+  it('momentSetName drops the photo count', () => {
+    expect(momentSetName(momentLabel([Date.UTC(2026, 9, 31, 16, 12)], 1))).toBe(
+      'Sat 31 Oct · 4:12 PM'
+    )
+    expect(momentSetName('Undated · 1,204 photos')).toBe('Undated')
   })
 })

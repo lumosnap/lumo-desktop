@@ -16,11 +16,20 @@ import {
   runInTransaction,
   getAlbumImages,
   deleteImages,
-  updateAlbum
+  updateAlbum,
+  listSets,
+  createSet,
+  createSetFromMoment,
+  renameSet,
+  deleteSet,
+  reorderSets,
+  addImagesToSet,
+  removeImagesFromSet,
+  setSetCover
 } from '../database'
 import { albumsApi } from '../api-client'
 import { uploadPipeline } from '../pipeline'
-import { analyzeAlbum, regroupAlbum } from '../album-analysis'
+import { analyzeAlbum, regroupAlbum, scheduleSetsPush } from '../album-analysis'
 import { watcherService } from '../watcher'
 import { createLogger, getErrorMessage } from '../logger'
 
@@ -431,6 +440,68 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       return { success: false, error: getErrorMessage(error) }
     }
   })
+
+  // Sets: every mutation returns the album's sets, queues a debounced push and tells the renderer
+  ipcMain.handle('sets:list', (_event, albumId: string) => {
+    try {
+      return { success: true, sets: listSets(albumId) }
+    } catch (error: unknown) {
+      logger.error('Failed to list sets:', getErrorMessage(error))
+      return { success: false, error: getErrorMessage(error), sets: [] }
+    }
+  })
+
+  const cleanName = (name: unknown): string => {
+    const n = typeof name === 'string' ? name.trim().slice(0, 120) : ''
+    if (!n) throw new Error('Set name is required')
+    return n
+  }
+  const ids = (v: unknown): number[] =>
+    Array.isArray(v) ? v.filter((x): x is number => Number.isInteger(x)) : []
+
+  const setsMutation = <A extends unknown[]>(
+    channel: string,
+    run: (...args: A) => string // returns the album id
+  ): void => {
+    ipcMain.handle(channel, (_event, ...args) => {
+      try {
+        const albumId = run(...(args as A))
+        scheduleSetsPush(albumId)
+        for (const win of BrowserWindow.getAllWindows())
+          win.webContents.send('album:setsChanged', { albumId })
+        return { success: true, sets: listSets(albumId) }
+      } catch (error: unknown) {
+        logger.error(`${channel} failed:`, getErrorMessage(error))
+        return { success: false, error: getErrorMessage(error) }
+      }
+    })
+  }
+
+  setsMutation('sets:create', (albumId: string, name: string, imageIds?: number[]) => {
+    if (!getAlbum(albumId)) throw new Error('Album not found')
+    createSet(albumId, cleanName(name), ids(imageIds))
+    return albumId
+  })
+  setsMutation('sets:fromMoment', (albumId: string, momentId: string, name: string) => {
+    if (!getAlbum(albumId)) throw new Error('Album not found')
+    createSetFromMoment(albumId, String(momentId), cleanName(name))
+    return albumId
+  })
+  setsMutation('sets:rename', (setId: string, name: string) => renameSet(setId, cleanName(name)))
+  setsMutation('sets:delete', (setId: string) => deleteSet(setId))
+  setsMutation('sets:reorder', (albumId: string, orderedIds: string[]) => {
+    reorderSets(albumId, Array.isArray(orderedIds) ? orderedIds.map(String) : [])
+    return albumId
+  })
+  setsMutation('sets:addImages', (setId: string, imageIds: number[]) =>
+    addImagesToSet(setId, ids(imageIds))
+  )
+  setsMutation('sets:removeImages', (setId: string, imageIds: number[]) =>
+    removeImagesFromSet(setId, ids(imageIds))
+  )
+  setsMutation('sets:setCover', (setId: string, imageId: number | null) =>
+    setSetCover(setId, Number.isInteger(imageId) ? imageId : null)
+  )
 
   // Show item in folder
   ipcMain.handle('shell:showItemInFolder', (_event, albumId: string, imageId: number) => {
