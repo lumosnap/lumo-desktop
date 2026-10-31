@@ -16,8 +16,16 @@ import {
   updateImagesBatch,
   listSets,
   clearSetsNeedPush,
+  getImagesMissingEmbedding,
+  getAlbumTags,
+  getEmbeddedImageIds,
+  saveImageTags,
+  Album,
   Image
 } from './database'
+import { embedBatch, stopEmbedder, BATCH_SIZE } from './ml/embedder'
+import { TAG_MODEL, selectTags, tagProbabilities } from './tags/select'
+import { uploadPipeline } from './pipeline'
 import { albumsApi } from './api-client'
 import { groupImages } from './grouping'
 import { readExifSignals, thumbnailSignals, ImageSignals } from './image-signals'
@@ -72,7 +80,21 @@ export function analyzeAlbum(albumId: string, { force = false } = {}): Promise<v
   return enqueue(`Analyze ${albumId}`, async () => {
     await backfillNow(albumId)
     await regroupNow(albumId)
+    tagAlbum(albumId)
   })
+}
+
+const thumbnailPathOf = (album: Album, img: Image): string =>
+  join(
+    album.localFolderPath,
+    '.thumbnail',
+    `${basename(img.originalFilename, extname(img.originalFilename))}.webp`
+  )
+
+function notifyAnalyzed(albumId: string): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('album:analyzed', { albumId })
+  }
 }
 
 async function backfillNow(albumId: string): Promise<void> {
@@ -88,8 +110,7 @@ async function backfillNow(albumId: string): Promise<void> {
   for (let i = 0; i < todo.length; i += BACKFILL_CONCURRENCY) {
     const results = await Promise.all(
       todo.slice(i, i + BACKFILL_CONCURRENCY).map(async (img) => {
-        const baseName = basename(img.originalFilename, extname(img.originalFilename))
-        const thumbnailPath = join(album.localFolderPath, '.thumbnail', `${baseName}.webp`)
+        const thumbnailPath = thumbnailPathOf(album, img)
         // No thumbnail yet: the upload pipeline will compute signals when it compresses it
         if (!existsSync(thumbnailPath)) return null
         try {
@@ -152,9 +173,7 @@ async function regroupNow(albumId: string): Promise<void> {
   if (updates.length > 0) {
     updateImagesBatch(updates) // one transaction
     log.info(`Regrouped ${albumId}: ${updates.length} images changed`)
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('album:analyzed', { albumId })
-    }
+    notifyAnalyzed(albumId)
   }
 
   await pushDirty(albumId)
@@ -207,8 +226,12 @@ async function pushSets(albumId: string): Promise<void> {
 
 /** PATCH rows marked needs_push. Failures stay marked and retry on the next run. */
 async function pushDirty(albumId: string): Promise<void> {
-  const dirty = getAlbumImages(albumId).filter((r) => r.needs_push && r.serverId != null)
+  const dirty = getAlbumImages(albumId).filter(
+    (r) => (r.needs_push || r.tags_need_push) && r.serverId != null
+  )
   if (dirty.length === 0) return
+  const tags = getAlbumTags(albumId)
+  const embedded = getEmbeddedImageIds(albumId)
 
   for (let i = 0; i < dirty.length; i += PATCH_BATCH_SIZE) {
     const batch = dirty.slice(i, i + PATCH_BATCH_SIZE)
@@ -222,10 +245,91 @@ async function pushDirty(albumId: string): Promise<void> {
         momentId: r.moment_id ?? null,
         phash: r.phash ?? null,
         sharpness: r.sharpness ?? null,
-        thumbhash: r.thumbhash ?? null
+        thumbhash: r.thumbhash ?? null,
+        // Omitted (not null) until analyzed, so a regroup push never wipes server-side tags
+        tags: embedded.has(r.id) ? (tags.get(r.id) ?? []) : undefined
       }))
     )
-    updateImagesBatch(batch.map((r) => ({ id: r.id, changes: { needs_push: 0 } })))
+    updateImagesBatch(
+      batch.map((r) => ({ id: r.id, changes: { needs_push: 0, tags_need_push: 0 } }))
+    )
   }
   log.info(`Pushed browse fields for ${dirty.length} images in ${albumId}`)
+}
+
+// AI tags. Separate chain from `queue`: an album can take ~40 min, and regroup/sets pushes must
+// not wait behind it. DB writes and pushes still go through `queue` so they never interleave.
+
+let tagChain: Promise<void> = Promise.resolve()
+const tagQueued = new Set<string>()
+const tagCancelled = new Set<string>()
+let taggingAlbum: string | null = null
+const TAG_PUSH_EVERY = 200 // images between incremental pushes + UI refreshes
+const UPLOAD_POLL_MS = 5000
+
+/** Embed + tag images missing embeddings, once uploads are idle. Coalesces repeat calls. */
+export function tagAlbum(albumId: string): void {
+  if (tagQueued.has(albumId)) return
+  tagQueued.add(albumId)
+  tagCancelled.delete(albumId)
+  tagChain = tagChain
+    .then(() => {
+      tagQueued.delete(albumId) // a call during the run queues one more pass for new images
+      return tagNow(albumId)
+    })
+    .catch((error) => log.error(`Tagging ${albumId} failed:`, getErrorMessage(error)))
+}
+
+/** Stop tagging an album (e.g. it was deleted). Work done so far is kept. */
+export function cancelTagging(albumId: string): void {
+  tagCancelled.add(albumId)
+  if (taggingAlbum === albumId) stopEmbedder()
+}
+
+async function tagNow(albumId: string): Promise<void> {
+  const album = getAlbum(albumId)
+  if (!album || tagCancelled.has(albumId)) return
+  const todo = getImagesMissingEmbedding(albumId, TAG_MODEL)
+    .map((img) => ({ img, path: thumbnailPathOf(album, img) }))
+    .filter((t) => existsSync(t.path)) // no thumbnail yet: the post-upload pass gets it
+  if (todo.length === 0) return
+  log.info(`Tagging ${todo.length} images in ${albumId}`)
+
+  taggingAlbum = albumId
+  let done = 0
+  let changedSincePush = 0
+  const flush = (): Promise<void> => {
+    if (changedSincePush === 0) return Promise.resolve()
+    changedSincePush = 0
+    notifyAnalyzed(albumId)
+    return enqueue(`Push tags ${albumId}`, () => pushDirty(albumId))
+  }
+  try {
+    for (let i = 0; i < todo.length; i += BATCH_SIZE) {
+      // Uploads keep all their CPU and bandwidth: ML only runs between them
+      while (uploadPipeline.isBusy() && !tagCancelled.has(albumId)) {
+        await new Promise((r) => setTimeout(r, UPLOAD_POLL_MS))
+      }
+      if (tagCancelled.has(albumId)) return
+      const chunk = todo.slice(i, i + BATCH_SIZE)
+      const vecs = await embedBatch(chunk.map((t) => t.path))
+      const items = chunk.flatMap(({ img }, k) => {
+        const vec = vecs[k]
+        // ponytail: undecodable thumbnails stay untagged and retry next session
+        return vec ? [{ imageId: img.id, vec, tags: selectTags(tagProbabilities(vec)) }] : []
+      })
+      await enqueue(`Save tags ${albumId}`, async () => {
+        changedSincePush += saveImageTags(TAG_MODEL, items)
+      })
+      done += items.length
+      if (changedSincePush >= TAG_PUSH_EVERY) await flush()
+    }
+  } catch (error) {
+    if (tagCancelled.has(albumId)) return
+    throw error
+  } finally {
+    taggingAlbum = null
+    await flush()
+    log.info(`Tagged ${done}/${todo.length} images in ${albumId}`)
+  }
 }

@@ -15,6 +15,7 @@ import {
   createImagesBatch,
   runInTransaction,
   getAlbumImages,
+  getAlbumTags,
   deleteImages,
   updateAlbum,
   listSets,
@@ -29,7 +30,7 @@ import {
 } from '../database'
 import { albumsApi } from '../api-client'
 import { uploadPipeline } from '../pipeline'
-import { analyzeAlbum, regroupAlbum, scheduleSetsPush } from '../album-analysis'
+import { analyzeAlbum, regroupAlbum, scheduleSetsPush, cancelTagging } from '../album-analysis'
 import { watcherService } from '../watcher'
 import { createLogger, getErrorMessage } from '../logger'
 
@@ -213,6 +214,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
       // Stop watching
       watcherService.unwatch(albumId)
+      cancelTagging(albumId)
 
       return { success: true }
     } catch (error: unknown) {
@@ -226,14 +228,24 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
     logger.debug(`Getting images for album: ${albumId}`)
     try {
       const images = getAlbumImages(albumId)
+      const tags = getAlbumTags(albumId)
 
       // Favorites are now loaded separately by the frontend to improve performance
       // Return images without favorite info (frontend will enrich later)
       // Browse columns are snake_case in SQLite; the renderer gets camelCase
       const imagesWithFavorites = images.map((row) => {
-        const { captured_at, camera_id, burst_id, is_burst_cover, moment_id, needs_push, ...img } =
-          row
+        const {
+          captured_at,
+          camera_id,
+          burst_id,
+          is_burst_cover,
+          moment_id,
+          needs_push,
+          tags_need_push,
+          ...img
+        } = row
         void needs_push
+        void tags_need_push
         return {
           ...img,
           capturedAt: captured_at ?? null,
@@ -245,6 +257,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           burstId: burst_id ?? null,
           isBurstCover: is_burst_cover === 1,
           momentId: moment_id ?? null,
+          tags: tags.get(row.id) ?? [], // AI tag slugs, best first
           isFavorite: false,
           favoriteCount: 0,
           notesCount: 0,

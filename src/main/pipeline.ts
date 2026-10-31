@@ -20,7 +20,7 @@ import { networkService } from './network'
 import { AsyncQueue } from './utils/async-queue'
 import { hashFile } from './hash'
 import type { ImageSignals } from './image-signals'
-import { regroupAlbum, signalColumns, signalsFromRow } from './album-analysis'
+import { regroupAlbum, signalColumns, signalsFromRow, tagAlbum } from './album-analysis'
 
 const log = createLogger('Pipeline')
 
@@ -79,6 +79,11 @@ class UploadPipeline {
 
   // Track failed images for end-of-queue retry
   private failedImages: Set<number> = new Set()
+
+  /** True while any album is uploading or queued; background ML waits for this to clear. */
+  isBusy(): boolean {
+    return this.isRunning || this.queuedAlbums.size > 0
+  }
 
   async startPipeline(albumId: string, mainWindow: BrowserWindow | null): Promise<void> {
     // Store mainWindow reference for queue processing
@@ -160,6 +165,7 @@ class UploadPipeline {
 
       // Background: group bursts/moments over the whole album and push to the server
       regroupAlbum(albumId)
+      tagAlbum(albumId)
     } catch (error) {
       log.error(`[Pipeline] Pipeline failed for album ${albumId}:`, error)
       if (mainWindow) {

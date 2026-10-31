@@ -36,6 +36,8 @@ asarUnpack:
   - '**/node_modules/@img/**/*.dylib'
   - '**/node_modules/@img/**/*.so'
   - '**/node_modules/@img/**/*.dll'
+  # onnxruntime-node dlopens libonnxruntime next to its .node binding: unpack the whole package
+  - '**/node_modules/onnxruntime-node/**'
 
 extraResources:
   - from: "build/icon.ico"
@@ -45,6 +47,8 @@ extraResources:
 
 win:
   executableName: Lumosnap
+  files:
+    - '!**/node_modules/onnxruntime-node/bin/napi-v6/{linux,darwin}/**'
   icon: build/icon.ico
   target:
     - target: nsis
@@ -62,6 +66,10 @@ nsis:
 
 mac:
   icon: build/icon.icns
+  # onnxruntime-node ships every OS's binaries (~250 MB); keep only this OS's. ponytail: both
+  # arches stay (~73 MB on mac); per-arch filtering needs an afterPack hook.
+  files:
+    - '!**/node_modules/onnxruntime-node/bin/napi-v6/{linux,win32}/**'
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -90,6 +98,8 @@ dmg:
 
 linux:
   icon: build/icons/png
+  files:
+    - '!**/node_modules/onnxruntime-node/bin/napi-v6/{darwin,win32}/**'
   target:
     - AppImage
     - deb

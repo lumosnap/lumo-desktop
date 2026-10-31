@@ -143,6 +143,7 @@ export interface ApiBrowseFields {
   phash?: string | null
   sharpness?: number | null
   thumbhash?: string | null
+  tags?: string[] | null // AI tag slugs (src/main/tags/vocabulary.ts), best first
 }
 
 export interface ApiFavorite {

@@ -46,7 +46,14 @@ export interface Image {
   height: number
   mtime: string
   sourceFileHash: string | null
-  uploadStatus: 'pending' | 'compressing' | 'uploading' | 'complete' | 'failed' | 'failed_compression' | 'failed_upload'
+  uploadStatus:
+    | 'pending'
+    | 'compressing'
+    | 'uploading'
+    | 'complete'
+    | 'failed'
+    | 'failed_compression'
+    | 'failed_upload'
   uploadOrder: number
   createdAt: string
   // Browse metadata (migrations 2-3), snake_case like their columns; null until analyzed
@@ -60,6 +67,7 @@ export interface Image {
   is_burst_cover?: number | null // 0 or 1
   moment_id?: string | null
   needs_push?: number | null // 1 = browse fields changed locally, not yet PATCHed to server
+  tags_need_push?: number | null // migration 5: 1 = AI tags changed, not yet PATCHed
 }
 
 export function initDatabase(dbPath = join(app.getPath('userData'), 'lumosnap.db')): void {
@@ -151,6 +159,24 @@ const migrations: Array<(database: Database.Database) => void> = [
       );
       CREATE INDEX idx_set_images_image ON set_images(image_id);
       ALTER TABLE albums ADD COLUMN sets_need_push INTEGER DEFAULT 0;
+    `)
+  },
+  // 5: AI tags. vec = little-endian f32 image embedding from `model`
+  (database) => {
+    database.exec(`
+      CREATE TABLE image_embeddings (
+        image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+        model TEXT NOT NULL,
+        vec BLOB NOT NULL
+      );
+      CREATE TABLE image_tags (
+        image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+        tag TEXT NOT NULL,
+        score REAL NOT NULL,
+        PRIMARY KEY (image_id, tag)
+      );
+      CREATE INDEX idx_image_tags_tag ON image_tags(tag);
+      ALTER TABLE images ADD COLUMN tags_need_push INTEGER DEFAULT 0;
     `)
   }
 ]
@@ -375,7 +401,7 @@ export function updateAlbum(id: string, updates: Partial<Album>): void {
   const fields = Object.keys(updates)
     .map((key) => `${key} = ?`)
     .join(', ')
-    const values = Object.values(updates)
+  const values = Object.values(updates)
 
   const stmt = db.prepare(`UPDATE albums SET ${fields} WHERE id = ?`)
   stmt.run(...values, id)
@@ -544,9 +570,9 @@ function mutateSets(albumId: string, fn: (d: Database.Database, now: string) => 
   const d = conn()
   d.transaction(() => {
     fn(d, new Date().toISOString())
-    d.prepare('UPDATE albums SET sets_need_push = COALESCE(sets_need_push, 0) + 1 WHERE id = ?').run(
-      albumId
-    )
+    d.prepare(
+      'UPDATE albums SET sets_need_push = COALESCE(sets_need_push, 0) + 1 WHERE id = ?'
+    ).run(albumId)
   })()
 }
 
@@ -582,7 +608,12 @@ export function listSets(albumId: string): AlbumSet[] {
 }
 
 // Only images from the set's own album are added; duplicates are ignored
-function insertMembers(d: Database.Database, setId: string, albumId: string, imageIds: number[]): void {
+function insertMembers(
+  d: Database.Database,
+  setId: string,
+  albumId: string,
+  imageIds: number[]
+): void {
   const stmt = d.prepare(
     'INSERT OR IGNORE INTO set_images (set_id, image_id) SELECT ?, id FROM images WHERE id = ? AND albumId = ?'
   )
@@ -606,7 +637,9 @@ export function createSet(albumId: string, name: string, imageIds: number[] = []
 export function createSetFromMoment(albumId: string, momentId: string, name: string): string {
   const ids = (
     conn()
-      .prepare('SELECT id FROM images WHERE albumId = ? AND moment_id = ? ORDER BY captured_at, uploadOrder')
+      .prepare(
+        'SELECT id FROM images WHERE albumId = ? AND moment_id = ? ORDER BY captured_at, uploadOrder'
+      )
       .all(albumId, momentId) as Array<{ id: number }>
   ).map((r) => r.id)
   return createSet(albumId, name, ids)
@@ -686,6 +719,82 @@ export function clearSetsNeedPush(albumId: string, seen: number): void {
   conn()
     .prepare('UPDATE albums SET sets_need_push = 0 WHERE id = ? AND sets_need_push = ?')
     .run(albumId, seen)
+}
+
+// AI tags
+
+/** Images in the album with no embedding from `model` yet. */
+export function getImagesMissingEmbedding(albumId: string, model: string): Image[] {
+  return conn()
+    .prepare(
+      `SELECT i.* FROM images i LEFT JOIN image_embeddings e ON e.image_id = i.id AND e.model = ?
+       WHERE i.albumId = ? AND e.image_id IS NULL ORDER BY i.uploadOrder`
+    )
+    .all(model, albumId) as Image[]
+}
+
+/** Album's tags per image id, best first. Untagged images are absent. */
+export function getAlbumTags(albumId: string): Map<number, string[]> {
+  const rows = conn()
+    .prepare(
+      `SELECT t.image_id, t.tag FROM image_tags t JOIN images i ON i.id = t.image_id
+       WHERE i.albumId = ? ORDER BY t.image_id, t.score DESC`
+    )
+    .all(albumId) as Array<{ image_id: number; tag: string }>
+  const out = new Map<number, string[]>()
+  for (const r of rows) {
+    const list = out.get(r.image_id)
+    if (list) list.push(r.tag)
+    else out.set(r.image_id, [r.tag])
+  }
+  return out
+}
+
+/** Album's image ids that have an embedding (so their tags are known, possibly empty). */
+export function getEmbeddedImageIds(albumId: string): Set<number> {
+  const rows = conn()
+    .prepare(
+      'SELECT e.image_id FROM image_embeddings e JOIN images i ON i.id = e.image_id WHERE i.albumId = ?'
+    )
+    .all(albumId) as Array<{ image_id: number }>
+  return new Set(rows.map((r) => r.image_id))
+}
+
+/**
+ * Store embeddings and replace tags in one transaction. Marks tags_need_push only where the
+ * tag set actually changed. Returns how many images' tags changed.
+ */
+export function saveImageTags(
+  model: string,
+  items: Array<{ imageId: number; vec: Float32Array; tags: Array<{ tag: string; score: number }> }>
+): number {
+  const d = conn()
+  const putVec = d.prepare(
+    'INSERT OR REPLACE INTO image_embeddings (image_id, model, vec) VALUES (?, ?, ?)'
+  )
+  const oldTags = d.prepare('SELECT tag FROM image_tags WHERE image_id = ? ORDER BY score DESC')
+  const clear = d.prepare('DELETE FROM image_tags WHERE image_id = ?')
+  const put = d.prepare('INSERT INTO image_tags (image_id, tag, score) VALUES (?, ?, ?)')
+  const dirty = d.prepare('UPDATE images SET tags_need_push = 1 WHERE id = ?')
+  const exists = d.prepare('SELECT 1 FROM images WHERE id = ?')
+  const hadVec = d.prepare('SELECT 1 FROM image_embeddings WHERE image_id = ?')
+  let changed = 0
+  d.transaction(() => {
+    for (const { imageId, vec, tags } of items) {
+      if (!exists.get(imageId)) continue // deleted meanwhile
+      const first = !hadVec.get(imageId)
+      putVec.run(imageId, model, Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength))
+      const before = (oldTags.all(imageId) as Array<{ tag: string }>).map((r) => r.tag).join()
+      clear.run(imageId)
+      for (const t of tags) put.run(imageId, t.tag, t.score)
+      // A first embedding always pushes, even with no tags, so the server learns "analyzed, none"
+      if (first || before !== tags.map((t) => t.tag).join()) {
+        dirty.run(imageId)
+        changed++
+      }
+    }
+  })()
+  return changed
 }
 
 export function closeDatabase(): void {

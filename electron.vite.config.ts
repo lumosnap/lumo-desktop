@@ -15,7 +15,8 @@ export default defineConfig(({ mode }) => {
         rollupOptions: {
           input: {
             index: resolve(__dirname, 'src/main/index.ts'),
-            'compression-worker': resolve(__dirname, 'src/main/compression-worker.ts')
+            'compression-worker': resolve(__dirname, 'src/main/compression-worker.ts'),
+            'embed-worker': resolve(__dirname, 'src/main/ml/embed-worker.ts')
           }
         }
       },
