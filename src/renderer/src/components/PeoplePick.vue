@@ -45,7 +45,6 @@ const busy = ref(false)
 // Where the spinner goes while a name saves: the option that was taken, or "Not Anjali"
 const savingAt = ref<number | 'not' | null>(null)
 
-const firstName = (s: string): string => s.split(' ')[0]
 const facesWord = (n: number): string => `${n} ${n === 1 ? 'face' : 'faces'}`
 
 const tiles = computed(() =>
@@ -211,8 +210,7 @@ const fieldStyle = computed(() => {
     transform: `translateX(${cx < 0.2 ? -15 : cx > 0.8 ? -85 : -50}%)`
   }
 })
-const label = (f: Face): string =>
-  f.name ? (f.source === 'ref' ? firstName(f.name) : `${firstName(f.name)}?`) : ''
+const label = (f: Face): string => (f.name ? (f.source === 'ref' ? f.name : `${f.name}?`) : '')
 </script>
 
 <template>
@@ -338,7 +336,7 @@ const label = (f: Face): string =>
               :disabled="busy"
               @click="save({ none: true })"
             >
-              Not {{ firstName(face.name) }}
+              Not {{ face.name }}
               <span v-if="savingAt === 'not'" class="spin" aria-hidden="true"></span>
             </button>
           </form>

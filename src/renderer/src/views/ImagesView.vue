@@ -1924,7 +1924,7 @@ onUnmounted(() => {
                 :aria-label="`Check ${nf(p.reviewCount)} faces of ${p.name}`"
                 @click="reviewing = p"
               >
-                {{ firstName(p.name) }} {{ nf(p.reviewCount) }}
+                {{ p.name }} {{ nf(p.reviewCount) }}
               </button>
             </div>
 
@@ -2349,7 +2349,7 @@ onUnmounted(() => {
           </button>
         </template>
         <template v-else-if="pop.kind === 'merge'">
-          <div class="pick-h">Merge {{ firstName(pop.person.name) }} with</div>
+          <div class="pick-h">Merge {{ pop.person.name }} with</div>
           <button
             v-for="p in mergeTargets"
             :key="p.id"
@@ -2385,7 +2385,7 @@ onUnmounted(() => {
               v-bind="menuBusy('cover')"
               @click="useFaceAsCover"
             >
-              <ImageIcon />Use this face for {{ firstName(pop.face.name) }}
+              <ImageIcon />Use this face for {{ pop.face.name }}
               <span v-if="pending === 'cover'" class="spin"></span>
             </button>
             <button
@@ -2394,7 +2394,7 @@ onUnmounted(() => {
               v-bind="menuBusy('face:none')"
               @click="popRun('face:none', () => assignFace({ none: true }))"
             >
-              <X />Not {{ pop.face.name ? firstName(pop.face.name) : 'this person' }}
+              <X />Not {{ pop.face.name || 'this person' }}
               <span v-if="pending === 'face:none'" class="spin"></span>
             </button>
           </template>
@@ -2635,7 +2635,7 @@ onUnmounted(() => {
     >
       <p>
         The photos stay. The name goes, here and in your client's gallery, and
-        {{ firstName(personToRemove?.name ?? '') }}'s faces are no longer matched.
+        {{ personToRemove?.name ?? '' }}'s faces are no longer matched.
       </p>
       <template #footer>
         <button class="btn ghost" :disabled="peopleBusy" autofocus @click="personToRemove = null">
@@ -2654,7 +2654,7 @@ onUnmounted(() => {
 
     <Modal
       :show="!!mergeAsk"
-      :title="`Merge ${firstName(mergeAsk?.from.name ?? '')} into ${mergeAsk?.into.name ?? ''}?`"
+      :title="`Merge ${mergeAsk?.from.name ?? ''} into ${mergeAsk?.into.name ?? ''}?`"
       @close="!peopleBusy && (mergeAsk = null)"
     >
       <p>
