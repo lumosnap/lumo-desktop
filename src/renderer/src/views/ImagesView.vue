@@ -1362,6 +1362,9 @@ const errText = (err: unknown): string => (err instanceof Error ? err.message : 
 // Private notes: the photographer's own, on this computer only
 const albumNote = ref('')
 const notesLoaded = ref(false)
+watch(showNotesSidebar, (open) => {
+  if (lightbox?.pswp) lightbox.pswp.options.trapFocus = !open
+})
 const showAlbumNote = ref(false)
 async function loadNotes(): Promise<void> {
   try {
@@ -1769,7 +1772,17 @@ function initLightbox(): void {
   }
   lightbox.on('change', scrollToCurrent)
   lightbox.on('close', scrollToCurrent)
-  lightbox.on('afterInit', () => (lbRoot.value = lightbox?.pswp?.element ?? null))
+  lightbox.on('afterInit', () => {
+    lbRoot.value = lightbox?.pswp?.element ?? null
+    // The notes panel sits outside the lightbox: PhotoSwipe's focus trap would pull focus back
+    // out of its text box, so the photographer couldn't type a note
+    if (lightbox?.pswp) lightbox.pswp.options.trapFocus = !showNotesSidebar.value
+  })
+  // Typing in a field (the note box) must not move, zoom or close the lightbox
+  lightbox.on('keydown', (e) => {
+    const t = e.originalEvent.target as HTMLElement | null
+    if (t?.closest?.('input, textarea, [contenteditable]')) e.preventDefault()
+  })
   lightbox.on('destroy', () => {
     if (lbRoot.value) closePop()
     lbRoot.value = null
