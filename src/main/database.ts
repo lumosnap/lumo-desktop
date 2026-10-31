@@ -31,6 +31,7 @@ export interface Album {
   event_type?: string | null // migration 7: picks the AI tag pack; null = wedding
   people_enabled?: number // migration 8: 1 = find and group faces (opt-in)
   people_need_push?: number // migration 8: >0 = people changed locally since the last full push
+  vectors_hash?: string | null // migration 11: hash of the LSV1 search file last uploaded; null = none
 }
 
 export interface AlbumSet {
@@ -270,6 +271,10 @@ const migrations: Array<(database: Database.Database) => void> = [
       );
       ALTER TABLE albums ADD COLUMN private_note TEXT;
     `)
+  },
+  // 11: gallery search vectors. Differs from the album's current LSV1 file hash = needs upload.
+  (database) => {
+    database.exec('ALTER TABLE albums ADD COLUMN vectors_hash TEXT')
   }
 ]
 
@@ -865,6 +870,21 @@ export function getEmbeddedImageIds(albumId: string): Set<number> {
 }
 
 /** Album's stored embeddings from `model`, by image id. */
+/**
+ * Cheap fingerprint of an album's shippable embeddings (which photos, their server ids, which
+ * embedding rows): lets the vectors push skip decoding + encoding when nothing changed.
+ */
+export function getAlbumEmbeddingsSignature(albumId: string, model: string): string {
+  const r = conn()
+    .prepare(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(i.serverId), 0) AS s, COALESCE(SUM(e.rowid), 0) AS r
+       FROM image_embeddings e JOIN images i ON i.id = e.image_id
+       WHERE i.albumId = ? AND e.model = ? AND i.serverId IS NOT NULL`
+    )
+    .get(albumId, model) as { n: number; s: number; r: number }
+  return `${r.n}:${r.s}:${r.r}`
+}
+
 export function getAlbumEmbeddings(
   albumId: string,
   model: string

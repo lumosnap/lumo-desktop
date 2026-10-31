@@ -6,10 +6,11 @@
  * and nothing here is awaited by the UI or the upload pipeline.
  */
 
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import sharp from 'sharp'
 import { join, basename, extname } from 'path'
 import { existsSync } from 'fs'
+import { mkdir, rm, writeFile } from 'fs/promises'
 import {
   getAlbum,
   getAlbumImages,
@@ -20,10 +21,12 @@ import {
   getAlbumTags,
   getEmbeddedImageIds,
   getAlbumEmbeddings,
+  getAlbumEmbeddingsSignature,
   getAlbumTagSet,
   saveImageEmbeddings,
   saveImageTags,
   setAlbumTagsScored,
+  updateAlbum,
   Album,
   Image
 } from './database'
@@ -31,7 +34,8 @@ import { embedBatch, stopEmbedder, BATCH_SIZE } from './ml/embedder'
 import { TAG_MODEL, TAG_SCORING_VERSION, selectAlbumTags, tagLogits } from './tags/select'
 import { TAG_PACKS, eventTypeOf } from './tags/vocabulary'
 import { uploadPipeline } from './pipeline'
-import { albumsApi } from './api-client'
+import { albumsApi, uploadToPresignedUrl } from './api-client'
+import { encodeVectorsFile, vectorsFileHash, VECTORS_MODEL_TAG } from './vectors-file'
 import { groupImages } from './grouping'
 import { readExifSignals, thumbnailSignals, ImageSignals } from './image-signals'
 import { scanFacesNow } from './people'
@@ -184,6 +188,78 @@ async function regroupNow(albumId: string): Promise<void> {
 
   await pushDirty(albumId)
   await pushSets(albumId) // regroup runs when uploads finish, so newly uploaded set photos go up here
+  scheduleVectorsPush(albumId) // also after deletes; a failed push retries on the next regroup
+}
+
+// Gallery search vectors: one LSV1 file per album. The stored hash is the dirty flag: the
+// file is rebuilt and compared each time, and only uploaded when it differs.
+
+const VECTORS_PUSH_DEBOUNCE_MS = 30_000
+const vectorsTimers = new Map<string, ReturnType<typeof setTimeout>>()
+// Last pushed (or confirmed unchanged) embeddings signature per album; skips the ~440 ms rebuild per 10k
+const vectorsSigs = new Map<string, string>()
+
+/** Debounced rebuild + upload of the album's search vectors, once uploads and tagging are idle. */
+export function scheduleVectorsPush(albumId: string): void {
+  clearTimeout(vectorsTimers.get(albumId))
+  vectorsTimers.set(
+    albumId,
+    setTimeout(() => {
+      vectorsTimers.delete(albumId)
+      // Never compete with photo uploads; tagging this album reschedules when it finishes
+      if (uploadPipeline.isBusy() || taggingAlbum === albumId) return scheduleVectorsPush(albumId)
+      enqueue(`Push vectors ${albumId}`, () => pushVectors(albumId))
+    }, VECTORS_PUSH_DEBOUNCE_MS)
+  )
+}
+
+async function pushVectors(albumId: string): Promise<void> {
+  const album = getAlbum(albumId)
+  if (!album) return
+  const sig = getAlbumEmbeddingsSignature(albumId, TAG_MODEL)
+  if (album.vectors_hash && vectorsSigs.get(albumId) === sig) return
+  const started = Date.now()
+  const serverIds = new Map(getAlbumImages(albumId).map((r) => [r.id, r.serverId]))
+  const items = getAlbumEmbeddings(albumId, TAG_MODEL).flatMap(({ imageId, vec }) => {
+    const serverId = serverIds.get(imageId)
+    return serverId == null ? [] : [{ serverId, vec }]
+  })
+  if (items.length === 0) {
+    if (album.vectors_hash) {
+      await albumsApi.deleteVectors(albumId)
+      updateAlbum(albumId, { vectors_hash: null })
+      log.info(`Cleared search vectors for ${albumId}`)
+    }
+    return
+  }
+  const buf = encodeVectorsFile(items, VECTORS_MODEL_TAG)
+  const hash = vectorsFileHash(buf)
+  if (hash === album.vectors_hash) {
+    vectorsSigs.set(albumId, sig)
+    return
+  }
+  const built = Date.now()
+
+  const dir = join(app.getPath('userData'), 'tmp')
+  const path = join(dir, `${hash}.bin`)
+  try {
+    await mkdir(dir, { recursive: true })
+    await writeFile(path, buf)
+    const { url, key, headers } = await albumsApi.getVectorsUploadUrl(albumId, hash, buf.length)
+    const put = await uploadToPresignedUrl(url, path, {
+      'Content-Type': 'application/octet-stream',
+      ...headers
+    })
+    if (!put.success) throw new Error(`Vectors upload failed: ${put.error}`)
+    await albumsApi.putVectors(albumId, key, items.length, VECTORS_MODEL_TAG)
+    updateAlbum(albumId, { vectors_hash: hash })
+    vectorsSigs.set(albumId, sig)
+  } finally {
+    await rm(path, { force: true })
+  }
+  log.info(
+    `Pushed search vectors for ${albumId}: ${items.length} photos, ${(buf.length / 1e6).toFixed(2)} MB, built in ${built - started} ms, uploaded in ${Date.now() - built} ms`
+  )
 }
 
 const SETS_PUSH_DEBOUNCE_MS = 2000
@@ -384,7 +460,10 @@ async function tagNow(albumId: string): Promise<void> {
   } finally {
     taggingAlbum = null
     // Also covers albums scored with an older TAG_SCORING_VERSION or with deleted photos
-    if (!tagCancelled.has(albumId)) await flush()
+    if (!tagCancelled.has(albumId)) {
+      await flush()
+      scheduleVectorsPush(albumId)
+    }
     if (todo.length > 0) log.info(`Tagged ${done}/${todo.length} images in ${albumId}`)
   }
 }

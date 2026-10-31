@@ -605,6 +605,33 @@ export const albumsApi = {
     })
   },
 
+  /** Presigned PUT for the album's LSV1 search vectors file. Send `headers` with the PUT. */
+  async getVectorsUploadUrl(
+    albumId: string,
+    hash: string,
+    size: number
+  ): Promise<{ url: string; key: string; headers: Record<string, string> }> {
+    type R = { url: string; key: string; headers?: Record<string, string> }
+    const r = await apiFetch<ApiResponse<R> & Partial<R>>(`/albums/${albumId}/vectors/upload-url`, {
+      method: 'POST',
+      body: { hash, size }
+    })
+    const d = r.data ?? (r as R)
+    return { url: d.url, key: d.key, headers: d.headers ?? {} }
+  },
+
+  /** Record the uploaded vectors file (the server drops the previous one). */
+  async putVectors(albumId: string, key: string, count: number, model: string): Promise<void> {
+    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/vectors`, {
+      method: 'PUT',
+      body: { key, count, model }
+    })
+  },
+
+  async deleteVectors(albumId: string): Promise<void> {
+    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/vectors`, { method: 'DELETE' })
+  },
+
   /**
    * Update existing images with new file references (for modified files)
    * Called after re-uploading modified files
@@ -639,7 +666,8 @@ export const albumsApi = {
  */
 export async function uploadToPresignedUrl(
   presignedUrl: string,
-  filePath: string
+  filePath: string,
+  headers: Record<string, string> = { 'Content-Type': 'image/webp' }
 ): Promise<{ success: boolean; error?: string }> {
   console.log(`[API] Uploading file to presigned URL: ${filePath}`)
 
@@ -669,10 +697,7 @@ export async function uploadToPresignedUrl(
         port: urlObj.port || (isHttps ? 443 : 80),
         path: urlObj.pathname + urlObj.search,
         method: 'PUT',
-        headers: {
-          'Content-Type': 'image/webp',
-          'Content-Length': fileSize
-        }
+        headers: { ...headers, 'Content-Length': fileSize }
       }
 
       console.log(`[API] Uploading to ${urlObj.hostname}${urlObj.pathname}`)
