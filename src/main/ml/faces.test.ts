@@ -9,6 +9,7 @@ import {
   similarityTransform,
   type DetectedFace
 } from './faces'
+import { SFACE } from './model'
 
 const apply = ([a, b, tx, ty]: number[], x: number, y: number): [number, number] => [
   a * x - b * y + tx,
@@ -109,5 +110,18 @@ describe('frontalness', () => {
   it('is 1 with the nose centred between the eyes, 0 in profile', () => {
     expect(frontalness([10, 0, 30, 0, 20, 10])).toBe(1)
     expect(frontalness([10, 0, 30, 0, 30, 10])).toBe(0)
+  })
+})
+
+describe('SFace model', () => {
+  it('is the pinned fp32 build (same input/output names as int8, ~8x faster on CPU)', () => {
+    expect(SFACE.url).toMatch(
+      /\/3d7082438a6e4551e840c9b2bb60b71e8da4b524\/face_recognition_sface_2021dec\.onnx$/
+    )
+    expect(SFACE.path).toBe('faces/face_recognition_sface_2021dec.onnx')
+    expect(SFACE).toMatchObject({
+      sha256: '0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79',
+      size: 38696353
+    })
   })
 })

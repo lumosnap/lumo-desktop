@@ -7,7 +7,7 @@ import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { Booking, ApiFavoriteImage } from '../main/api-client'
 import type { TagConfig } from '../main/ipc/albums'
-import type { PeopleConfig, PersonSummary } from '../main/people'
+import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
 
 type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
 type Result = { success: boolean; error?: string }
@@ -16,6 +16,7 @@ type FaceInImage = {
   box: [number, number, number, number]
   personId: string | null
   name: string | null
+  source: 'ref' | 'auto' | null
 }
 type FaceTarget = { personId: string } | { newName: string } | { none: true }
 
@@ -187,6 +188,18 @@ const api = {
     setEnabled: (albumId: string, enabled: boolean): Promise<PeopleConfig> =>
       ipcRenderer.invoke('people:setEnabled', albumId, enabled),
     list: (albumId: string): Promise<PersonSummary[]> => ipcRenderer.invoke('people:list', albumId),
+    pickPhotos: (albumId: string, limit = 12): Promise<PickPhoto[]> =>
+      ipcRenderer.invoke('people:pickPhotos', albumId, limit),
+    reviewQueue: (albumId: string, personId: string, limit = 24): Promise<ReviewFace[]> =>
+      ipcRenderer.invoke('people:reviewQueue', albumId, personId, limit),
+    review: (
+      albumId: string,
+      personId: string,
+      decisions: Array<{ faceId: number; yes: boolean }>
+    ): Promise<Result & { remaining: number }> =>
+      ipcRenderer.invoke('people:review', albumId, personId, decisions),
+    remove: (albumId: string, personId: string): Promise<Result> =>
+      ipcRenderer.invoke('people:remove', albumId, personId),
     rename: (albumId: string, personId: string, name: string | null): Promise<Result> =>
       ipcRenderer.invoke('people:rename', albumId, personId, name),
     merge: (albumId: string, intoId: string, fromIds: string[]): Promise<Result> =>
@@ -406,6 +419,9 @@ const api = {
       }
       error?: string
     }> => ipcRenderer.invoke('settings:getAll')
+  },
+  power: {
+    reportBattery: (level: number): void => ipcRenderer.send('power:battery', level)
   },
   network: {
     getStatus: (): Promise<{ online: boolean }> => ipcRenderer.invoke('network:getStatus'),

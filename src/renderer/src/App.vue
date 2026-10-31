@@ -10,7 +10,19 @@ const route = useRoute()
 const authStore = useAuthStore()
 const networkStore = useNetworkStore()
 
+// Main can't read the battery level; report it so ML work runs unplugged until it gets low
+type BatteryManager = EventTarget & { level: number }
+async function reportBattery(): Promise<void> {
+  const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryManager> }
+  const battery = await nav.getBattery?.().catch(() => undefined)
+  if (!battery) return
+  const send = (): void => window.api.power.reportBattery(battery.level)
+  send()
+  battery.addEventListener('levelchange', send)
+}
+
 onMounted(async () => {
+  reportBattery()
   // Initialize network monitoring
   networkStore.setupListener()
   await networkStore.checkStatus()

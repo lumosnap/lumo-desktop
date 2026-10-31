@@ -2,7 +2,7 @@
  * Main-process side of the ML utilityProcess (SigLIP tags, faces). Models never run in main or renderer.
  * Spawned lazily at low OS priority, paused on battery or thermal pressure, killed when idle.
  */
-import { powerMonitor, utilityProcess, type UtilityProcess } from 'electron'
+import { ipcMain, powerMonitor, utilityProcess, type UtilityProcess } from 'electron'
 import { constants, setPriority } from 'os'
 import { join } from 'path'
 import { ensureFaceModels, ensureModel } from './model'
@@ -23,21 +23,34 @@ const pending = new Map<number, Pending>()
 let idleTimer: ReturnType<typeof setTimeout> | undefined
 
 // Pause state. Thermal state is macOS-only; other platforms never report serious/critical.
+// Unplugged, ML keeps running while the battery has charge to spare; it pauses below this level.
+const MIN_BATTERY = 0.4 // ponytail: tuning knob; a settings toggle if photographers want stricter
 let onBattery = false
+let batteryLevel: number | null = null // 0..1, reported by the renderer (Battery Status API); null = unknown
 let hot = false
 let resumeWaiters: Array<() => void> = []
 let watching = false
+
+function update(): void {
+  if (paused()) return
+  for (const w of resumeWaiters) w()
+  resumeWaiters = []
+}
+
+// The main process has no battery-level API; the renderer reports navigator.getBattery() changes.
+ipcMain.on('power:battery', (_event, level: unknown) => {
+  batteryLevel = typeof level === 'number' && level >= 0 && level <= 1 ? level : null
+  update()
+})
 
 function watchPower(): void {
   if (watching) return
   watching = true
   onBattery = powerMonitor.isOnBatteryPower()
-  const update = (): void => {
-    if (paused()) return
-    for (const w of resumeWaiters) w()
-    resumeWaiters = []
-  }
-  powerMonitor.on('on-battery', () => (onBattery = true))
+  powerMonitor.on('on-battery', () => {
+    onBattery = true
+    update()
+  })
   powerMonitor.on('on-ac', () => {
     onBattery = false
     update()
@@ -48,7 +61,14 @@ function watchPower(): void {
   })
 }
 
-const paused = (): boolean => onBattery || hot
+const lowBattery = (): boolean => onBattery && (batteryLevel === null || batteryLevel < MIN_BATTERY)
+const paused = (): boolean => lowBattery() || hot
+
+/** Unplugged but allowed to run: the UI shows a quiet warning. */
+export function isMlOnBattery(): boolean {
+  watchPower()
+  return onBattery && !paused()
+}
 
 /** True while ML work waits for AC power or a cooler machine. */
 export function isMlPaused(): boolean {
@@ -59,7 +79,7 @@ export function isMlPaused(): boolean {
 function waitUntilAllowed(): Promise<void> {
   watchPower()
   if (!paused()) return Promise.resolve()
-  log.info(`Paused (${onBattery ? 'on battery' : 'thermal pressure'})`)
+  log.info(`Paused (${hot ? 'thermal pressure' : `battery ${batteryLevel === null ? 'level unknown' : `${Math.round(batteryLevel * 100)}%`}`})`)
   return new Promise((resolve) => resumeWaiters.push(resolve))
 }
 
@@ -131,9 +151,4 @@ export async function embedBatch(paths: string[]): Promise<Array<Float32Array | 
 /** Faces in one photo (read at full quality, long edge 1024), each with a 128-d SFace vector. */
 export async function detectFaces(path: string): Promise<WorkerFace[]> {
   return request({ op: 'faces', models: await ensureFaceModels(), path })
-}
-
-/** Average-linkage cluster labels for n×128 vectors (heavy, so off the main thread). */
-export function clusterInWorker(vecs: Float32Array, threshold: number): Promise<Int32Array> {
-  return request({ op: 'cluster', vecs, threshold })
 }

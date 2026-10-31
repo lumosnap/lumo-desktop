@@ -3,13 +3,11 @@
  * never loads the face models.
  * In:  { id, op: 'embed', model, paths } → result: (Float32Array | null)[] (null = undecodable)
  *      { id, op: 'faces', models: { yunet, sface }, path } → result: WorkerFace[]
- *      { id, op: 'cluster', vecs, threshold } → result: Int32Array
  * Out: { id, result } or { id, error }
  */
 import * as ort from 'onnxruntime-node'
 import sharp from 'sharp'
 import { ALIGN_SIZE, YUNET_SIZE, alignFace, decodeYuNet, type WorkerFace } from './faces'
-import { clusterFaces } from '../people-cluster'
 
 const SIZE = 224
 // rescale (1/255) then normalize (mean 0.5, std 0.5), rounded to f32 at each step exactly like
@@ -172,7 +170,6 @@ export async function faces(
 type Msg =
   | { id: number; op: 'embed'; model: string; paths: string[] }
   | { id: number; op: 'faces'; models: { yunet: string; sface: string }; path: string }
-  | { id: number; op: 'cluster'; vecs: Float32Array; threshold: number }
 
 // Batch size 1 per run: benchmarked faster and ~200 MB lighter than batch 8 on CPU
 async function handle(msg: Msg): Promise<unknown> {
@@ -182,8 +179,7 @@ async function handle(msg: Msg): Promise<unknown> {
     for (const p of msg.paths) vectors.push(await embed(s, p).catch(() => null))
     return vectors
   }
-  if (msg.op === 'faces') return faces(msg.models, msg.path)
-  return clusterFaces(msg.vecs, msg.threshold)
+  return faces(msg.models, msg.path)
 }
 
 process.parentPort?.on('message', async (e) => {

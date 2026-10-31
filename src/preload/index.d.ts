@@ -13,7 +13,7 @@ import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/syn
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { TagConfig } from '../main/ipc/albums'
-import type { PeopleConfig, PersonSummary } from '../main/people'
+import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
 
 type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
 
@@ -35,7 +35,7 @@ type AlbumImageWithFavorites = Image & {
   isBurstCover: boolean
   momentId: string | null
   tags: string[] // effective tags: manual adds first, then AI tags (by score) not removed
-  people: string[] // person ids in this photo (shown people: named, or unnamed with ≥2 faces)
+  people: string[] // ids of the people in this photo (reference or auto faces)
 }
 
 type PeopleResult = { success: boolean; error?: string }
@@ -169,16 +169,31 @@ declare global {
           tag: string
         ) => Promise<{ success: boolean; error?: string }>
       }
-      // People (opt-in per album). Mutations emit album:peopleChanged and push named people.
+      // People (opt-in per album). A person = faces the photographer confirmed (references);
+      // other faces match them: auto (sure), review ("Is this X?") or no one. Mutations re-match,
+      // emit album:peopleChanged (also sent per scan batch) and push to the server.
       people: {
         getConfig: (albumId: string) => Promise<PeopleConfig>
         // Off deletes every face, person and client link of the album, locally and on the server
         setEnabled: (albumId: string, enabled: boolean) => Promise<PeopleConfig>
-        // Named first (by name), then unnamed by photoCount; unnamed clusters < 2 faces left out
+        // Every person (all named), by name
         list: (albumId: string) => Promise<PersonSummary[]>
+        // Scanned photos good for picking people: many large, clear faces first
+        pickPhotos: (albumId: string, limit?: number) => Promise<PickPhoto[]>
+        // "Is this X?" candidates, best first
+        reviewQueue: (albumId: string, personId: string, limit?: number) => Promise<ReviewFace[]>
+        // yes = becomes a reference of the person, no = never this person; remaining = queue left
+        review: (
+          albumId: string,
+          personId: string,
+          decisions: Array<{ faceId: number; yes: boolean }>
+        ) => Promise<PeopleResult & { remaining: number }>
+        // Empty name fails: every person has a name
         rename: (albumId: string, personId: string, name: string | null) => Promise<PeopleResult>
-        // Pins the merged faces to intoId (survives re-clustering); intoId takes a name if it has none
+        // References, auto faces, rejections and client links move to intoId
         merge: (albumId: string, intoId: string, fromIds: string[]) => Promise<PeopleResult>
+        // Deletes the person; its references become plain faces
+        remove: (albumId: string, personId: string) => Promise<PeopleResult>
         setHidden: (albumId: string, personId: string, hidden: boolean) => Promise<PeopleResult>
         // faceId must be one of the person's faces
         setCover: (albumId: string, personId: string, faceId: number) => Promise<PeopleResult>
@@ -191,9 +206,12 @@ declare global {
             box: [number, number, number, number] // normalized x, y, w, h
             personId: string | null
             name: string | null
+            source: 'ref' | 'auto' | null // ref = confirmed by the photographer
           }>
         >
-        // Manual, survives re-clustering. Resolves with the face's person afterwards
+        // personId/newName: this face is a reference of that person (newName reuses a person of
+        // the same name, case-insensitive). none: not its current person (remembered).
+        // Resolves with the person the face is now a reference of
         assignFace: (
           albumId: string,
           faceId: number,
@@ -334,6 +352,9 @@ declare global {
           }
           error?: string
         }>
+      }
+      power: {
+        reportBattery: (level: number) => void
       }
       network: {
         getStatus: () => Promise<{ online: boolean }>

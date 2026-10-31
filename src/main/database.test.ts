@@ -32,19 +32,19 @@ import {
   setPeopleEnabled,
   getPeopleProgress,
   saveImageFaces,
-  getFacesToCluster,
-  applyPeopleAssignment,
+  rematchPeople,
   getAlbumPeople,
   getImageFaces,
   renamePerson,
   mergePeople,
+  removePerson,
+  reviewFaces,
   assignFace,
   setPersonCover,
   setClientPerson,
   getClientPeople,
-  clearPeopleNeedPush
+  hasPerson
 } from './database'
-import { assignPeople } from './people-cluster'
 
 // better-sqlite3 is rebuilt for Electron's ABI by postinstall; skip under plain Node if it won't load
 let loadable = true
@@ -67,7 +67,7 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(8)
+    expect(db.pragma('user_version', { simple: true })).toBe(9)
     expect(cols('albums')).toEqual(
       expect.arrayContaining(['startTime', 'endTime', 'isOrphaned', 'albumType'])
     )
@@ -103,11 +103,44 @@ describe.skipIf(!loadable)('runMigrations', () => {
       'score',
       'landmarks',
       'vec',
-      'person_id'
+      'person_id',
+      'source'
     ])
     expect(cols('people')).toEqual(['id', 'album_id', 'name', 'hidden', 'cover_face_id'])
-    expect(cols('face_overrides')).toEqual(['face_id', 'person_id'])
+    expect(cols('face_rejections')).toEqual(['face_id', 'person_id'])
+    expect(cols('face_overrides')).toEqual([])
     expect(cols('client_people')).toEqual(['album_id', 'client_name', 'person_id'])
+    db.close()
+  })
+
+  it('9: drops unnamed people from clustering; faces of named people become references', () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    db.exec(`
+      CREATE TABLE albums (id TEXT PRIMARY KEY, title TEXT NOT NULL);
+      CREATE TABLE images (id INTEGER PRIMARY KEY, albumId TEXT NOT NULL, uploadStatus TEXT);
+    `)
+    runMigrations(db, 8)
+    db.exec(`
+      INSERT INTO albums (id, title) VALUES ('a', 'a');
+      INSERT INTO images (id, albumId) VALUES (1, 'a');
+      INSERT INTO people (id, album_id, name) VALUES ('named', 'a', 'Bride'), ('anon', 'a', NULL);
+      INSERT INTO faces (id, image_id, box, score, landmarks, vec, person_id) VALUES
+        (1, 1, '[]', 1, '[]', x'00', 'named'), (2, 1, '[]', 1, '[]', x'00', 'anon'),
+        (3, 1, '[]', 1, '[]', x'00', NULL);
+      INSERT INTO face_overrides (face_id, person_id) VALUES (3, NULL);
+      INSERT INTO client_people (album_id, client_name, person_id) VALUES ('a', 'Anu', 'anon');
+    `)
+    runMigrations(db)
+    expect(db.prepare('SELECT id, name FROM people').all()).toEqual([
+      { id: 'named', name: 'Bride' }
+    ])
+    expect(db.prepare('SELECT id, person_id, source FROM faces ORDER BY id').all()).toEqual([
+      { id: 1, person_id: 'named', source: 'ref' },
+      { id: 2, person_id: null, source: null },
+      { id: 3, person_id: null, source: null }
+    ])
+    expect(db.prepare('SELECT * FROM client_people').all()).toEqual([])
     db.close()
   })
 })
@@ -306,19 +339,19 @@ describe.skipIf(!loadable)('people', () => {
     landmarks: [0.15, 0.15, 0.25, 0.15, 0.2, 0.2, 0.16, 0.25, 0.24, 0.25],
     vec: v(k)
   })
-  // Cluster label = the face's one-hot axis, so a test controls who is "the same person"
-  const recluster = (albumId: string): number => {
-    const labels = new Map(
-      getFacesToCluster(albumId).map((f) => [f.id, f.vec.findIndex((x) => x === 1)])
-    )
-    let n = 0
-    return applyPeopleAssignment(albumId, (faces, persons) =>
-      assignPeople(faces, labels, persons, () => `p${n++}`)
-    )
+  /** One-hot axis k mixed toward axis 100 + k: cosine `c` to v(k). */
+  const near = (k: number, c: number): Parameters<typeof saveImageFaces>[1][number] => {
+    const f = face(k)
+    f.vec = new Float32Array(128)
+    f.vec[k] = c
+    f.vec[100 + k] = Math.sqrt(1 - c * c)
+    return f
   }
   const pushCount = (id: string): number => getAlbum(id)!.people_need_push ?? 0
+  const state = (albumId: string, imageId: number): Array<[string | null, string | null]> =>
+    getImageFaces(albumId, imageId).map((f) => [f.name, f.source])
 
-  it('scans, clusters, renames, merges, overrides and deletes everything when turned off', () => {
+  it('references, auto matches, review answers, rejections; off deletes everything', () => {
     initDatabase(':memory:')
     album('a')
     const [i1, i2, i3] = mk('a', 3)
@@ -326,47 +359,66 @@ describe.skipIf(!loadable)('people', () => {
 
     setPeopleEnabled('a', true)
     expect(saveImageFaces(i1, [face(0), face(1)])).toBe(true)
-    expect(saveImageFaces(i2, [face(0), face(1)])).toBe(true)
-    expect(saveImageFaces(i3, [face(2)])).toBe(true)
+    expect(saveImageFaces(i2, [face(0), near(1, 0.4)])).toBe(true)
+    expect(saveImageFaces(i3, [near(0, 0.3), face(2)])).toBe(true)
     expect(getPeopleProgress('a')).toEqual({ enabled: true, processed: 3, total: 3 })
 
-    expect(recluster('a')).toBe(4) // two people of 2 faces; the lone face stays unassigned
-    let people = getAlbumPeople('a')
-    expect(people.map((p) => p.faces.length)).toEqual([2, 2])
-    const [p0, p1] = people.map((p) => p.id)
+    // Nobody picked yet: no people, nothing matched
+    expect(rematchPeople('a').changed).toBe(0)
+    expect(getAlbumPeople('a')).toEqual([])
 
-    renamePerson('a', p0, 'Bride')
+    // Pick the two faces of photo 1
+    const [f0, f1] = getImageFaces('a', i1)
+    const bride = assignFace('a', f0.id, { newName: 'Bride' })!
+    expect(assignFace('a', f1.id, { newName: 'bride' })).toBe(bride) // same name, any case
+    const groom = assignFace('a', f1.id, { newName: 'Groom' })!
+    let { review } = rematchPeople('a')
+    expect(state('a', i1)).toEqual([
+      ['Bride', 'ref'],
+      ['Groom', 'ref']
+    ])
+    expect(state('a', i2)).toEqual([
+      ['Bride', 'auto'],
+      [null, null]
+    ])
+    expect(review.get(groom)!.map((r) => r.faceId)).toEqual([getImageFaces('a', i2)[1].id])
+    expect(getAlbumPeople('a').map((p) => [p.name, p.faces.length])).toEqual([
+      ['Bride', 2],
+      ['Groom', 1]
+    ])
+
+    // Review: yes = reference; the 0.3 face stays below the review band for Bride
     const seen = pushCount('a')
-    expect(seen).toBeGreaterThan(0)
-    clearPeopleNeedPush('a', seen)
+    reviewFaces('a', groom, [{ faceId: getImageFaces('a', i2)[1].id, yes: true }])
+    review = rematchPeople('a').review
+    expect(review.get(groom)).toBeUndefined()
+    expect(state('a', i2)[1]).toEqual(['Groom', 'ref'])
+    expect(pushCount('a')).toBeGreaterThan(seen)
 
-    // Re-cluster with fresh labels: the named person keeps its id
-    expect(recluster('a')).toBe(0)
-    expect(getAlbumPeople('a').find((p) => p.name === 'Bride')!.id).toBe(p0)
+    // "Not Bride": rejected, never matched to Bride again
+    const autoFace = getImageFaces('a', i2)[0]
+    assignFace('a', autoFace.id, { none: true })
+    rematchPeople('a')
+    expect(state('a', i2)[0]).toEqual([null, null])
+    // ...and a "no" in review is the same
+    assignFace('a', autoFace.id, { personId: bride })
+    reviewFaces('a', bride, [{ faceId: autoFace.id, yes: false }])
+    rematchPeople('a')
+    expect(state('a', i2)[0]).toEqual([null, null])
 
-    // Manual: lone face goes to Bride; survives re-clustering
-    const lone = getImageFaces('a', i3)[0]
-    expect(assignFace('a', lone.id, { personId: p0 })).toBe(p0)
-    recluster('a')
-    expect(getImageFaces('a', i3)[0].personId).toBe(p0)
-    // "Not this person" wins too
-    assignFace('a', lone.id, { none: true })
-    recluster('a')
-    expect(getImageFaces('a', i3)[0].personId).toBeNull()
+    // A cover that leaves its person stops being the cover
+    setPersonCover('a', groom, f1.id)
+    expect(() => setPersonCover('a', groom, f0.id)).toThrow()
+    assignFace('a', f1.id, { personId: bride })
+    rematchPeople('a') // Groom keeps one reference (photo 2), loses the cover
+    expect(getAlbumPeople('a').find((p) => p.id === groom)!.coverFaceId).toBeNull()
 
-    // Merge pins p1's faces to Bride and moves client links
-    setClientPerson('a', 'Anu', p1)
-    mergePeople('a', p0, [p1])
-    recluster('a')
-    people = getAlbumPeople('a')
-    expect(people).toHaveLength(1)
-    expect(people[0]).toMatchObject({ id: p0, name: 'Bride' })
-    expect(people[0].faces).toHaveLength(4)
-    expect(getClientPeople('a')).toEqual({ Anu: p0 })
+    // A person whose last reference goes is removed
+    assignFace('a', getImageFaces('a', i2)[1].id, { none: true })
+    rematchPeople('a')
+    expect(getAlbumPeople('a').map((p) => p.name)).toEqual(['Bride'])
 
-    expect(() => setPersonCover('a', p0, lone.id)).toThrow()
-    setPersonCover('a', p0, people[0].faces[1].id)
-
+    setClientPerson('a', 'Anu', bride)
     setPeopleEnabled('a', false)
     expect(getPeopleProgress('a')).toEqual({ enabled: false, processed: 0, total: 3 })
     expect(getImageFaces('a', i1)).toEqual([])
@@ -376,17 +428,73 @@ describe.skipIf(!loadable)('people', () => {
     closeDatabase()
   })
 
-  it('new named person from a face; photo deletion cascades', () => {
+  it('merge unions references and rejections; remove frees references', () => {
+    initDatabase(':memory:')
+    album('a')
+    const [i1, i2] = mk('a', 2)
+    setPeopleEnabled('a', true)
+    saveImageFaces(i1, [face(0), face(1), face(2)])
+    saveImageFaces(i2, [face(0), face(1)])
+    const [a0, a1, a2] = getImageFaces('a', i1)
+    const [b0, b1] = getImageFaces('a', i2)
+    const anna = assignFace('a', a0.id, { newName: 'Anna' })!
+    const anna2 = assignFace('a', a1.id, { newName: 'Anna 2' })!
+    assignFace('a', a2.id, { newName: 'Ben' })
+    reviewFaces('a', anna, [{ faceId: b1.id, yes: false }]) // b1 is not Anna...
+    reviewFaces('a', anna2, [{ faceId: b0.id, yes: false }]) // ...b0 is not Anna 2
+    rematchPeople('a')
+    expect(state('a', i2)).toEqual([
+      ['Anna', 'auto'],
+      ['Anna 2', 'auto']
+    ])
+    setClientPerson('a', 'Anu', anna2)
+
+    mergePeople('a', anna, [anna2])
+    rematchPeople('a')
+    const people = getAlbumPeople('a')
+    expect(people.map((p) => p.name)).toEqual(['Anna', 'Ben'])
+    expect(state('a', i1)).toEqual([
+      ['Anna', 'ref'],
+      ['Anna', 'ref'],
+      ['Ben', 'ref']
+    ])
+    // Both rejections now hold for Anna
+    expect(state('a', i2)).toEqual([
+      [null, null],
+      [null, null]
+    ])
+    expect(getClientPeople('a')).toEqual({ Anu: anna })
+
+    // Anna's own reference was once rejected for her: confirming it clears the rejection
+    assignFace('a', b1.id, { personId: anna })
+    rematchPeople('a')
+    expect(state('a', i2)[1]).toEqual(['Anna', 'ref'])
+
+    removePerson('a', anna)
+    rematchPeople('a')
+    renamePerson('a', people[1].id, 'Benny')
+    expect(getAlbumPeople('a').map((p) => p.name)).toEqual(['Benny'])
+    expect(state('a', i1)).toEqual([
+      [null, null],
+      [null, null],
+      ['Benny', 'ref']
+    ])
+    expect(getClientPeople('a')).toEqual({})
+    closeDatabase()
+  })
+
+  it('photo deletion cascades; a person without references goes', () => {
     initDatabase(':memory:')
     album('a')
     const [i1] = mk('a', 1)
     setPeopleEnabled('a', true)
     saveImageFaces(i1, [face(0)])
-    const f = getImageFaces('a', i1)[0]
-    const id = assignFace('a', f.id, { newName: 'Father' })!
-    expect(getAlbumPeople('a')).toMatchObject([{ id, name: 'Father' }]) // named: 1 face is enough
+    const id = assignFace('a', getImageFaces('a', i1)[0].id, { newName: 'Father' })!
+    expect(getAlbumPeople('a')).toMatchObject([{ id, name: 'Father' }])
     deleteImages([i1])
+    rematchPeople('a')
     expect(getAlbumPeople('a')).toEqual([])
+    expect(hasPerson('a', id)).toBe(false)
     closeDatabase()
   })
 })

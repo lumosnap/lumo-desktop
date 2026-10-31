@@ -294,7 +294,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           isBurstCover: is_burst_cover === 1,
           momentId: moment_id ?? null,
           tags: tags.get(row.id) ?? [], // effective: manual adds, then AI tags not removed
-          people: people.get(row.id) ?? [], // shown people (named, or unnamed with ≥2 faces)
+          people: people.get(row.id) ?? [], // people with a reference or auto face here
           isFavorite: false,
           favoriteCount: 0,
           notesCount: 0,

@@ -1,31 +1,30 @@
 /**
  * People: opt-in per album. Finds faces in the original photos (ML worker, after tagging, only
- * while uploads are idle), groups them into people, and pushes the photographer-named ones.
+ * while uploads are idle). The photographer picks faces to make people (references); every
+ * other face is matched to them (people-match.ts): auto, "Is this X?" review, or no one.
  * Face vectors never leave this computer: the server only gets names, photo ids and a cover box.
  */
 import { BrowserWindow } from 'electron'
-import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { basename, extname, join } from 'path'
 import {
-  applyPeopleAssignment,
   clearPeopleNeedPush,
   getAlbum,
+  getAlbumFaces,
   getAlbumImages,
   getAlbumPeople,
-  getFacesToCluster,
   getImagesToScanForFaces,
   getPeopleProgress,
   markPeopleDirty,
+  rematchPeople,
   saveImageFaces,
   setPeopleEnabled as dbSetPeopleEnabled,
   type FaceRow,
   type PersonRow
 } from './database'
-import { clusterInWorker, detectFaces, isMlPaused } from './ml/embedder'
+import { detectFaces, isMlOnBattery, isMlPaused } from './ml/embedder'
 import { ensureFaceModels } from './ml/model'
 import { frontalness } from './ml/faces'
-import { assignPeople, CLUSTER_THRESHOLD, FACE_DIM } from './people-cluster'
 import { uploadPipeline } from './pipeline'
 import { albumsApi } from './api-client'
 import { createLogger, getErrorMessage } from './logger'
@@ -40,17 +39,43 @@ export interface PeopleConfig {
   state: PeopleState
   processed: number
   total: number
+  onBattery: boolean // running unplugged (battery above the pause level)
 }
 export interface PersonSummary {
   id: string
-  name: string | null
+  name: string
   hidden: boolean
   photoCount: number
+  reviewCount: number
   cover: { imageId: number; path: string; box: Box }
+}
+export interface PickPhoto {
+  imageId: number
+  path: string
+  faceCount: number
+}
+export interface ReviewFace {
+  faceId: number
+  imageId: number
+  path: string
+  box: Box
+  score: number
 }
 
 let scanning: { albumId: string; waitingForUploads: boolean } | null = null
-const clusteredThisSession = new Set<string>()
+/** Review queues per album, from the last re-match. */
+const reviews = new Map<string, Map<string, Array<{ faceId: number; score: number }>>>()
+
+/** Re-match the album's faces to the references; call after every people change or scan batch. */
+export function rematch(albumId: string): Map<string, Array<{ faceId: number; score: number }>> {
+  const { changed, review } = rematchPeople(albumId)
+  reviews.set(albumId, review)
+  if (changed > 0) schedulePeoplePush(albumId)
+  return review
+}
+
+const reviewsFor = (albumId: string): Map<string, Array<{ faceId: number; score: number }>> =>
+  reviews.get(albumId) ?? rematch(albumId)
 
 export function notifyPeopleChanged(albumId: string): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -65,13 +90,14 @@ export function peopleConfig(albumId: string): PeopleConfig {
   else if (scanning?.albumId === albumId)
     state = scanning.waitingForUploads ? 'waiting' : isMlPaused() ? 'paused' : 'running'
   else state = processed >= total ? 'done' : 'waiting'
-  return { enabled, state, processed, total }
+  return { enabled, state, processed, total, onBattery: state === 'running' && isMlOnBattery() }
 }
 
 /** Off deletes all face data now and empties the server's people (debounced, retried). */
 export function setPeopleEnabled(albumId: string, enabled: boolean): PeopleConfig {
   if (!getAlbum(albumId)) throw new Error('Album not found')
   dbSetPeopleEnabled(albumId, enabled)
+  reviews.delete(albumId)
   schedulePeoplePush(albumId)
   notifyPeopleChanged(albumId)
   return peopleConfig(albumId)
@@ -93,39 +119,73 @@ const thumbnailPath = (localFolderPath: string, originalFilename: string): strin
     `${basename(originalFilename, extname(originalFilename))}.webp`
   )
 
-/** Named first (by name), then unnamed by photo count. */
-export function listPeople(albumId: string): PersonSummary[] {
+/** The thumbnail if there is one, else the local copy; local image id → path. */
+function imagePaths(albumId: string): Map<number, string> {
   const album = getAlbum(albumId)
-  if (!album) return []
-  const images = new Map(getAlbumImages(albumId).map((i) => [i.id, i]))
-  const people = getAlbumPeople(albumId).map((p) => {
-    const cover = coverFace(p)
-    const img = images.get(cover.imageId)!
-    const thumb = thumbnailPath(album.localFolderPath, img.originalFilename)
-    return {
-      id: p.id,
-      name: p.name,
-      hidden: p.hidden,
-      photoCount: new Set(p.faces.map((f) => f.imageId)).size,
-      cover: {
-        imageId: cover.imageId,
-        path: existsSync(thumb) ? thumb : img.localFilePath,
-        box: cover.box
-      }
-    }
-  })
-  return people.sort((a, b) =>
-    a.name != null && b.name != null
-      ? a.name.localeCompare(b.name)
-      : a.name != null
-        ? -1
-        : b.name != null
-          ? 1
-          : b.photoCount - a.photoCount
+  if (!album) return new Map()
+  return new Map(
+    getAlbumImages(albumId).map((i) => {
+      const thumb = thumbnailPath(album.localFolderPath, i.originalFilename)
+      return [i.id, existsSync(thumb) ? thumb : i.localFilePath]
+    })
   )
 }
 
-/** Person ids (shown people only, hidden included) per local image id. */
+/** All people (every person is named), by name. */
+export function listPeople(albumId: string): PersonSummary[] {
+  const paths = imagePaths(albumId)
+  const review = reviewsFor(albumId)
+  return getAlbumPeople(albumId)
+    .map((p) => {
+      const cover = coverFace(p)
+      return {
+        id: p.id,
+        name: p.name,
+        hidden: p.hidden,
+        photoCount: new Set(p.faces.map((f) => f.imageId)).size,
+        reviewCount: review.get(p.id)?.length ?? 0,
+        cover: { imageId: cover.imageId, path: paths.get(cover.imageId)!, box: cover.box }
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** "Is this X?" candidates, best first. */
+export function reviewQueue(albumId: string, personId: string, limit = 24): ReviewFace[] {
+  const queue = reviewsFor(albumId).get(personId)?.slice(0, limit) ?? []
+  const faces = new Map(getAlbumFaces(albumId).map((f) => [f.id, f]))
+  const paths = imagePaths(albumId)
+  return queue.flatMap(({ faceId, score }) => {
+    const f = faces.get(faceId)
+    return f ? [{ faceId, imageId: f.imageId, path: paths.get(f.imageId)!, box: f.box, score }] : []
+  })
+}
+
+/**
+ * Good photos to pick people from: many faces that are large, frontal and confident
+ * (group and family portraits win). Faces too small to click count for nothing.
+ * ponytail: heuristic weights eyeballed on LumoTest; no burst/duplicate spreading.
+ */
+export function pickPhotos(albumId: string, limit = 12): PickPhoto[] {
+  const byImage = new Map<number, { score: number; faceCount: number }>()
+  for (const f of getAlbumFaces(albumId)) {
+    const side = Math.sqrt(f.box[2] * f.box[3]) // fraction of the photo
+    const q =
+      side < 0.03 ? 0 : f.score * (0.25 + frontalness(f.landmarks)) * Math.min(1, side / 0.1)
+    const e = byImage.get(f.imageId) ?? { score: 0, faceCount: 0 }
+    e.score += q
+    e.faceCount++
+    byImage.set(f.imageId, e)
+  }
+  const paths = imagePaths(albumId)
+  return [...byImage]
+    .filter(([id, e]) => e.score > 0 && paths.has(id))
+    .sort((a, b) => b[1].score - a[1].score)
+    .slice(0, limit)
+    .map(([imageId, e]) => ({ imageId, path: paths.get(imageId)!, faceCount: e.faceCount }))
+}
+
+/** Person ids (reference or auto, hidden included) per local image id. */
 export function imagePeople(albumId: string): Map<number, string[]> {
   const out = new Map<number, string[]>()
   for (const p of getAlbumPeople(albumId)) {
@@ -138,29 +198,11 @@ export function imagePeople(albumId: string): Map<number, string[]> {
   return out
 }
 
-/** Re-cluster the album's faces (heavy part in the worker) and keep named people stable. */
-export async function reclusterAlbum(albumId: string): Promise<void> {
-  const faces = getFacesToCluster(albumId)
-  const vecs = new Float32Array(faces.length * FACE_DIM)
-  faces.forEach((f, i) => vecs.set(f.vec, i * FACE_DIM))
-  const labels = faces.length > 1 ? await clusterInWorker(vecs, CLUSTER_THRESHOLD) : [0]
-  const byFace = new Map(faces.map((f, i) => [f.id, labels[i]]))
-  const changed = applyPeopleAssignment(albumId, (all, persons) =>
-    assignPeople(all, byFace, persons, randomUUID)
-  )
-  if (changed > 0) {
-    log.info(`Re-clustered ${albumId}: ${changed} faces changed person`)
-    schedulePeoplePush(albumId)
-  }
-  notifyPeopleChanged(albumId)
-}
-
 const UPLOAD_POLL_MS = 5000
-// Interim re-clusters + UI refreshes every 100 photos, or every +25% so big albums stay O(final)
-const RECLUSTER_EVERY = 100
+const REMATCH_EVERY = 10 // photos per re-match + UI refresh while scanning
 
 /**
- * Detect faces in the album's unscanned photos, then re-cluster. Runs on the tagging chain
+ * Detect faces in the album's unscanned photos, matching them to people as they come. Runs on the tagging chain
  * (after tagging), so it never competes with SigLIP. Also retries a pending people push.
  */
 export async function scanFacesNow(albumId: string, cancelled: () => boolean): Promise<void> {
@@ -169,19 +211,12 @@ export async function scanFacesNow(albumId: string, cancelled: () => boolean): P
   if (!album) return
   if (album.people_enabled !== 1 || cancelled()) return pushPeople(albumId)
   const todo = getImagesToScanForFaces(albumId)
-  if (todo.length === 0) {
-    // Once per session: covers faces saved by a scan that was interrupted before re-clustering
-    if (!clusteredThisSession.has(albumId)) await reclusterAlbum(albumId)
-    clusteredThisSession.add(albumId)
-    return pushPeople(albumId)
-  }
+  if (todo.length === 0) return pushPeople(albumId)
 
   log.info(`Finding faces in ${todo.length} photos of ${albumId}`)
   scanning = { albumId, waitingForUploads: false }
   notifyPeopleChanged(albumId)
-  const { total } = getPeopleProgress(albumId)
   let since = 0
-  let done = 0
   let found = 0
   try {
     await ensureFaceModels() // download failure: abort, retry next session
@@ -206,14 +241,13 @@ export async function scanFacesNow(albumId: string, cancelled: () => boolean): P
       if (stop()) return
       saveImageFaces(img.id, faces)
       found += faces.length
-      done++
-      if (++since >= Math.max(RECLUSTER_EVERY, (total - todo.length + done) / 4)) {
+      if (++since >= REMATCH_EVERY) {
         since = 0
-        await reclusterAlbum(albumId)
-      } else if (since % 10 === 0) notifyPeopleChanged(albumId) // progress
+        rematch(albumId)
+        notifyPeopleChanged(albumId)
+      }
     }
-    await reclusterAlbum(albumId)
-    clusteredThisSession.add(albumId)
+    rematch(albumId)
     log.info(`Found ${found} faces in ${todo.length} photos of ${albumId}`)
   } finally {
     scanning = null
@@ -226,6 +260,7 @@ export async function scanFacesNow(albumId: string, cancelled: () => boolean): P
 export function peoplePhotosChanged(albumId: string): void {
   if (!getPeopleProgress(albumId).enabled) return
   markPeopleDirty(albumId)
+  rematch(albumId) // a deleted photo may have held a person's only reference
   schedulePeoplePush(albumId)
   notifyPeopleChanged(albumId)
 }
@@ -264,8 +299,8 @@ export function peoplePayload(albumId: string): {
   const serverId = new Map(getAlbumImages(albumId).map((i) => [i.id, i.serverId]))
   let complete = true
   const people = getAlbumPeople(albumId)
-    .filter((p) => p.name != null && !p.hidden)
-    .sort((a, b) => a.name!.localeCompare(b.name!))
+    .filter((p) => !p.hidden)
+    .sort((a, b) => a.name.localeCompare(b.name))
     .flatMap((p) => {
       const uploaded = p.faces.filter((f) => serverId.get(f.imageId) != null)
       if (uploaded.length < p.faces.length) complete = false
@@ -274,7 +309,7 @@ export function peoplePayload(albumId: string): {
       return [
         {
           id: p.id,
-          name: p.name!,
+          name: p.name,
           coverImageId: serverId.get(cover.imageId)!,
           box: cover.box,
           imageIds: [...new Set(uploaded.map((f) => serverId.get(f.imageId)!))]

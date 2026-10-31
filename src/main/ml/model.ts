@@ -42,11 +42,12 @@ const YUNET: ModelFile = {
   sha256: '8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4',
   size: 232589
 }
-const SFACE: ModelFile = {
-  path: 'faces/face_recognition_sface_2021dec_int8.onnx',
-  url: 'https://huggingface.co/opencv/face_recognition_sface/resolve/3d7082438a6e4551e840c9b2bb60b71e8da4b524/face_recognition_sface_2021dec_int8.onnx',
-  sha256: '2b0e941e6f16cc048c20aee0c8e31f569118f65d702914540f7bfdc14048d78a',
-  size: 9896933
+// fp32, not the int8 build: ~8x faster on CPU (int8 conv kernels are slow in ORT) and full precision
+export const SFACE: ModelFile = {
+  path: 'faces/face_recognition_sface_2021dec.onnx',
+  url: 'https://huggingface.co/opencv/face_recognition_sface/resolve/3d7082438a6e4551e840c9b2bb60b71e8da4b524/face_recognition_sface_2021dec.onnx',
+  sha256: '0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79',
+  size: 38696353
 }
 const ATTEMPTS = 5
 
