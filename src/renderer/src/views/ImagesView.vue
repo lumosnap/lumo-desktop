@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import Modal from '../components/ui/Modal.vue'
 import NotesSidebar from '../components/NotesSidebar.vue'
+import PeoplePick from '../components/PeoplePick.vue'
+import PeopleReview from '../components/PeopleReview.vue'
 import { toast } from '../composables/useToast'
 import { useNetworkStore } from '../stores/network'
 import {
@@ -29,6 +31,7 @@ import {
   SlidersHorizontal,
   ScanFace,
   UserRound,
+  EyeOff,
   Image as ImageIcon
 } from 'lucide-vue-next'
 import PhotoTile from '../components/PhotoTile.vue'
@@ -70,6 +73,8 @@ import {
   withPeople,
   type Box,
   type Face,
+  type FaceTarget,
+  type PeopleApi,
   type PeopleConfig,
   type Person
 } from '../utils/people'
@@ -639,48 +644,47 @@ async function saveTagSet(): Promise<void> {
 }
 
 // People: faces found on this computer. Off per album until the photographer turns it on.
-const peopleApi = window.api.people
+const peopleApi: PeopleApi | undefined = window.api.people
 const peopleCfg = ref<PeopleConfig | null>(null)
-const people = ref<Person[]>([])
+const people = ref<Person[]>([]) // named people only
 const activePeople = ref<string[]>([])
 const lastPerson = ref<string | null>(null) // the person the detail line under the faces is about
-const showHiddenPeople = ref(false)
-const showAllUnnamed = ref(false)
 const clientLinks = ref<Record<string, string>>({})
 const showPeopleOn = ref(false)
 const showPeopleOff = ref(false)
 const peopleBusy = ref(false)
+const showPick = ref(false)
+const reviewing = ref<Person | null>(null)
+const personToRemove = ref<Person | null>(null)
+const lastViewedId = ref<number | null>(null) // offered first in the pick view
 
 const imageById = computed(() => new Map(images.value.map((img) => [img.id, img])))
 const personById = computed(() => new Map(people.value.map((p) => [p.id, p])))
-const named = computed(() => people.value.filter((p) => p.name && !p.hidden))
-const unnamed = computed(() => people.value.filter((p) => !p.name && !p.hidden))
-const hiddenPeople = computed(() => people.value.filter((p) => p.hidden))
-const UNNAMED_SHOWN = 5
-const unnamedShown = computed(() =>
-  showAllUnnamed.value ? unnamed.value : unnamed.value.slice(0, UNNAMED_SHOWN)
-)
+const toCheck = computed(() => people.value.filter((p) => p.reviewCount > 0))
+const mergeAsk = ref<{ from: Person; into: Person } | null>(null)
 const focusPerson = computed(() =>
   lastPerson.value && activePeople.value.includes(lastPerson.value)
     ? (personById.value.get(lastPerson.value) ?? null)
     : null
 )
-const personName = (p: Person | undefined | null): string => p?.name ?? 'Unnamed'
-function peopleNames(ids: readonly string[]): string {
-  const ps = ids.map((id) => personById.value.get(id))
-  const names = ps.flatMap((p) => (p?.name ? [firstName(p.name)] : []))
-  const rest = ps.length - names.length
-  if (!names.length) return rest === 1 ? 'an unnamed person' : `${nf(rest)} unnamed people`
-  return [...names, ...(rest ? [`${nf(rest)} unnamed`] : [])].join(' + ')
+const personName = (p: Person | undefined | null): string => p?.name ?? 'This person'
+const peopleNames = (ids: readonly string[]): string =>
+  ids.flatMap((id) => personById.value.get(id)?.name.split(' ')[0] ?? []).join(' + ')
+const photoAspect = (id: number): number => {
+  const img = imageById.value.get(id)
+  return img?.width && img.height ? img.width / img.height : 0
+}
+const pickPhoto = (id: number): { src: string; aspect: number } | null => {
+  const img = imageById.value.get(id)
+  return img ? { src: `file://${img.localFilePath}`, aspect: photoAspect(id) || 1.5 } : null
 }
 
 /** Inline style that turns a .avatar into the person's face, cut from the cover thumbnail */
 function faceStyle(p: Person | undefined | null): Record<string, string> | undefined {
   if (!p) return undefined
-  const img = imageById.value.get(p.cover.imageId)
   return {
     backgroundImage: `url(${JSON.stringify(`file://${p.cover.path}`)})`,
-    ...faceCrop(p.cover.box as Box, img?.width && img.height ? img.width / img.height : 0)
+    ...faceCrop(p.cover.box as Box, photoAspect(p.cover.imageId))
   }
 }
 
@@ -771,14 +775,14 @@ async function afterPeopleEdit(): Promise<void> {
   renderLbFaces()
 }
 
-function namePerson(p: Person, e?: Event): void {
+function renamePerson(p: Person, e?: Event): void {
   promptName(
-    p.name ? 'Rename' : 'Who is this?',
-    p.name ?? '',
+    'Rename',
+    p.name,
     async (name) => {
       // A name already in use means the same person: merge, so there are never two Rahuls
-      const same = named.value.find(
-        (x) => x.id !== p.id && x.name!.toLowerCase() === name.toLowerCase()
+      const same = people.value.find(
+        (x) => x.id !== p.id && x.name.toLowerCase() === name.toLowerCase()
       )
       if (same) return mergePerson(p, same).then(() => true)
       const ok = await peopleCall(() => peopleApi!.rename(albumId, p.id, name), 'save the name')
@@ -800,20 +804,34 @@ async function mergePerson(from: Person, into: Person): Promise<void> {
   }
 }
 
+// Hidden: the photographer still sees and filters them; the client gallery does not show them
 async function hidePerson(p: Person, hidden: boolean): Promise<void> {
   closePop()
   if (!(await peopleCall(() => peopleApi!.setHidden(albumId, p.id, hidden), 'update'))) return
-  if (hidden) {
-    activePeople.value = activePeople.value.filter((id) => id !== p.id)
-    toast(`${personName(p)} is hidden`, { label: 'Undo', run: () => hidePerson(p, false) })
-  }
+  if (hidden)
+    toast(`${firstName(p.name)} is hidden from your client`, {
+      label: 'Undo',
+      run: () => hidePerson(p, false)
+    })
   await afterPeopleEdit()
+}
+
+async function removePerson(): Promise<void> {
+  const p = personToRemove.value
+  if (!p || peopleBusy.value) return
+  peopleBusy.value = true
+  if (await peopleCall(() => peopleApi!.remove(albumId, p.id), 'remove')) {
+    personToRemove.value = null
+    activePeople.value = activePeople.value.filter((id) => id !== p.id)
+    await afterPeopleEdit()
+  }
+  peopleBusy.value = false
 }
 
 const mergeTargets = computed(() => {
   const p = pop.value
   if (p?.kind !== 'merge') return []
-  return people.value.filter((x) => x.id !== p.person.id && !x.hidden)
+  return people.value.filter((x) => x.id !== p.person.id)
 })
 
 // Client link: which named person a client is. Only the photographer sees it.
@@ -865,6 +883,7 @@ async function renderLbFaces(): Promise<void> {
     const b = document.createElement('button')
     b.type = 'button'
     b.className = 'lb-face' + (f.personId ? '' : ' none')
+    const sure = f.source === 'ref' ? '' : '?'
     const [x, y, w, h] = f.box
     Object.assign(b.style, {
       left: `${x * 100}%`,
@@ -873,10 +892,10 @@ async function renderLbFaces(): Promise<void> {
       height: `${h * 100}%`
     })
     b.setAttribute('aria-haspopup', 'dialog')
-    b.setAttribute('aria-label', f.name ? `${f.name}, change` : 'Who is this?')
+    b.setAttribute('aria-label', f.name ? `${f.name}${sure}, change` : 'Who is this?')
     if (f.name) {
       const n = document.createElement('span')
-      n.textContent = firstName(f.name)
+      n.textContent = firstName(f.name) + sure
       b.append(n)
     }
     // PhotoSwipe reads a press on the photo as zoom or close
@@ -887,9 +906,7 @@ async function renderLbFaces(): Promise<void> {
   slide.container.append(layer)
 }
 
-async function assignFace(
-  to: { personId: string } | { newName: string } | { none: true }
-): Promise<boolean> {
+async function assignFace(to: FaceTarget): Promise<boolean> {
   const p = pop.value
   if (p?.kind !== 'face') return false
   const ok = await peopleCall(() => peopleApi!.assignFace(albumId, p.face.faceId, to), 'save')
@@ -1419,6 +1436,7 @@ function initLightbox(): void {
         c.className = 'c num'
         el.append(f, c)
         pswp.on('change', () => {
+          lastViewedId.value = slideImage(pswp)?.id ?? null
           f.textContent = slideImage(pswp)?.originalFilename || ''
           c.textContent = `${pswp.currIndex + 1} / ${nf(pswp.getNumItems())}`
         })
@@ -1703,7 +1721,7 @@ onUnmounted(() => {
                   <span class="n num">{{ nf(clientCounts[name] || 0) }}</span>
                 </button>
                 <button
-                  v-if="peopleCfg?.enabled && named.length"
+                  v-if="peopleCfg?.enabled && people.length"
                   class="icon-btn sm plain link-face"
                   :class="{ on: !!linkedPerson(name) }"
                   aria-haspopup="menu"
@@ -1759,7 +1777,7 @@ onUnmounted(() => {
               </div>
               <p class="faces-note num" aria-live="polite">
                 <template v-if="peopleCfg.state === 'paused'">
-                  Paused to keep your computer cool and its battery up. It resumes on its own.
+                  Paused until your Mac is plugged in or cooler. It goes on by itself.
                 </template>
                 <template v-else-if="peopleCfg.state === 'waiting'">
                   Starts when the photos are in.
@@ -1768,96 +1786,81 @@ onUnmounted(() => {
                   Finding faces · {{ nf(peopleCfg.processed) }} of {{ photos(peopleCfg.total) }}
                 </template>
               </p>
+              <p v-if="peopleCfg.onBattery" class="faces-note">On battery. It pauses below 40%.</p>
             </div>
 
-            <p v-if="peopleCfg.state === 'done' && !people.length" class="faces-note">
-              No faces found in these photos.
-            </p>
+            <button
+              v-if="!people.length"
+              class="btn sm ghost pick-start"
+              aria-haspopup="dialog"
+              @click="showPick = true"
+            >
+              <ScanFace />Pick people from a photo
+            </button>
 
-            <div v-if="named.length" class="faces" role="group" aria-label="People">
+            <div v-else class="faces" role="group" aria-label="People">
               <button
-                v-for="p in named"
+                v-for="p in people"
                 :key="p.id"
                 class="face-btn"
                 :aria-pressed="activePeople.includes(p.id)"
-                :title="`${p.name} · ${photos(p.photoCount)}`"
+                :title="`${p.name} · ${photos(p.photoCount)}${p.hidden ? ' · hidden from your client' : ''}`"
                 :aria-label="`${p.name}, ${photos(p.photoCount)}`"
                 @click="togglePerson(p.id)"
                 @contextmenu.prevent="openPop({ kind: 'person', person: p }, $event)"
               >
                 <span class="avatar face" :style="faceStyle(p)"></span>
-                <span class="face-n">{{ firstName(p.name!) }}</span>
+                <span class="face-n"><EyeOff v-if="p.hidden" />{{ firstName(p.name) }}</span>
+              </button>
+              <button
+                class="face-btn face-add"
+                aria-haspopup="dialog"
+                aria-label="Add people from a photo"
+                title="Add people from a photo"
+                @click="showPick = true"
+              >
+                <span class="avatar"><Plus /></span>
+                <span class="face-n">Add</span>
               </button>
             </div>
 
-            <template v-if="unnamed.length">
-              <div class="faces-sub">
-                {{ named.length ? 'Not named yet' : 'Name the people who matter most' }}
-              </div>
-              <div class="faces small" role="group" aria-label="People not named yet">
-                <button
-                  v-for="(p, i) in unnamedShown"
-                  :key="p.id"
-                  class="face-btn"
-                  :aria-pressed="activePeople.includes(p.id)"
-                  :aria-label="`Unnamed person ${i + 1}, ${photos(p.photoCount)}`"
-                  :title="photos(p.photoCount)"
-                  @click="togglePerson(p.id)"
-                  @contextmenu.prevent="openPop({ kind: 'person', person: p }, $event)"
-                >
-                  <span class="avatar face" :style="faceStyle(p)"></span>
-                </button>
-                <button
-                  v-if="unnamed.length > UNNAMED_SHOWN"
-                  class="face-more num"
-                  @click="showAllUnnamed = !showAllUnnamed"
-                >
-                  {{ showAllUnnamed ? 'Fewer' : `+${nf(unnamed.length - UNNAMED_SHOWN)}` }}
-                </button>
-              </div>
-            </template>
+            <!-- Faces the app is not sure about: work that can wait, so a quiet line, not a badge -->
+            <div v-if="toCheck.length" class="faces-check">
+              <span>To check</span>
+              <button
+                v-for="p in toCheck"
+                :key="p.id"
+                class="link num"
+                aria-haspopup="dialog"
+                :aria-label="`Check ${nf(p.reviewCount)} faces of ${p.name}`"
+                @click="reviewing = p"
+              >
+                {{ firstName(p.name) }} {{ nf(p.reviewCount) }}
+              </button>
+            </div>
 
-            <!-- The person whose photos are shown: name them here, while their photos are in view -->
+            <!-- The person whose photos are shown: check their faces and change them here -->
             <div v-if="focusPerson" class="face-focus">
-              <span class="t">{{ personName(focusPerson) }}</span>
+              <span class="t">{{ focusPerson.name }}</span>
               <span class="n num">{{ photos(focusPerson.photoCount) }}</span>
               <button
-                v-if="!focusPerson.name"
+                v-if="focusPerson.reviewCount"
                 class="btn sm ghost"
                 aria-haspopup="dialog"
-                @click="namePerson(focusPerson, $event)"
+                @click="reviewing = focusPerson"
               >
-                Name…
+                Check {{ nf(focusPerson.reviewCount) }}
               </button>
               <button
                 class="icon-btn sm plain"
                 aria-haspopup="menu"
                 :aria-expanded="pop?.kind === 'person'"
-                :aria-label="`Options for ${personName(focusPerson)}`"
-                :title="`Options for ${personName(focusPerson)}`"
+                :aria-label="`Options for ${focusPerson.name}`"
+                :title="`Options for ${focusPerson.name}`"
                 @click="openPop({ kind: 'person', person: focusPerson }, $event)"
               >
                 <MoreHorizontal />
               </button>
-            </div>
-
-            <div v-if="hiddenPeople.length" class="faces-hidden">
-              <button class="link" @click="showHiddenPeople = !showHiddenPeople">
-                {{ showHiddenPeople ? 'Hide' : 'Show' }} {{ nf(hiddenPeople.length) }} hidden
-                {{ hiddenPeople.length === 1 ? 'person' : 'people' }}
-              </button>
-              <div v-if="showHiddenPeople" class="faces small" role="group" aria-label="Hidden">
-                <button
-                  v-for="p in hiddenPeople"
-                  :key="p.id"
-                  class="face-btn"
-                  :aria-label="`Show ${personName(p)} again`"
-                  :title="`Show ${personName(p)} again`"
-                  @click="hidePerson(p, false)"
-                >
-                  <span class="avatar face" :style="faceStyle(p)"></span>
-                </button>
-              </div>
             </div>
           </template>
         </div>
@@ -2209,46 +2212,47 @@ onUnmounted(() => {
           </div>
         </form>
         <template v-else-if="pop.kind === 'person'">
-          <button role="menuitem" @click="namePerson(pop.person)">
-            <Pencil />{{ pop.person.name ? 'Rename…' : 'Name…' }}
+          <button
+            v-if="pop.person.reviewCount"
+            role="menuitem"
+            @click="((reviewing = pop.person), closePop())"
+          >
+            <ScanFace />Check {{ nf(pop.person.reviewCount) }} faces…
           </button>
-          <button role="menuitem" @click="openPop({ kind: 'merge', person: pop.person })">
-            <UserRound />Same person as…
+          <button role="menuitem" @click="renamePerson(pop.person)"><Pencil />Rename…</button>
+          <button
+            v-if="people.length > 1"
+            role="menuitem"
+            @click="openPop({ kind: 'merge', person: pop.person })"
+          >
+            <UserRound />Merge with…
+          </button>
+          <button role="menuitem" @click="hidePerson(pop.person, !pop.person.hidden)">
+            <EyeOff />{{
+              pop.person.hidden ? 'Show in client gallery' : 'Hide from client gallery'
+            }}
           </button>
           <hr />
-          <button role="menuitem" @click="hidePerson(pop.person, true)"><X />Not important</button>
+          <button role="menuitem" class="bad" @click="((personToRemove = pop.person), closePop())">
+            <Trash2 />Remove person…
+          </button>
         </template>
         <template v-else-if="pop.kind === 'merge'">
-          <div class="pick-h">Same person as</div>
+          <div class="pick-h">Merge {{ firstName(pop.person.name) }} with</div>
           <button
-            v-for="p in mergeTargets.filter((x) => x.name)"
+            v-for="p in mergeTargets"
             :key="p.id"
             role="menuitem"
-            @click="mergePerson(pop.person, p)"
+            @click="((mergeAsk = { from: pop.person, into: p }), closePop())"
           >
             <span class="avatar face xs" :style="faceStyle(p)"></span>{{ p.name
             }}<span class="n num">{{ nf(p.photoCount) }}</span>
           </button>
-          <template v-if="mergeTargets.some((x) => !x.name)">
-            <div class="pick-h">Not named yet</div>
-            <div class="merge-faces">
-              <button
-                v-for="(p, i) in mergeTargets.filter((x) => !x.name)"
-                :key="p.id"
-                role="menuitem"
-                :aria-label="`Unnamed person ${i + 1}, ${photos(p.photoCount)}`"
-                :title="photos(p.photoCount)"
-                @click="mergePerson(pop.person, p)"
-              >
-                <span class="avatar face" :style="faceStyle(p)"></span>
-              </button>
-            </div>
-          </template>
         </template>
         <template v-else-if="pop.kind === 'face'">
           <div class="pick-h">Who is this?</div>
           <button
-            v-for="p in named"
+            v-for="p in people"
             :key="p.id"
             role="menuitem"
             :aria-current="pop.face.personId === p.id || undefined"
@@ -2271,7 +2275,7 @@ onUnmounted(() => {
         <template v-else-if="pop.kind === 'link'">
           <div class="pick-h">Which person is {{ firstName(pop.client) }}?</div>
           <button
-            v-for="p in named"
+            v-for="p in people"
             :key="p.id"
             role="menuitem"
             @click="linkClient(pop.client, p.id)"
@@ -2453,6 +2457,67 @@ onUnmounted(() => {
         </button>
       </template>
     </Modal>
+
+    <Modal
+      :show="!!personToRemove"
+      :title="`Remove ${personToRemove?.name ?? ''}?`"
+      @close="!peopleBusy && (personToRemove = null)"
+    >
+      <p>
+        The photos stay. The name goes, here and in your client's gallery, and
+        {{ firstName(personToRemove?.name ?? '') }}'s faces are no longer matched.
+      </p>
+      <template #footer>
+        <button class="btn ghost" :disabled="peopleBusy" autofocus @click="personToRemove = null">
+          Cancel
+        </button>
+        <button class="btn danger" :disabled="peopleBusy" @click="removePerson">
+          <span v-if="peopleBusy" class="spin"></span>Remove
+        </button>
+      </template>
+    </Modal>
+
+    <Modal
+      :show="!!mergeAsk"
+      :title="`Merge ${firstName(mergeAsk?.from.name ?? '')} into ${mergeAsk?.into.name ?? ''}?`"
+      @close="mergeAsk = null"
+    >
+      <p>
+        {{ mergeAsk?.from.name }}'s faces become {{ mergeAsk?.into.name }}'s, here and in your
+        client's gallery. There is no undo.
+      </p>
+      <template #footer>
+        <button class="btn ghost" autofocus @click="mergeAsk = null">Cancel</button>
+        <button
+          class="btn primary"
+          @click="mergeAsk && (mergePerson(mergeAsk.from, mergeAsk.into), (mergeAsk = null))"
+        >
+          Merge
+        </button>
+      </template>
+    </Modal>
+
+    <PeoplePick
+      v-if="showPick && peopleApi"
+      :album-id="albumId"
+      :api="peopleApi"
+      :people="people"
+      :photo="pickPhoto"
+      :face-style="faceStyle"
+      :last-viewed-id="lastViewedId"
+      @changed="afterPeopleEdit"
+      @close="showPick = false"
+    />
+    <PeopleReview
+      v-if="reviewing && peopleApi"
+      :album-id="albumId"
+      :api="peopleApi"
+      :person="reviewing"
+      :aspect="photoAspect"
+      :face-style="faceStyle"
+      @changed="afterPeopleEdit"
+      @close="reviewing = null"
+    />
 
     <NotesSidebar
       :is-open="showNotesSidebar"
@@ -2799,11 +2864,6 @@ onUnmounted(() => {
   gap: 12px 4px;
   margin-top: 12px;
 }
-.faces.small {
-  grid-template-columns: repeat(auto-fill, 32px);
-  gap: 8px;
-  margin-top: 8px;
-}
 .face-btn {
   display: grid;
   justify-items: center;
@@ -2822,10 +2882,6 @@ onUnmounted(() => {
   width: 44px;
   height: 44px;
   transition: box-shadow 0.12s var(--ease);
-}
-.faces.small .avatar {
-  width: 32px;
-  height: 32px;
 }
 .face-btn:hover .avatar {
   box-shadow:
@@ -2855,23 +2911,44 @@ onUnmounted(() => {
 .face-btn[aria-pressed='true'] .face-n {
   color: var(--ink);
 }
-.faces-sub {
+.face-btn {
+  position: relative;
+}
+.faces-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
   margin-top: 16px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-3);
 }
-.face-more {
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--inset);
-  color: var(--ink-2);
-  font-size: 11px;
-  padding: 0;
+.face-n svg {
+  width: 12px;
+  height: 12px;
+  margin-right: 3px;
+  vertical-align: -1px;
+  color: var(--ink-3);
 }
-.face-more:hover {
-  background: var(--inset-2);
+.face-add .avatar {
+  background: none;
+  border: 1.5px dashed var(--line-2);
+  color: var(--ink-3);
+}
+.face-add .avatar svg {
+  width: 18px;
+  height: 18px;
+}
+.face-add:hover .avatar {
+  border-color: var(--ink-3);
+  color: var(--ink);
+  box-shadow: none;
+}
+.face-add .face-n {
+  color: var(--ink-3);
+}
+.pick-start {
+  margin-top: 12px;
 }
 .face-focus {
   display: flex;
@@ -2899,13 +2976,6 @@ onUnmounted(() => {
   height: 28px;
   padding: 0 12px;
 }
-.faces-hidden {
-  margin-top: 16px;
-  font-size: 12px;
-}
-.faces-hidden .avatar {
-  opacity: 0.5;
-}
 .menu .avatar.xs {
   width: 24px;
   height: 24px;
@@ -2915,18 +2985,6 @@ onUnmounted(() => {
   width: 16px;
   height: 16px;
   color: var(--brand);
-}
-.merge-faces {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, 40px);
-  gap: 4px;
-  padding: 0 8px 4px;
-}
-.menu .merge-faces button {
-  width: 40px;
-  height: 40px;
-  padding: 4px;
-  border-radius: 50%;
 }
 .pick-people {
   max-height: min(420px, 60vh);

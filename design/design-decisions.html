@@ -174,6 +174,50 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-10-31-people-pick">
+<h2>Session 2026-10-31 (5): People, pick from a photo</h2>
+<p>Existing work, Revamp level, flow scope: the People card, a new "pick people from a photo" view, a new "Is this Anjali?" check, and the person menu. The look is kept. The flow changes: the app no longer shows a wall of faces with no names. The photographer names the 4 to 8 people who matter on one group photo, and the app finds their other faces. Screens: 960 px to 2560 px, desktop only.</p>
+<ul>
+<li><b>For:</b> the photographer after the edit, with a client who asks "send me all the photos of my father".</li>
+<li><b>Job:</b> name a few people fast, then filter by them. Fix the doubtful matches in batches, not one by one.</li>
+<li><b>Signature moment:</b> naming on the photo. Type a name, press Enter, and the next face opens. Seven faces take seven names and seven Enters.</li>
+<li><b>Direction:</b> kept: delivery tracking. Naming happens on the photo, like writing names on the back of a print. The check is a contact sheet of face crops.</li>
+<li><b>Mutation:</b> no "Not named yet" faces at all. The app shows only people the photographer named.</li>
+<li><b>Ending:</b> naming ends with "Everyone here is named" and focus on Done. The check ends with the toast "Anjali's faces are all checked" and the count goes away from the avatar.</li>
+</ul>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Card with no names yet</td><td>One outline pill, "Pick people from a photo", under the progress bar. Nothing else</td><td>The photographer cares about 4 to 8 people, not 60 clusters. One action says where to start. It works during the face search too, on the photos that are done</td><td class="rejected">The "Not named yet" wall of small faces (removed); a black pill (the card is not the main job of the page)</td></tr>
+<tr><td>Pick view</td><td>A large white dialog: 6 suggested photos in 3 columns, each with "7 faces". The photo last opened in the lightbox comes first, as "Last opened · 3 faces"</td><td>A group photo with the family is the fastest place to name them. White like every other dialog in the app. "Last opened" is the "use the photo I'm viewing" path without a new lightbox button</td><td class="rejected">A step-by-step wizard; a new lightbox button</td></tr>
+<tr><td>Face boxes</td><td>Dashed white = no name. Solid with a white name chip = named by you. Dashed with a white chip and "?" ("Anjali?") = the app's guess. The face being named has a thicker ring</td><td>Three states, three looks, readable over any photo. The question mark says "guess" with no legend. The same "?" shows in the lightbox Faces mode</td><td class="rejected">Colour for each state (would compete with the photo)</td></tr>
+<tr><td>Name field</td><td>A small card at the face: field "Who is this?", matching people with their face, then "New person “…”". Typing selects the top row and Enter takes it. On a guess the guessed person is already selected, so Enter accepts it. With nothing typed or selected, Enter skips the face. Arrows move. "Not Anjali" (grey text) when the face has a name. The footer says "Enter saves and goes to the next face · with no name, skips it"</td><td>Typing is faster than hunting in a list. A typed name that already exists joins that person, so there are never two Rahuls. The field sits under the face, or over it near the bottom, so the face stays in view</td><td class="rejected">A side list of faces; a select</td></tr>
+<tr><td>Save</td><td>Each name saves at once and the next face without a name opens. Done only closes</td><td>Nothing is lost if the photographer stops halfway. No "Save all" to forget</td><td class="rejected">Collect names and save on Done</td></tr>
+<tr><td>Reading order</td><td>Rows top to bottom, each row left to right (<code>byPosition</code>)</td><td>Group photos have a standing row and a seated row. The next face is the one the eye expects</td><td class="rejected">Left to right only (jumped between rows)</td></tr>
+<tr><td>Count to check</td><td>A quiet line under the faces: "To check  Anjali 37  Meera 12", each a link to the check. "Check 37" also shows in the person line and in the person menu</td><td>It is work that can wait, not an alarm. Words, not a bare number: a number on an avatar reads as a photo count</td><td class="rejected">A grey badge on the avatar (tried first; the critique read it as a photo count and the check was found only after a click); a red badge</td></tr>
+<tr><td>"Is this Anjali?"</td><td>A white dialog with Anjali's face and a grid of 112 px face crops (24 a batch), cut from thumbnails with <code>faceCrop</code>. All are yes. A click (or N) marks "Not Anjali": grey, faded, with a white "× Not Anjali" chip. Click again to undo. Footer: "22 yes · 2 no · 13 more after these" and the black pill "Save 22 as Anjali"</td><td>Most guesses are right, so the photographer only touches the wrong ones. One Confirm sends the batch; the next batch loads until none are left. Faded plus words plus a mark, not colour alone</td><td class="rejected">Yes and No buttons on each face; one face at a time</td></tr>
+<tr><td>Keyboard in the check</td><td>Arrows move. Y and N answer and go to the next face. Space flips one. After the last face, focus goes to Confirm. The footer shows "Y yes N no"</td><td>A batch of 24 is done with the left hand. The hint is short and quiet, so the keys are found without a tour</td><td class="rejected">No hint; a help popover</td></tr>
+<tr><td>Person menu</td><td>Check N faces… (when there are any), Rename…, Merge with…, Hide from client gallery (or Show in client gallery), Remove person… (red, with a confirm)</td><td>"Hide" now says where it hides. A hidden person stays in your card with a small eye-off icon by the name, because you can still filter by them. Remove deletes the name and the matches online too, so it gets a confirm</td><td class="rejected">"Not important" (unclear: hidden from whom?)</td></tr>
+<tr><td>Merge with…</td><td>A list of the other people, then a confirm "Merge Anjali into Rahul Nair?" that says there is no undo</td><td>Merge cannot be undone and the direction matters. One stray Enter in the menu must not join two people</td><td class="rejected">Merge on the click</td></tr>
+<tr><td>Battery</td><td>Under the progress line: "On battery. It pauses below 40%." Paused says "Paused until your Mac is plugged in or cooler. It goes on by itself."</td><td>A fact and what happens next, in the same grey as the progress line. No action is needed, so no warning colour</td><td class="rejected">An amber warning; a battery icon</td></tr>
+<tr><td>Add people later</td><td>A dashed "+ Add" circle at the end of the faces row</td><td>It sits where the next face goes. The same pick view opens</td><td class="rejected">A text link under the faces</td></tr>
+</table>
+<h3>Motion</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th></tr>
+<tr><td>Pick view and check open</td><td>transition</td><td>the app's dialog pop, 220 ms</td></tr>
+<tr><td>Next face after Enter, face marked no</td><td>micro</td><td>instant ring move; crop fades 120 ms. Frequent and keyboard-driven</td></tr>
+<tr><td>Photo tile hover</td><td>micro</td><td>scale 1.02, 220 ms</td></tr>
+<tr><td>Next batch of faces</td><td>none</td><td>grey squares while it loads, then the faces</td></tr>
+</table>
+<h3>States</h3>
+<p>Pick view: loading (6 grey tiles), no photos with faces ("No photos with faces yet. Try again when more photos are done."), a photo with no faces ("No faces found in this photo"), save failed (toast, the field stays open). Check: loading (12 grey squares), load failed (toast, dialog closes), confirm failed (toast, the answers stay).</p>
+<h3>Mechanics</h3>
+<p>The pick view and the check are native <code>&lt;dialog&gt;</code> elements in the top layer, so they also work over the lightbox. The large photo uses container units (<code>min(100cqw, 100cqh * ratio)</code>) so the face boxes in % sit on the photo at every window size. IPC gets only plain values (ids, strings, a new array from <code>decisions()</code>). The new calls (<code>pickPhotos</code>, <code>reviewQueue</code>, <code>review</code>, <code>remove</code>) are typed in <code>utils/people.ts</code> as <code>PeopleApi</code>; the view casts <code>window.api.people</code> to it until preload declares them.</p>
+<h3>Checks</h3>
+<p>Vitest: <code>byPosition</code>, <code>nextToName</code>, <code>matchPeople</code>, <code>decisions</code>, <code>gridMove</code>, and the earlier <code>faceCrop</code> and <code>withPeople</code>. Rendered in headless Chromium with a mocked <code>window.api</code> that refuses to clone Vue proxies, as contextBridge does, at 1280 × 860 and 960 × 860: running, pick view, naming (new, match, guess), all named, card with counts, lightbox Faces, last opened, check, next batch, menu, merge, remove. <code>check.py</code>: 0 errors. A fresh reviewer read the captures. Fixed from its list: guesses looked the same as names (now dashed), the check was found only after a click (now a "To check" line), Confirm said nothing ("Save 22 as Anjali"), "Later" and the back arrow did the same as other buttons (removed), merge had no confirm, Tab was taken over to skip a face (Tab moves focus again; empty Enter skips), red on "Not Anjali" meant delete elsewhere (now ink), the pick view had its own grey surface (now white like every dialog). Kept: the name field can cover the next face in a crowded photo; it moves with each face, and Esc hides it. Counts that did not agree were mock data. Not done: the real Electron window with real face data.</p>
+</article>
+
 <article id="session-2026-10-31-people">
 <h2>Session 2026-10-31 (4): People, v1</h2>
 <p>Existing work, Minimal level, component scope: a People card in the album side panel, a Faces mode in the lightbox, and a face link for each client in "Picked by". People is off for each album until the photographer turns it on. Faces are found on this computer. Screens: 960 px to 2560 px, desktop only.</p>

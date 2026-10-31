@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { faceCrop, withPeople } from './people'
+import {
+  faceCrop,
+  withPeople,
+  byPosition,
+  nextToName,
+  matchPeople,
+  decisions,
+  gridMove,
+  type Box
+} from './people'
 import { withTags } from './tags'
 
 describe('faceCrop', () => {
@@ -56,5 +65,79 @@ describe('withPeople', () => {
 
   it('composes with tags (AND)', () => {
     expect(ids(withTags(withPeople(imgs, ['a']), ['stage']))).toEqual([1])
+  })
+})
+
+describe('byPosition and nextToName', () => {
+  const f = (x: number, source: 'ref' | 'auto' | null): { box: Box; source: typeof source } => ({
+    box: [x, 0.2, 0.1, 0.1],
+    source
+  })
+
+  it('orders faces left to right', () => {
+    expect(byPosition([f(0.6, null), f(0.1, null), f(0.3, null)]).map((x) => x.box[0])).toEqual([
+      0.1, 0.3, 0.6
+    ])
+  })
+
+  it('reads a two-row group photo row by row', () => {
+    const at = (x: number, y: number): { box: Box } => ({ box: [x, y, 0.1, 0.15] })
+    const faces = [at(0.6, 0.12), at(0.2, 0.5), at(0.1, 0.1), at(0.5, 0.52), at(0.35, 0.08)]
+    expect(byPosition(faces).map((f) => f.box.slice(0, 2))).toEqual([
+      [0.1, 0.1],
+      [0.35, 0.08],
+      [0.6, 0.12],
+      [0.2, 0.5],
+      [0.5, 0.52]
+    ])
+  })
+
+  it('skips faces already named and wraps round', () => {
+    const faces = [f(0.1, null), f(0.3, 'ref'), f(0.5, 'auto'), f(0.7, 'ref')]
+    expect(nextToName(faces, 0)).toBe(2)
+    expect(nextToName(faces, 2)).toBe(0)
+    expect(nextToName(faces, -1)).toBe(0)
+  })
+
+  it('says -1 when every face is named', () => {
+    expect(nextToName([f(0.1, 'ref'), f(0.3, 'ref')], 0)).toBe(-1)
+    expect(nextToName([], -1)).toBe(-1)
+  })
+})
+
+describe('matchPeople', () => {
+  const ps = [{ name: 'Anjali Menon' }, { name: 'Rahul Nair' }, { name: 'Ammachi' }]
+
+  it('lists everyone for an empty query', () => {
+    expect(matchPeople(ps, '  ')).toEqual({ matches: ps, exact: null })
+  })
+
+  it('matches the start of any word, ignoring case', () => {
+    expect(matchPeople(ps, 'a').matches.map((p) => p.name)).toEqual(['Anjali Menon', 'Ammachi'])
+    expect(matchPeople(ps, 'NAI').matches.map((p) => p.name)).toEqual(['Rahul Nair'])
+    expect(matchPeople(ps, 'rahul n').matches.map((p) => p.name)).toEqual(['Rahul Nair'])
+  })
+
+  it('finds the exact name, so a typed name joins the person', () => {
+    expect(matchPeople(ps, ' rahul nair ').exact).toBe(ps[1])
+    expect(matchPeople(ps, 'Rahul').exact).toBeNull()
+  })
+})
+
+describe('decisions and gridMove', () => {
+  it('answers yes for every face not marked no', () => {
+    expect(decisions([{ faceId: 1 }, { faceId: 2 }, { faceId: 3 }], new Set([2]))).toEqual([
+      { faceId: 1, yes: true },
+      { faceId: 2, yes: false },
+      { faceId: 3, yes: true }
+    ])
+  })
+
+  it('moves through a grid and stops at its edges', () => {
+    expect(gridMove(0, 'ArrowRight', 4, 10)).toBe(1)
+    expect(gridMove(1, 'ArrowDown', 4, 10)).toBe(5)
+    expect(gridMove(8, 'ArrowDown', 4, 10)).toBe(8)
+    expect(gridMove(0, 'ArrowLeft', 4, 10)).toBe(0)
+    expect(gridMove(3, 'x', 4, 10)).toBe(3)
   })
 })
