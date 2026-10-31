@@ -19,6 +19,8 @@ import {
   X,
   ExternalLink,
   FolderOpen,
+  Folder,
+  FolderPlus,
   Layers,
   Plus,
   Minus,
@@ -2036,6 +2038,8 @@ onUnmounted(() => {
                   @click="viewSet(s.id)"
                   @contextmenu.prevent="openPop({ kind: 'set', set: s }, $event)"
                 >
+                  <!-- Folders, so sets read as places photos live in, not labels like tags -->
+                  <component :is="activeSetId === s.id ? FolderOpen : Folder" class="set-ic" />
                   {{ s.name }} <span class="n num">{{ nf(s.imageIds.length) }}</span>
                 </button>
                 <button
@@ -2051,7 +2055,7 @@ onUnmounted(() => {
                 </button>
               </template>
               <button class="btn sm ghost" aria-haspopup="dialog" @click="newSet">
-                <Plus />New set
+                <FolderPlus />New set
               </button>
             </div>
 
@@ -2433,7 +2437,7 @@ onUnmounted(() => {
             v-bind="menuBusy(`add:${s.id}`)"
             @click="addSelectedTo(s)"
           >
-            {{ s.name }}<span v-if="pending === `add:${s.id}`" class="spin"></span
+            <Folder class="set-ic" />{{ s.name }}<span v-if="pending === `add:${s.id}`" class="spin"></span
             ><span v-else class="n num">{{ nf(s.imageIds.length) }}</span>
           </button>
           <hr v-if="sets.length" />
@@ -2779,6 +2783,12 @@ onUnmounted(() => {
 .set-bar .btn[aria-pressed='true'] {
   background: var(--brand-wash);
   border-color: var(--brand-soft);
+}
+.set-ic {
+  color: var(--ink-3);
+}
+[aria-pressed='true'] > .set-ic {
+  color: var(--brand);
 }
 /* One line that scrolls sideways, so the gallery's offset never changes */
 .set-bar {
