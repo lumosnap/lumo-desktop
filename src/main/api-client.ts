@@ -548,6 +548,39 @@ export const albumsApi = {
   },
 
   /**
+   * Replace the album's people atomically: named, non-hidden ones only. Image ids are server
+   * ids; box is normalized [x, y, w, h] on the cover photo. No face vectors, ever.
+   */
+  async putPeople(
+    albumId: string,
+    people: Array<{
+      id: string
+      name: string
+      position: number
+      coverImageId: number
+      box: [number, number, number, number]
+      imageIds: number[]
+    }>
+  ): Promise<void> {
+    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/people`, {
+      method: 'PUT',
+      body: { people }
+    })
+  },
+
+  /** Link a client (by name) to a person in the album, or unlink with null. Photographer-only. */
+  async putClientPerson(
+    albumId: string,
+    clientName: string,
+    personId: string | null
+  ): Promise<void> {
+    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/client-people`, {
+      method: 'PUT',
+      body: { clientName, personId }
+    })
+  },
+
+  /**
    * Update existing images with new file references (for modified files)
    * Called after re-uploading modified files
    */

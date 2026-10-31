@@ -7,8 +7,17 @@ import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { Booking, ApiFavoriteImage } from '../main/api-client'
 import type { TagConfig } from '../main/ipc/albums'
+import type { PeopleConfig, PersonSummary } from '../main/people'
 
 type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
+type Result = { success: boolean; error?: string }
+type FaceInImage = {
+  faceId: number
+  box: [number, number, number, number]
+  personId: string | null
+  name: string | null
+}
+type FaceTarget = { personId: string } | { newName: string } | { none: true }
 
 type AuthUser = { id: string; email: string; name: string; image?: string }
 
@@ -171,6 +180,40 @@ const api = {
       tag: string
     ): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('tags:remove', albumId, imageIds, tag)
+  },
+  people: {
+    getConfig: (albumId: string): Promise<PeopleConfig> =>
+      ipcRenderer.invoke('people:getConfig', albumId),
+    setEnabled: (albumId: string, enabled: boolean): Promise<PeopleConfig> =>
+      ipcRenderer.invoke('people:setEnabled', albumId, enabled),
+    list: (albumId: string): Promise<PersonSummary[]> => ipcRenderer.invoke('people:list', albumId),
+    rename: (albumId: string, personId: string, name: string | null): Promise<Result> =>
+      ipcRenderer.invoke('people:rename', albumId, personId, name),
+    merge: (albumId: string, intoId: string, fromIds: string[]): Promise<Result> =>
+      ipcRenderer.invoke('people:merge', albumId, intoId, fromIds),
+    setHidden: (albumId: string, personId: string, hidden: boolean): Promise<Result> =>
+      ipcRenderer.invoke('people:setHidden', albumId, personId, hidden),
+    setCover: (albumId: string, personId: string, faceId: number): Promise<Result> =>
+      ipcRenderer.invoke('people:setCover', albumId, personId, faceId),
+    facesInImage: (albumId: string, imageId: number): Promise<FaceInImage[]> =>
+      ipcRenderer.invoke('people:facesInImage', albumId, imageId),
+    assignFace: (
+      albumId: string,
+      faceId: number,
+      target: FaceTarget
+    ): Promise<Result & { personId?: string | null }> =>
+      ipcRenderer.invoke('people:assignFace', albumId, faceId, target),
+    linkClient: (albumId: string, clientName: string, personId: string | null): Promise<Result> =>
+      ipcRenderer.invoke('people:linkClient', albumId, clientName, personId),
+    clientLinks: (albumId: string): Promise<Record<string, string>> =>
+      ipcRenderer.invoke('people:clientLinks', albumId),
+    // An album's faces/people or People progress changed in main; returns the unsubscribe
+    onPeopleChanged: (callback: (albumId: string) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, data: { albumId: string }): void =>
+        callback(data.albumId)
+      ipcRenderer.on('album:peopleChanged', handler)
+      return () => ipcRenderer.removeListener('album:peopleChanged', handler)
+    }
   },
   sync: {
     detectChanges: (albumId: string): Promise<SyncResult> =>

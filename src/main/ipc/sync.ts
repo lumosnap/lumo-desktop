@@ -19,6 +19,7 @@ import {
 import { scanImagesInFolder, clearScanCache } from '../storage'
 import { uploadPipeline } from '../pipeline'
 import { regroupAlbum } from '../album-analysis'
+import { peoplePhotosChanged } from '../people'
 import { createLogger, getErrorMessage } from '../logger'
 
 import {
@@ -489,6 +490,7 @@ export async function executeAlbumSync(
       notificationService.syncComplete(album.title)
       regroupAlbum(albumId)
     }
+    if (changes.deleted && changes.deleted.length > 0) peoplePhotosChanged(albumId)
     // Note: If only renames/skipped duplicates, don't notify (trivial silent sync)
 
     logger.info(`Sync completed for album ${albumId}`)

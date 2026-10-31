@@ -10,6 +10,7 @@ import { registerAuthHandlers } from './auth'
 import { registerConfigHandlers } from './config'
 import { registerProfileHandlers } from './profile'
 import { registerAlbumHandlers } from './albums'
+import { registerPeopleHandlers } from './people'
 import { registerSyncHandlers } from './sync'
 import { registerApiHandlers } from './api'
 import { registerSettingsHandlers } from './settings'
@@ -36,6 +37,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   // Album handlers (need mainWindow for pipeline progress)
   registerAlbumHandlers(mainWindow)
+  registerPeopleHandlers()
 
   // Sync handlers (need mainWindow for pipeline)
   registerSyncHandlers(mainWindow)

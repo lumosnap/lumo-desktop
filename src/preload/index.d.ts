@@ -13,6 +13,7 @@ import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/syn
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { TagConfig } from '../main/ipc/albums'
+import type { PeopleConfig, PersonSummary } from '../main/people'
 
 type SetsResult = { success: true; sets: AlbumSet[] } | { success: false; error: string }
 
@@ -34,7 +35,10 @@ type AlbumImageWithFavorites = Image & {
   isBurstCover: boolean
   momentId: string | null
   tags: string[] // effective tags: manual adds first, then AI tags (by score) not removed
+  people: string[] // person ids in this photo (shown people: named, or unnamed with ≥2 faces)
 }
+
+type PeopleResult = { success: boolean; error?: string }
 
 declare global {
   interface Window {
@@ -164,6 +168,45 @@ declare global {
           imageIds: number[],
           tag: string
         ) => Promise<{ success: boolean; error?: string }>
+      }
+      // People (opt-in per album). Mutations emit album:peopleChanged and push named people.
+      people: {
+        getConfig: (albumId: string) => Promise<PeopleConfig>
+        // Off deletes every face, person and client link of the album, locally and on the server
+        setEnabled: (albumId: string, enabled: boolean) => Promise<PeopleConfig>
+        // Named first (by name), then unnamed by photoCount; unnamed clusters < 2 faces left out
+        list: (albumId: string) => Promise<PersonSummary[]>
+        rename: (albumId: string, personId: string, name: string | null) => Promise<PeopleResult>
+        // Pins the merged faces to intoId (survives re-clustering); intoId takes a name if it has none
+        merge: (albumId: string, intoId: string, fromIds: string[]) => Promise<PeopleResult>
+        setHidden: (albumId: string, personId: string, hidden: boolean) => Promise<PeopleResult>
+        // faceId must be one of the person's faces
+        setCover: (albumId: string, personId: string, faceId: number) => Promise<PeopleResult>
+        facesInImage: (
+          albumId: string,
+          imageId: number
+        ) => Promise<
+          Array<{
+            faceId: number
+            box: [number, number, number, number] // normalized x, y, w, h
+            personId: string | null
+            name: string | null
+          }>
+        >
+        // Manual, survives re-clustering. Resolves with the face's person afterwards
+        assignFace: (
+          albumId: string,
+          faceId: number,
+          target: { personId: string } | { newName: string } | { none: true }
+        ) => Promise<PeopleResult & { personId?: string | null }>
+        // Saved on the server first; fails (and changes nothing) when offline
+        linkClient: (
+          albumId: string,
+          clientName: string,
+          personId: string | null
+        ) => Promise<PeopleResult>
+        clientLinks: (albumId: string) => Promise<Record<string, string>>
+        onPeopleChanged: (callback: (albumId: string) => void) => () => void
       }
       sync: {
         detectChanges: (albumId: string) => Promise<SyncResult>

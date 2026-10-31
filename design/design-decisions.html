@@ -174,6 +174,45 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-10-31-people">
+<h2>Session 2026-10-31 (4): People, v1</h2>
+<p>Existing work, Minimal level, component scope: a People card in the album side panel, a Faces mode in the lightbox, and a face link for each client in "Picked by". People is off for each album until the photographer turns it on. Faces are found on this computer. Screens: 960 px to 2560 px, desktop only.</p>
+<ul>
+<li><b>For:</b> the photographer, after the edit, with a client who asks "send me all the photos of my father".</li>
+<li><b>Job:</b> show the photos of one person, name the people who matter, and fix a face that is on the wrong person (father and groom).</li>
+<li><b>Direction:</b> kept: delivery tracking. People is one more "who" filter, next to "Picked by". The route bar shows the face search, the same bar as uploads.</li>
+</ul>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Where the faces live</td><td>A "People" card in the side panel, under "Picked by". Not in the pinned bar over the photos</td><td>The side panel already holds the "who" filters (Picks, Picked by) and it is sticky, so the faces stay in reach. The pinned bar holds "what" (sets, tags). A third row there takes 44 px more from the photos on a 13-inch laptop</td><td class="rejected">A third pinned row of avatars; a People toggle that swaps the tag row</td></tr>
+<tr><td>Turn on</td><td>When off, the card has one line, "See the photos each person is in.", and an outline pill "Find people…". It opens a dialog with four short points and "Turn on"</td><td>Face data needs consent. The dialog says what stays on the computer, what goes to the client, who must agree ("the couple" for a wedding, "your client" for other events) and that off deletes it</td><td class="rejected">A switch with no dialog; a long privacy text</td></tr>
+<tr><td>Progress</td><td>The route bar (<code>.bar</code>) and "Finding faces · 412 of 1,240 photos". Paused: grey fill and "Paused to keep your computer cool and its battery up. It resumes on its own."</td><td>The same bar as uploads, so it reads as "work in transit". Paused says why and that no action is needed</td><td class="rejected">A spinner; a percent with no count</td></tr>
+<tr><td>Avatars</td><td>Round, cut with CSS from the cover thumbnail (<code>faceCrop</code> in <code>utils/people.ts</code>). Named: 44 px with the first name under it, 5 a row. Not named: 32 px, no text, first 5 and "+N" on one row</td><td>No new image files. Named people are the ones the photographer uses, so they are larger and come first. Faces without names need no label to be found</td><td class="rejected">Initials; one size for all</td></tr>
+<tr><td>Filter</td><td>A click toggles the person. Two people = photos with both. It adds to set, picks and tags (AND). The title says "with Anjali + Rahul". The tag counts follow</td><td>"Photos of the couple together" is a real request. AND is how tags already work here</td><td class="rejected">One person at a time; OR</td></tr>
+<tr><td>Selected avatar</td><td>A 2 px blue ring with a white gap</td><td>Blue is selection in this design. The ring keeps the face visible</td><td class="rejected">Dim the others</td></tr>
+<tr><td>Naming</td><td>The person you click gets a grey line under the faces: name, photo count, "Name…" (when not named) and a "⋯" menu: Rename…, Same person as…, Not important. Right-click on a face opens the same menu</td><td>The photographer names a face when its photos are on screen and they can see who it is. The menu is always one visible click away; right-click is a shortcut only. Grey, not blue wash: it is context, not a selection. A name that is already in use merges the two, so there are never two people called Rahul</td><td class="rejected">A pencil on each avatar; a separate People page</td></tr>
+<tr><td>Nudge</td><td>Until the first name, the heading over the faces is "Name the people who matter most". After that it is "Not named yet"</td><td>One quiet line, once. No badge, no count, no banner</td><td class="rejected">A banner with a count of unnamed faces</td></tr>
+<tr><td>Same person as…</td><td>Named people as rows; faces not named as a grid of 32 px avatars</td><td>A list of rows that all say "Unnamed" was noise</td><td class="rejected">One row for each face</td></tr>
+<tr><td>Not important</td><td>Hides the face from the card. Toast with "Undo". "Show 1 hidden person" at the foot shows them dimmed; a click shows one again</td><td>Undo, not a confirm, for a step that loses nothing</td><td class="rejected">A confirm dialog</td></tr>
+<tr><td>Faces in the lightbox</td><td>A "Faces" button in the top bar (white when on). It draws a box on each face: solid with the first name when known, dashed when not. A click opens "Who is this?": named people, "New person…", "Not Rahul", "Use this face for Rahul"</td><td>This is where a mix-up is seen and fixed, on the photo itself. Off by default so the photo stays clean. The mode stays on from photo to photo for a run of fixes</td><td class="rejected">Boxes always on; a list of faces under the photo</td></tr>
+<tr><td>Client link</td><td>In "Picked by", a faint person button at the end of each row (full strength on hover). It asks "Which person is Rahul?". When linked, the client's initials change to that person's face</td><td>The link is rare, so it stays quiet, but it is never hidden; the face shows the result without words. Only the photographer sees it</td><td class="rejected">A select in each row</td></tr>
+<tr><td>Turn off</td><td>"⋯" in the card head is a menu with "Turn off People…", which opens "Turn off People?" with "Turn off and delete" (red)</td><td>It deletes data on the computer and online, so it gets a confirm</td><td class="rejected">A switch</td></tr>
+<tr><td>Apostrophes</td><td>Straight apostrophes kept (check.py ASK)</td><td>The whole app uses them ("Couldn't", "client's"); one curly set in one dialog is drift</td><td class="rejected">Curly quotes only here</td></tr>
+</table>
+<h3>Motion</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th></tr>
+<tr><td>Avatar hover and selected ring</td><td>micro</td><td>box-shadow 120 ms, ease-out</td></tr>
+<tr><td>Progress bar</td><td>micro</td><td>the existing <code>.bar</code> transform, 500 ms</td></tr>
+<tr><td>Faces on or off, face boxes, popovers</td><td>none</td><td>Frequent, keyboard-driven, in the lightbox: instant</td></tr>
+</table>
+<h3>Mechanics</h3>
+<p>The renderer calls <code>window.api.people</code> as preload declares it. If <code>getConfig</code> fails, the card does not show. All IPC calls get plain values. Progress is read every 3 s while the state is waiting, running or paused. The face boxes are a layer in PhotoSwipe's zoom wrapper, sized to the image, so they zoom and pan with it; <code>pointerdown</code> stops on a box so PhotoSwipe does not zoom or close.</p>
+<h3>Checks</h3>
+<p>Vitest for <code>faceCrop</code> and <code>withPeople</code>. Rendered in headless Chromium with a mocked <code>window.api</code> at 1280 × 860 and 960 × 860: off, consent, running, paused, done, name, merge, two people, client link, lightbox faces, face picker. <code>check.py</code>: 0 errors. A fresh reviewer read the captures; fixed from its list: the client link was hover-only, naming could make a second "Rahul", the naming line fell below the fold, unclear counts ("of 1,240" now says photos), the header ⋯ opened a dialog directly, and unnamed faces all had the same screen-reader label. Kept: "Not important" (the requested words; the client never sees it). Not done: the real Electron window with main's real face data.</p>
+</article>
+
 <article id="session-2026-10-31-tags">
 <h2>Session 2026-10-31 (3): album tags by kind of event</h2>
 <p>Existing work, Minimal level, component scope: the New album dialog, the Album tags dialog and the tag picker. The requester asked that the tag settings must not feel complex. Each album now has a kind of event (Wedding, Birthday &amp; party, Corporate, Baby shower &amp; naming, Concert &amp; stage show, Something else). The kind of event sets the tags that AI suggests. Screens: 960 px to 2560 px, desktop only.</p>

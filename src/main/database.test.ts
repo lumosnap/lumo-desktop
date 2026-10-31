@@ -28,8 +28,23 @@ import {
   getImagesMissingEmbedding,
   getEmbeddedImageIds,
   getImage,
-  updateImagesBatch
+  updateImagesBatch,
+  setPeopleEnabled,
+  getPeopleProgress,
+  saveImageFaces,
+  getFacesToCluster,
+  applyPeopleAssignment,
+  getAlbumPeople,
+  getImageFaces,
+  renamePerson,
+  mergePeople,
+  assignFace,
+  setPersonCover,
+  setClientPerson,
+  getClientPeople,
+  clearPeopleNeedPush
 } from './database'
+import { assignPeople } from './people-cluster'
 
 // better-sqlite3 is rebuilt for Electron's ABI by postinstall; skip under plain Node if it won't load
 let loadable = true
@@ -52,7 +67,7 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(7)
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
     expect(cols('albums')).toEqual(
       expect.arrayContaining(['startTime', 'endTime', 'isOrphaned', 'albumType'])
     )
@@ -79,6 +94,20 @@ describe.skipIf(!loadable)('runMigrations', () => {
     expect(cols('albums')).toEqual(expect.arrayContaining(['tag_set', 'tags_scored']))
     expect(cols('image_tag_overrides')).toEqual(['image_id', 'tag', 'action'])
     expect(cols('albums')).toContain('event_type')
+    expect(cols('albums')).toEqual(expect.arrayContaining(['people_enabled', 'people_need_push']))
+    expect(cols('images')).toContain('faces_scanned')
+    expect(cols('faces')).toEqual([
+      'id',
+      'image_id',
+      'box',
+      'score',
+      'landmarks',
+      'vec',
+      'person_id'
+    ])
+    expect(cols('people')).toEqual(['id', 'album_id', 'name', 'hidden', 'cover_face_id'])
+    expect(cols('face_overrides')).toEqual(['face_id', 'person_id'])
+    expect(cols('client_people')).toEqual(['album_id', 'client_name', 'person_id'])
     db.close()
   })
 })
@@ -261,6 +290,103 @@ describe.skipIf(!loadable)('sets', () => {
     expect(listSets('a').map((s) => s.name)).toEqual(['Party', 'Later'])
     deleteAlbum('a')
     expect(listSets('a')).toEqual([])
+    closeDatabase()
+  })
+})
+
+describe.skipIf(!loadable)('people', () => {
+  const v = (k: number): Float32Array => {
+    const out = new Float32Array(128)
+    out[k] = 1
+    return out
+  }
+  const face = (k: number): Parameters<typeof saveImageFaces>[1][number] => ({
+    box: [0.1, 0.1, 0.2, 0.2],
+    score: 0.9,
+    landmarks: [0.15, 0.15, 0.25, 0.15, 0.2, 0.2, 0.16, 0.25, 0.24, 0.25],
+    vec: v(k)
+  })
+  // Cluster label = the face's one-hot axis, so a test controls who is "the same person"
+  const recluster = (albumId: string): number => {
+    const labels = new Map(
+      getFacesToCluster(albumId).map((f) => [f.id, f.vec.findIndex((x) => x === 1)])
+    )
+    let n = 0
+    return applyPeopleAssignment(albumId, (faces, persons) =>
+      assignPeople(faces, labels, persons, () => `p${n++}`)
+    )
+  }
+  const pushCount = (id: string): number => getAlbum(id)!.people_need_push ?? 0
+
+  it('scans, clusters, renames, merges, overrides and deletes everything when turned off', () => {
+    initDatabase(':memory:')
+    album('a')
+    const [i1, i2, i3] = mk('a', 3)
+    expect(saveImageFaces(i1, [face(0)])).toBe(false) // People is off: nothing stored
+
+    setPeopleEnabled('a', true)
+    expect(saveImageFaces(i1, [face(0), face(1)])).toBe(true)
+    expect(saveImageFaces(i2, [face(0), face(1)])).toBe(true)
+    expect(saveImageFaces(i3, [face(2)])).toBe(true)
+    expect(getPeopleProgress('a')).toEqual({ enabled: true, processed: 3, total: 3 })
+
+    expect(recluster('a')).toBe(4) // two people of 2 faces; the lone face stays unassigned
+    let people = getAlbumPeople('a')
+    expect(people.map((p) => p.faces.length)).toEqual([2, 2])
+    const [p0, p1] = people.map((p) => p.id)
+
+    renamePerson('a', p0, 'Bride')
+    const seen = pushCount('a')
+    expect(seen).toBeGreaterThan(0)
+    clearPeopleNeedPush('a', seen)
+
+    // Re-cluster with fresh labels: the named person keeps its id
+    expect(recluster('a')).toBe(0)
+    expect(getAlbumPeople('a').find((p) => p.name === 'Bride')!.id).toBe(p0)
+
+    // Manual: lone face goes to Bride; survives re-clustering
+    const lone = getImageFaces('a', i3)[0]
+    expect(assignFace('a', lone.id, { personId: p0 })).toBe(p0)
+    recluster('a')
+    expect(getImageFaces('a', i3)[0].personId).toBe(p0)
+    // "Not this person" wins too
+    assignFace('a', lone.id, { none: true })
+    recluster('a')
+    expect(getImageFaces('a', i3)[0].personId).toBeNull()
+
+    // Merge pins p1's faces to Bride and moves client links
+    setClientPerson('a', 'Anu', p1)
+    mergePeople('a', p0, [p1])
+    recluster('a')
+    people = getAlbumPeople('a')
+    expect(people).toHaveLength(1)
+    expect(people[0]).toMatchObject({ id: p0, name: 'Bride' })
+    expect(people[0].faces).toHaveLength(4)
+    expect(getClientPeople('a')).toEqual({ Anu: p0 })
+
+    expect(() => setPersonCover('a', p0, lone.id)).toThrow()
+    setPersonCover('a', p0, people[0].faces[1].id)
+
+    setPeopleEnabled('a', false)
+    expect(getPeopleProgress('a')).toEqual({ enabled: false, processed: 0, total: 3 })
+    expect(getImageFaces('a', i1)).toEqual([])
+    expect(getAlbumPeople('a')).toEqual([])
+    expect(getClientPeople('a')).toEqual({})
+    expect(pushCount('a')).toBeGreaterThan(0) // so the server gets { people: [] }
+    closeDatabase()
+  })
+
+  it('new named person from a face; photo deletion cascades', () => {
+    initDatabase(':memory:')
+    album('a')
+    const [i1] = mk('a', 1)
+    setPeopleEnabled('a', true)
+    saveImageFaces(i1, [face(0)])
+    const f = getImageFaces('a', i1)[0]
+    const id = assignFace('a', f.id, { newName: 'Father' })!
+    expect(getAlbumPeople('a')).toMatchObject([{ id, name: 'Father' }]) // named: 1 face is enough
+    deleteImages([i1])
+    expect(getAlbumPeople('a')).toEqual([])
     closeDatabase()
   })
 })

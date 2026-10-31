@@ -28,6 +28,8 @@ export interface Album {
   tag_set?: string | null // migration 6: JSON array of enabled AI tag slugs; null = all
   tags_scored?: string | null // migration 6: scoring key the AI tags were last computed with
   event_type?: string | null // migration 7: picks the AI tag pack; null = wedding
+  people_enabled?: number // migration 8: 1 = find and group faces (opt-in)
+  people_need_push?: number // migration 8: >0 = people changed locally since the last full push
 }
 
 export interface AlbumSet {
@@ -72,6 +74,7 @@ export interface Image {
   moment_id?: string | null
   needs_push?: number | null // 1 = browse fields changed locally, not yet PATCHed to server
   tags_need_push?: number | null // migration 5: 1 = AI tags changed, not yet PATCHed
+  faces_scanned?: number | null // migration 8: 1 = face detection ran (even if it found none)
 }
 
 export function initDatabase(dbPath = join(app.getPath('userData'), 'lumosnap.db')): void {
@@ -199,6 +202,44 @@ const migrations: Array<(database: Database.Database) => void> = [
   // 7: album event type (AI tag pack); NULL = wedding for albums created before it
   (database) => {
     database.exec('ALTER TABLE albums ADD COLUMN event_type TEXT')
+  },
+  // 8: People. Face vectors never leave the device. box/landmarks = JSON, normalized to the photo.
+  // face_overrides.person_id NULL = "not this person / no one". people.cover_face_id NULL = auto.
+  (database) => {
+    database.exec(`
+      ALTER TABLE albums ADD COLUMN people_enabled INTEGER DEFAULT 0;
+      ALTER TABLE albums ADD COLUMN people_need_push INTEGER DEFAULT 0;
+      ALTER TABLE images ADD COLUMN faces_scanned INTEGER DEFAULT 0;
+      CREATE TABLE people (
+        id TEXT PRIMARY KEY,
+        album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+        name TEXT,
+        hidden INTEGER NOT NULL DEFAULT 0,
+        cover_face_id INTEGER REFERENCES faces(id) ON DELETE SET NULL
+      );
+      CREATE INDEX idx_people_album ON people(album_id);
+      CREATE TABLE faces (
+        id INTEGER PRIMARY KEY,
+        image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+        box TEXT NOT NULL,
+        score REAL NOT NULL,
+        landmarks TEXT NOT NULL,
+        vec BLOB NOT NULL,
+        person_id TEXT REFERENCES people(id) ON DELETE SET NULL
+      );
+      CREATE INDEX idx_faces_image ON faces(image_id);
+      CREATE INDEX idx_faces_person ON faces(person_id);
+      CREATE TABLE face_overrides (
+        face_id INTEGER PRIMARY KEY REFERENCES faces(id) ON DELETE CASCADE,
+        person_id TEXT REFERENCES people(id) ON DELETE CASCADE
+      );
+      CREATE TABLE client_people (
+        album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+        client_name TEXT NOT NULL,
+        person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+        PRIMARY KEY (album_id, client_name)
+      );
+    `)
   }
 ]
 
@@ -912,6 +953,416 @@ export function setTagOverride(
       dirty.run(id, albumId)
     }
   })()
+}
+
+// People. Every change that the server should see bumps albums.people_need_push.
+
+type Box = [number, number, number, number]
+
+export interface FaceRow {
+  id: number
+  imageId: number
+  box: Box
+  score: number
+  landmarks: number[]
+  personId: string | null
+}
+
+export interface PersonRow {
+  id: string
+  name: string | null
+  hidden: boolean
+  coverFaceId: number | null
+  faces: FaceRow[]
+}
+
+const bumpPeople = (d: Database.Database, albumId: string): void => {
+  d.prepare(
+    'UPDATE albums SET people_need_push = COALESCE(people_need_push, 0) + 1 WHERE id = ?'
+  ).run(albumId)
+}
+
+const toVec = (b: Buffer): Float32Array =>
+  new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.length))
+
+export function getPeopleProgress(albumId: string): {
+  enabled: boolean
+  processed: number
+  total: number
+} {
+  const d = conn()
+  const album = d.prepare('SELECT people_enabled FROM albums WHERE id = ?').get(albumId) as
+    | { people_enabled: number | null }
+    | undefined
+  const counts = d
+    .prepare(
+      'SELECT COUNT(*) AS total, COALESCE(SUM(faces_scanned), 0) AS processed FROM images WHERE albumId = ?'
+    )
+    .get(albumId) as { total: number; processed: number }
+  return { enabled: album?.people_enabled === 1, ...counts }
+}
+
+/** Turning People off deletes every face, person and client link of the album. */
+export function setPeopleEnabled(albumId: string, enabled: boolean): void {
+  const d = conn()
+  d.transaction(() => {
+    if (!enabled) {
+      d.prepare(
+        'DELETE FROM faces WHERE image_id IN (SELECT id FROM images WHERE albumId = ?)'
+      ).run(albumId)
+      d.prepare('DELETE FROM client_people WHERE album_id = ?').run(albumId)
+      d.prepare('DELETE FROM people WHERE album_id = ?').run(albumId)
+      d.prepare('UPDATE images SET faces_scanned = 0 WHERE albumId = ?').run(albumId)
+    }
+    d.prepare('UPDATE albums SET people_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, albumId)
+    bumpPeople(d, albumId)
+  })()
+}
+
+export function getImagesToScanForFaces(albumId: string): Image[] {
+  return conn()
+    .prepare(
+      'SELECT * FROM images WHERE albumId = ? AND COALESCE(faces_scanned, 0) = 0 ORDER BY uploadOrder'
+    )
+    .all(albumId) as Image[]
+}
+
+/**
+ * Store one photo's detected faces and mark it scanned. Skipped (returns false) when the photo
+ * was deleted or People was turned off meanwhile. A re-scan replaces the photo's faces.
+ */
+export function saveImageFaces(
+  imageId: number,
+  faces: Array<{ box: Box; score: number; landmarks: number[]; vec: Float32Array }>
+): boolean {
+  const d = conn()
+  return d.transaction(() => {
+    const ok = d
+      .prepare(
+        'SELECT 1 FROM images i JOIN albums a ON a.id = i.albumId WHERE i.id = ? AND a.people_enabled = 1'
+      )
+      .get(imageId)
+    if (!ok) return false
+    d.prepare('DELETE FROM faces WHERE image_id = ?').run(imageId)
+    const put = d.prepare(
+      'INSERT INTO faces (image_id, box, score, landmarks, vec) VALUES (?, ?, ?, ?, ?)'
+    )
+    for (const f of faces) {
+      put.run(
+        imageId,
+        JSON.stringify(f.box),
+        f.score,
+        JSON.stringify(f.landmarks),
+        Buffer.from(f.vec.buffer, f.vec.byteOffset, f.vec.byteLength)
+      )
+    }
+    d.prepare('UPDATE images SET faces_scanned = 1 WHERE id = ?').run(imageId)
+    return true
+  })()
+}
+
+/** Vectors of the album's faces that clustering decides (no manual override). */
+export function getFacesToCluster(albumId: string): Array<{ id: number; vec: Float32Array }> {
+  const rows = conn()
+    .prepare(
+      `SELECT f.id, f.vec FROM faces f JOIN images i ON i.id = f.image_id
+       LEFT JOIN face_overrides o ON o.face_id = f.id
+       WHERE i.albumId = ? AND o.face_id IS NULL ORDER BY f.id`
+    )
+    .all(albumId) as Array<{ id: number; vec: Buffer }>
+  return rows.map((r) => ({ id: r.id, vec: toVec(r.vec) }))
+}
+
+/**
+ * Re-assign the album's faces to people in one transaction. `decide` gets the current faces
+ * (with overrides) and people and returns the person per face plus the ids it created.
+ * Afterwards, people nobody curated (no name, not hidden, no cover, no override) and with no
+ * faces are dropped. Returns how many faces changed person; 0 if People is off.
+ */
+export function applyPeopleAssignment(
+  albumId: string,
+  decide: (
+    faces: Array<{
+      id: number
+      vec: Float32Array
+      person: string | null
+      override?: string | null
+    }>,
+    persons: Array<{ id: string; curated: boolean }>
+  ) => { assign: Map<number, string | null>; created: string[] }
+): number {
+  const d = conn()
+  return d.transaction(() => {
+    if (!getPeopleProgress(albumId).enabled) return 0
+    const rows = d
+      .prepare(
+        `SELECT f.id, f.vec, f.person_id, o.face_id AS has_override, o.person_id AS override
+         FROM faces f JOIN images i ON i.id = f.image_id
+         LEFT JOIN face_overrides o ON o.face_id = f.id WHERE i.albumId = ?`
+      )
+      .all(albumId) as Array<{
+      id: number
+      vec: Buffer
+      person_id: string | null
+      has_override: number | null
+      override: string | null
+    }>
+    const persons = d
+      .prepare(
+        `SELECT p.id, (p.name IS NOT NULL OR p.hidden = 1 OR p.cover_face_id IS NOT NULL OR
+           EXISTS (SELECT 1 FROM face_overrides o WHERE o.person_id = p.id)) AS curated
+         FROM people p WHERE p.album_id = ?`
+      )
+      .all(albumId) as Array<{ id: string; curated: number }>
+    const { assign, created } = decide(
+      rows.map((r) => ({
+        id: r.id,
+        vec: toVec(r.vec),
+        person: r.person_id,
+        ...(r.has_override != null ? { override: r.override } : {})
+      })),
+      persons.map((p) => ({ id: p.id, curated: p.curated === 1 }))
+    )
+    const add = d.prepare('INSERT INTO people (id, album_id) VALUES (?, ?)')
+    for (const id of created) add.run(id, albumId)
+    const set = d.prepare('UPDATE faces SET person_id = ? WHERE id = ?')
+    let changed = 0
+    for (const r of rows) {
+      const p = assign.get(r.id) ?? null
+      if (p !== r.person_id) {
+        set.run(p, r.id)
+        changed++
+      }
+    }
+    d.prepare(
+      `DELETE FROM people WHERE album_id = ? AND name IS NULL AND hidden = 0 AND cover_face_id IS NULL
+       AND NOT EXISTS (SELECT 1 FROM faces f WHERE f.person_id = people.id)
+       AND NOT EXISTS (SELECT 1 FROM face_overrides o WHERE o.person_id = people.id)`
+    ).run(albumId)
+    if (changed > 0) bumpPeople(d, albumId)
+    return changed
+  })()
+}
+
+const parseFace = (r: {
+  id: number
+  image_id: number
+  box: string
+  score: number
+  landmarks: string
+  person_id: string | null
+}): FaceRow => ({
+  id: r.id,
+  imageId: r.image_id,
+  box: JSON.parse(r.box),
+  score: r.score,
+  landmarks: JSON.parse(r.landmarks),
+  personId: r.person_id
+})
+
+/**
+ * The album's people that are shown: named ones with at least one face, unnamed ones with
+ * at least two. Hidden people are included (flagged).
+ */
+export function getAlbumPeople(albumId: string): PersonRow[] {
+  const d = conn()
+  const people = d
+    .prepare('SELECT id, name, hidden, cover_face_id FROM people WHERE album_id = ?')
+    .all(albumId) as Array<{
+    id: string
+    name: string | null
+    hidden: number
+    cover_face_id: number | null
+  }>
+  const faces = (
+    d
+      .prepare(
+        `SELECT f.id, f.image_id, f.box, f.score, f.landmarks, f.person_id FROM faces f
+         JOIN people p ON p.id = f.person_id WHERE p.album_id = ? ORDER BY f.id`
+      )
+      .all(albumId) as Array<Parameters<typeof parseFace>[0]>
+  ).map(parseFace)
+  const byPerson = new Map<string, FaceRow[]>()
+  for (const f of faces) {
+    const list = byPerson.get(f.personId!)
+    if (list) list.push(f)
+    else byPerson.set(f.personId!, [f])
+  }
+  return people
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      hidden: p.hidden === 1,
+      coverFaceId: p.cover_face_id,
+      faces: byPerson.get(p.id) ?? []
+    }))
+    .filter((p) => p.faces.length >= (p.name != null ? 1 : 2))
+}
+
+export function getImageFaces(
+  albumId: string,
+  imageId: number
+): Array<FaceRow & { name: string | null }> {
+  return (
+    conn()
+      .prepare(
+        `SELECT f.id, f.image_id, f.box, f.score, f.landmarks, f.person_id, p.name
+         FROM faces f JOIN images i ON i.id = f.image_id LEFT JOIN people p ON p.id = f.person_id
+         WHERE i.albumId = ? AND f.image_id = ? ORDER BY f.id`
+      )
+      .all(albumId, imageId) as Array<Parameters<typeof parseFace>[0] & { name: string | null }>
+  ).map((r) => ({ ...parseFace(r), name: r.name }))
+}
+
+export function hasPerson(albumId: string, personId: string): boolean {
+  return !!conn()
+    .prepare('SELECT 1 FROM people WHERE id = ? AND album_id = ?')
+    .get(personId, albumId)
+}
+
+function personInAlbum(d: Database.Database, albumId: string, personId: string): void {
+  if (!d.prepare('SELECT 1 FROM people WHERE id = ? AND album_id = ?').get(personId, albumId))
+    throw new Error('Person not found')
+}
+
+function mutatePeople(albumId: string, fn: (d: Database.Database) => void): void {
+  const d = conn()
+  d.transaction(() => {
+    fn(d)
+    bumpPeople(d, albumId)
+  })()
+}
+
+export function renamePerson(albumId: string, personId: string, name: string | null): void {
+  mutatePeople(albumId, (d) => {
+    personInAlbum(d, albumId, personId)
+    d.prepare('UPDATE people SET name = ? WHERE id = ?').run(name, personId)
+  })
+}
+
+export function setPersonHidden(albumId: string, personId: string, hidden: boolean): void {
+  mutatePeople(albumId, (d) => {
+    personInAlbum(d, albumId, personId)
+    d.prepare('UPDATE people SET hidden = ? WHERE id = ?').run(hidden ? 1 : 0, personId)
+  })
+}
+
+/** faceId must currently belong to the person. */
+export function setPersonCover(albumId: string, personId: string, faceId: number): void {
+  mutatePeople(albumId, (d) => {
+    personInAlbum(d, albumId, personId)
+    if (!d.prepare('SELECT 1 FROM faces WHERE id = ? AND person_id = ?').get(faceId, personId))
+      throw new Error("Cover must be one of this person's faces")
+    d.prepare('UPDATE people SET cover_face_id = ? WHERE id = ?').run(faceId, personId)
+  })
+}
+
+/**
+ * Merge people into `intoId`. Their faces are pinned to it with overrides, so re-clustering
+ * never splits them again. `intoId` keeps its name, or takes the first merged name if it has none.
+ */
+export function mergePeople(albumId: string, intoId: string, fromIds: string[]): void {
+  mutatePeople(albumId, (d) => {
+    personInAlbum(d, albumId, intoId)
+    for (const from of fromIds.filter((id) => id !== intoId)) {
+      personInAlbum(d, albumId, from)
+      d.prepare(
+        `INSERT OR REPLACE INTO face_overrides (face_id, person_id)
+         SELECT id, ? FROM faces WHERE person_id = ?`
+      ).run(intoId, from)
+      d.prepare('UPDATE face_overrides SET person_id = ? WHERE person_id = ?').run(intoId, from)
+      d.prepare('UPDATE faces SET person_id = ? WHERE person_id = ?').run(intoId, from)
+      d.prepare(`UPDATE client_people SET person_id = ? WHERE person_id = ? AND album_id = ?`).run(
+        intoId,
+        from,
+        albumId
+      )
+      d.prepare(
+        `UPDATE people SET name = COALESCE(name, (SELECT name FROM people WHERE id = ?)) WHERE id = ?`
+      ).run(from, intoId)
+      d.prepare('DELETE FROM people WHERE id = ?').run(from)
+    }
+  })
+}
+
+/**
+ * Manually put a face on a person, on a new named person, or on no one. Overrides survive
+ * re-clustering. Returns the face's person id afterwards.
+ */
+export function assignFace(
+  albumId: string,
+  faceId: number,
+  target: { personId: string } | { newName: string } | { none: true }
+): string | null {
+  let personId: string | null = null
+  mutatePeople(albumId, (d) => {
+    const face = d
+      .prepare(
+        'SELECT 1 FROM faces f JOIN images i ON i.id = f.image_id WHERE f.id = ? AND i.albumId = ?'
+      )
+      .get(faceId, albumId)
+    if (!face) throw new Error('Face not found')
+    if ('personId' in target) {
+      personInAlbum(d, albumId, target.personId)
+      personId = target.personId
+    } else if ('newName' in target) {
+      personId = randomUUID()
+      d.prepare('INSERT INTO people (id, album_id, name) VALUES (?, ?, ?)').run(
+        personId,
+        albumId,
+        target.newName
+      )
+    }
+    d.prepare('INSERT OR REPLACE INTO face_overrides (face_id, person_id) VALUES (?, ?)').run(
+      faceId,
+      personId
+    )
+    d.prepare('UPDATE faces SET person_id = ? WHERE id = ?').run(personId, faceId)
+    // A cover that left its person stops being the cover
+    d.prepare('UPDATE people SET cover_face_id = NULL WHERE cover_face_id = ? AND id IS NOT ?').run(
+      faceId,
+      personId
+    )
+  })
+  return personId
+}
+
+export function setClientPerson(
+  albumId: string,
+  clientName: string,
+  personId: string | null
+): void {
+  const d = conn()
+  if (personId == null) {
+    d.prepare('DELETE FROM client_people WHERE album_id = ? AND client_name = ?').run(
+      albumId,
+      clientName
+    )
+    return
+  }
+  personInAlbum(d, albumId, personId)
+  d.prepare(
+    'INSERT OR REPLACE INTO client_people (album_id, client_name, person_id) VALUES (?, ?, ?)'
+  ).run(albumId, clientName, personId)
+}
+
+export function getClientPeople(albumId: string): Record<string, string> {
+  const rows = conn()
+    .prepare('SELECT client_name, person_id FROM client_people WHERE album_id = ?')
+    .all(albumId) as Array<{ client_name: string; person_id: string }>
+  return Object.fromEntries(rows.map((r) => [r.client_name, r.person_id]))
+}
+
+/** Clears the dirty counter only if no change landed since `seen` was read. */
+export function clearPeopleNeedPush(albumId: string, seen: number): void {
+  conn()
+    .prepare('UPDATE albums SET people_need_push = 0 WHERE id = ? AND people_need_push = ?')
+    .run(albumId, seen)
+}
+
+/** Photos changed under People (e.g. deleted): the server's people need a fresh push. */
+export function markPeopleDirty(albumId: string): void {
+  bumpPeople(conn(), albumId)
 }
 
 export function closeDatabase(): void {

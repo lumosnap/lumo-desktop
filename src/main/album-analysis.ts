@@ -34,6 +34,7 @@ import { uploadPipeline } from './pipeline'
 import { albumsApi } from './api-client'
 import { groupImages } from './grouping'
 import { readExifSignals, thumbnailSignals, ImageSignals } from './image-signals'
+import { scanFacesNow } from './people'
 import { createLogger, getErrorMessage } from './logger'
 
 const log = createLogger('Analysis')
@@ -272,7 +273,10 @@ let taggingAlbum: string | null = null
 const TAG_PUSH_EVERY = 200 // images between incremental pushes + UI refreshes
 const UPLOAD_POLL_MS = 5000
 
-/** Embed + tag images missing embeddings, once uploads are idle. Coalesces repeat calls. */
+/**
+ * Embed + tag images missing embeddings, once uploads are idle, then find faces if the album
+ * has People on (same chain, so the two models never run at once). Coalesces repeat calls.
+ */
 export function tagAlbum(albumId: string): void {
   if (tagQueued.has(albumId)) return
   tagQueued.add(albumId)
@@ -283,6 +287,8 @@ export function tagAlbum(albumId: string): void {
       return tagNow(albumId)
     })
     .catch((error) => log.error(`Tagging ${albumId} failed:`, getErrorMessage(error)))
+    .then(() => scanFacesNow(albumId, () => tagCancelled.has(albumId)))
+    .catch((error) => log.error(`People for ${albumId} failed:`, getErrorMessage(error)))
 }
 
 /** Stop tagging an album (e.g. it was deleted). Work done so far is kept. */

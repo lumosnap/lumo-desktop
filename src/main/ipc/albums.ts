@@ -53,6 +53,7 @@ import {
   type TagCategory
 } from '../tags/vocabulary'
 import { TAG_SLUG } from '../tags/select'
+import { imagePeople, peoplePhotosChanged } from '../people'
 import { watcherService } from '../watcher'
 import { createLogger, getErrorMessage } from '../logger'
 
@@ -263,6 +264,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
     try {
       const images = getAlbumImages(albumId)
       const tags = getAlbumTags(albumId)
+      const people = imagePeople(albumId)
 
       // Favorites are now loaded separately by the frontend to improve performance
       // Return images without favorite info (frontend will enrich later)
@@ -292,6 +294,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           isBurstCover: is_burst_cover === 1,
           momentId: moment_id ?? null,
           tags: tags.get(row.id) ?? [], // effective: manual adds, then AI tags not removed
+          people: people.get(row.id) ?? [], // shown people (named, or unnamed with ≥2 faces)
           isFavorite: false,
           favoriteCount: 0,
           notesCount: 0,
@@ -323,6 +326,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       // Delete from local database
       deleteImages([imageId])
       regroupAlbum(albumId)
+      peoplePhotosChanged(albumId)
 
       // Update album total count
       const album = getAlbum(albumId)
@@ -359,6 +363,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       // Delete from local database
       deleteImages(imageIds)
       regroupAlbum(albumId)
+      peoplePhotosChanged(albumId)
 
       // Update album total count
       const album = getAlbum(albumId)

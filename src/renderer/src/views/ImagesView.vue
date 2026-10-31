@@ -27,6 +27,8 @@ import {
   ChevronRight,
   Tag,
   SlidersHorizontal,
+  ScanFace,
+  UserRound,
   Image as ImageIcon
 } from 'lucide-vue-next'
 import PhotoTile from '../components/PhotoTile.vue'
@@ -63,6 +65,14 @@ import {
   presetSlugs,
   type AlbumTagConfig
 } from '../utils/tags'
+import {
+  faceCrop,
+  withPeople,
+  type Box,
+  type Face,
+  type PeopleConfig,
+  type Person
+} from '../utils/people'
 
 const route = useRoute()
 const networkStore = useNetworkStore()
@@ -94,6 +104,7 @@ interface Image extends GroupableImage {
   comments?: Comment[]
   favoritedBy?: string[] // client names who favorited this image
   tags?: string[]
+  people?: string[] // person ids
 }
 
 interface Album {
@@ -256,8 +267,19 @@ function viewSet(id: string | null): void {
 type Pop =
   | { kind: 'set'; set: AlbumSet }
   | { kind: 'add' }
-  | { kind: 'name'; label: string; name: string; submit: (name: string) => Promise<boolean> }
+  | {
+      kind: 'name'
+      label: string
+      name: string
+      submit: (name: string) => Promise<boolean>
+      placeholder?: string
+    }
   | { kind: 'tags'; ids: number[]; query: string }
+  | { kind: 'person'; person: Person }
+  | { kind: 'merge'; person: Person }
+  | { kind: 'face'; face: Face; imageId: number }
+  | { kind: 'link'; client: string }
+  | { kind: 'people' }
 const pop = ref<Pop | null>(null)
 const popStyle = ref<Record<string, string>>({})
 const popEl = ref<HTMLElement>()
@@ -268,7 +290,7 @@ async function openPop(p: Pop, e?: Event): Promise<void> {
   if (e) {
     popReturn = e.currentTarget as HTMLElement
     const r = popReturn.getBoundingClientRect()
-    const up = r.bottom + (p.kind === 'tags' ? 420 : 240) > innerHeight
+    const up = r.bottom + (p.kind === 'tags' || p.kind === 'merge' ? 420 : 240) > innerHeight
     popStyle.value = {
       left: `${Math.max(8, Math.min(r.left, innerWidth - 288))}px`,
       ...(up ? { bottom: `${innerHeight - r.top + 6}px` } : { top: `${r.bottom + 6}px` })
@@ -294,9 +316,10 @@ function promptName(
   label: string,
   name: string,
   submit: (name: string) => Promise<boolean>,
-  e?: Event
+  e?: Event,
+  placeholder?: string
 ): void {
-  openPop({ kind: 'name', label, name, submit }, e)
+  openPop({ kind: 'name', label, name, submit, placeholder }, e)
 }
 
 async function submitName(): Promise<void> {
@@ -428,11 +451,11 @@ async function confirmDeleteSet(): Promise<void> {
 
 // Capture-time order when the album has moments, else upload order
 const orderedImages = computed(() => orderForGrouping(images.value))
-// Set, then picks: the scope tag chips count over
+// Set, picks, then people: the scope tag chips count over
 const scopedImages = computed(() => {
   const inView = inSet(orderedImages.value, activeSet.value?.imageIds ?? null)
-  if (!showFavoritesOnly.value) return inView
-  return inView.filter((img) => img.isFavorite)
+  const picked = showFavoritesOnly.value ? inView.filter((img) => img.isFavorite) : inView
+  return withPeople(picked, activePeople.value)
 })
 const filteredImages = computed(() => withTags(scopedImages.value, activeTags.value))
 
@@ -615,6 +638,282 @@ async function saveTagSet(): Promise<void> {
   }
 }
 
+// People: faces found on this computer. Off per album until the photographer turns it on.
+const peopleApi = window.api.people
+const peopleCfg = ref<PeopleConfig | null>(null)
+const people = ref<Person[]>([])
+const activePeople = ref<string[]>([])
+const lastPerson = ref<string | null>(null) // the person the detail line under the faces is about
+const showHiddenPeople = ref(false)
+const showAllUnnamed = ref(false)
+const clientLinks = ref<Record<string, string>>({})
+const showPeopleOn = ref(false)
+const showPeopleOff = ref(false)
+const peopleBusy = ref(false)
+
+const imageById = computed(() => new Map(images.value.map((img) => [img.id, img])))
+const personById = computed(() => new Map(people.value.map((p) => [p.id, p])))
+const named = computed(() => people.value.filter((p) => p.name && !p.hidden))
+const unnamed = computed(() => people.value.filter((p) => !p.name && !p.hidden))
+const hiddenPeople = computed(() => people.value.filter((p) => p.hidden))
+const UNNAMED_SHOWN = 5
+const unnamedShown = computed(() =>
+  showAllUnnamed.value ? unnamed.value : unnamed.value.slice(0, UNNAMED_SHOWN)
+)
+const focusPerson = computed(() =>
+  lastPerson.value && activePeople.value.includes(lastPerson.value)
+    ? (personById.value.get(lastPerson.value) ?? null)
+    : null
+)
+const personName = (p: Person | undefined | null): string => p?.name ?? 'Unnamed'
+function peopleNames(ids: readonly string[]): string {
+  const ps = ids.map((id) => personById.value.get(id))
+  const names = ps.flatMap((p) => (p?.name ? [firstName(p.name)] : []))
+  const rest = ps.length - names.length
+  if (!names.length) return rest === 1 ? 'an unnamed person' : `${nf(rest)} unnamed people`
+  return [...names, ...(rest ? [`${nf(rest)} unnamed`] : [])].join(' + ')
+}
+
+/** Inline style that turns a .avatar into the person's face, cut from the cover thumbnail */
+function faceStyle(p: Person | undefined | null): Record<string, string> | undefined {
+  if (!p) return undefined
+  const img = imageById.value.get(p.cover.imageId)
+  return {
+    backgroundImage: `url(${JSON.stringify(`file://${p.cover.path}`)})`,
+    ...faceCrop(p.cover.box as Box, img?.width && img.height ? img.width / img.height : 0)
+  }
+}
+
+async function peopleCall(call: () => Promise<unknown>, what: string): Promise<boolean> {
+  try {
+    const r = (await call()) as { success?: boolean; error?: string } | undefined
+    if (r && r.success === false) throw new Error(r.error)
+    return true
+  } catch (err) {
+    toast(`Couldn't ${what}: ${err instanceof Error ? err.message : String(err)}`)
+    return false
+  }
+}
+
+async function loadPeople(): Promise<void> {
+  if (!peopleApi) return
+  try {
+    peopleCfg.value = await peopleApi.getConfig(albumId)
+    if (!peopleCfg.value.enabled) {
+      people.value = []
+      activePeople.value = []
+      return
+    }
+    const [list, links] = await Promise.all([
+      peopleApi.list(albumId),
+      peopleApi.clientLinks(albumId)
+    ])
+    people.value = list
+    clientLinks.value = links
+    const ids = new Set(list.map((p) => p.id))
+    if (activePeople.value.some((id) => !ids.has(id)))
+      activePeople.value = activePeople.value.filter((id) => ids.has(id))
+  } catch {
+    // no people data: the card stays hidden
+  }
+}
+
+// Progress has no event of its own: read it every few seconds while faces are being found
+let peoplePoll: ReturnType<typeof setInterval> | null = null
+watch(
+  () => peopleCfg.value?.state,
+  (st) => {
+    const busy = st === 'waiting' || st === 'running' || st === 'paused'
+    if (busy && !peoplePoll) peoplePoll = setInterval(loadPeople, 3000)
+    if (!busy && peoplePoll) {
+      clearInterval(peoplePoll)
+      peoplePoll = null
+    }
+  }
+)
+
+function togglePerson(id: string): void {
+  const on = activePeople.value.includes(id)
+  activePeople.value = on ? activePeople.value.filter((x) => x !== id) : [...activePeople.value, id]
+  lastPerson.value = on ? (activePeople.value.at(-1) ?? null) : id
+  clearSelection()
+  // The line to name this person sits under the faces: keep it in view in a long panel
+  nextTick(() => document.querySelector('.face-focus')?.scrollIntoView({ block: 'nearest' }))
+}
+
+async function turnPeopleOn(): Promise<void> {
+  if (!peopleApi || peopleBusy.value) return
+  peopleBusy.value = true
+  if (await peopleCall(() => peopleApi.setEnabled(albumId, true), 'turn on People')) {
+    showPeopleOn.value = false
+    await loadPeople()
+  }
+  peopleBusy.value = false
+}
+
+async function turnPeopleOff(): Promise<void> {
+  if (!peopleApi || peopleBusy.value) return
+  peopleBusy.value = true
+  if (await peopleCall(() => peopleApi.setEnabled(albumId, false), 'turn off People')) {
+    showPeopleOff.value = false
+    clientLinks.value = {}
+    faceCache.clear()
+    await loadPeople()
+    renderLbFaces()
+    toast('People is off. Face data for this album is deleted.')
+  }
+  peopleBusy.value = false
+}
+
+async function afterPeopleEdit(): Promise<void> {
+  faceCache.clear()
+  await loadPeople()
+  renderLbFaces()
+}
+
+function namePerson(p: Person, e?: Event): void {
+  promptName(
+    p.name ? 'Rename' : 'Who is this?',
+    p.name ?? '',
+    async (name) => {
+      // A name already in use means the same person: merge, so there are never two Rahuls
+      const same = named.value.find(
+        (x) => x.id !== p.id && x.name!.toLowerCase() === name.toLowerCase()
+      )
+      if (same) return mergePerson(p, same).then(() => true)
+      const ok = await peopleCall(() => peopleApi!.rename(albumId, p.id, name), 'save the name')
+      if (ok) await afterPeopleEdit()
+      return ok
+    },
+    e,
+    'Name'
+  )
+}
+
+async function mergePerson(from: Person, into: Person): Promise<void> {
+  closePop()
+  if (await peopleCall(() => peopleApi!.merge(albumId, into.id, [from.id]), 'merge')) {
+    activePeople.value = activePeople.value.map((id) => (id === from.id ? into.id : id))
+    if (lastPerson.value === from.id) lastPerson.value = into.id
+    toast(`Merged into ${personName(into)}`)
+    await afterPeopleEdit()
+  }
+}
+
+async function hidePerson(p: Person, hidden: boolean): Promise<void> {
+  closePop()
+  if (!(await peopleCall(() => peopleApi!.setHidden(albumId, p.id, hidden), 'update'))) return
+  if (hidden) {
+    activePeople.value = activePeople.value.filter((id) => id !== p.id)
+    toast(`${personName(p)} is hidden`, { label: 'Undo', run: () => hidePerson(p, false) })
+  }
+  await afterPeopleEdit()
+}
+
+const mergeTargets = computed(() => {
+  const p = pop.value
+  if (p?.kind !== 'merge') return []
+  return people.value.filter((x) => x.id !== p.person.id && !x.hidden)
+})
+
+// Client link: which named person a client is. Only the photographer sees it.
+async function linkClient(client: string, personId: string | null): Promise<void> {
+  closePop()
+  if (await peopleCall(() => peopleApi!.linkClient(albumId, client, personId), 'link')) {
+    const next = { ...clientLinks.value }
+    if (personId) next[client] = personId
+    else delete next[client]
+    clientLinks.value = next
+  }
+}
+const linkedPerson = (client: string): Person | undefined =>
+  personById.value.get(clientLinks.value[client] ?? '')
+
+// Faces in the lightbox: boxes over the photo, each opens "Who is this?"
+const faceMode = ref(false)
+const faceCache = new Map<number, Promise<Face[]>>()
+const facesFor = (imageId: number): Promise<Face[]> => {
+  let f = faceCache.get(imageId)
+  if (!f) {
+    f = peopleApi!.facesInImage(albumId, imageId).catch(() => [])
+    faceCache.set(imageId, f)
+  }
+  return f
+}
+
+let lbFacesBtn: HTMLElement | null = null
+async function renderLbFaces(): Promise<void> {
+  const pswp = lightbox?.pswp
+  if (!pswp) return
+  const on = !!peopleCfg.value?.enabled
+  if (lbFacesBtn) {
+    lbFacesBtn.hidden = !on
+    lbFacesBtn.setAttribute('aria-pressed', String(on && faceMode.value))
+  }
+  pswp.element?.querySelectorAll('.lb-faces').forEach((el) => el.remove())
+  const slide = pswp.currSlide
+  const img = slideImage(pswp)
+  if (!on || !faceMode.value || !slide || !img) return
+  const faces = await facesFor(img.id)
+  if (pswp.currSlide !== slide || !faceMode.value) return
+  const layer = document.createElement('div')
+  layer.className = 'lb-faces'
+  const el = slide.content.element
+  layer.style.width = el?.style.width || `${slide.width * slide.zoomLevels.initial}px`
+  layer.style.height = el?.style.height || `${slide.height * slide.zoomLevels.initial}px`
+  for (const f of faces) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'lb-face' + (f.personId ? '' : ' none')
+    const [x, y, w, h] = f.box
+    Object.assign(b.style, {
+      left: `${x * 100}%`,
+      top: `${y * 100}%`,
+      width: `${w * 100}%`,
+      height: `${h * 100}%`
+    })
+    b.setAttribute('aria-haspopup', 'dialog')
+    b.setAttribute('aria-label', f.name ? `${f.name}, change` : 'Who is this?')
+    if (f.name) {
+      const n = document.createElement('span')
+      n.textContent = firstName(f.name)
+      b.append(n)
+    }
+    // PhotoSwipe reads a press on the photo as zoom or close
+    b.onpointerdown = (e) => e.stopPropagation()
+    b.onclick = (e) => openPop({ kind: 'face', face: f, imageId: img.id }, e)
+    layer.append(b)
+  }
+  slide.container.append(layer)
+}
+
+async function assignFace(
+  to: { personId: string } | { newName: string } | { none: true }
+): Promise<boolean> {
+  const p = pop.value
+  if (p?.kind !== 'face') return false
+  const ok = await peopleCall(() => peopleApi!.assignFace(albumId, p.face.faceId, to), 'save')
+  if (ok) {
+    closePop()
+    await afterPeopleEdit()
+  }
+  return ok
+}
+
+function newPersonForFace(): void {
+  promptName('New person', '', (name) => assignFace({ newName: name }), undefined, 'Name')
+}
+
+async function useFaceAsCover(): Promise<void> {
+  const p = pop.value
+  if (p?.kind !== 'face' || !p.face.personId) return
+  const { personId, faceId, name } = p.face
+  closePop()
+  if (await peopleCall(() => peopleApi!.setCover(albumId, personId, faceId), 'set the face'))
+    toast(`${name ?? 'This person'} now shows this face`)
+  await afterPeopleEdit()
+}
+
 const grid = computed(() =>
   flattenRows(filteredImages.value, { columns: columns.value, stackBursts: stackBursts.value })
 )
@@ -710,7 +1009,7 @@ watch(
   { flush: 'post' }
 )
 // A new set or filter starts from its first photo. The pinned bar stays put under the pointer.
-watch([activeSetId, activeTags, showFavoritesOnly, selectedClientName], () => {
+watch([activeSetId, activeTags, showFavoritesOnly, selectedClientName, activePeople], () => {
   const el = scrollEl.value
   if (el && el.scrollTop > stuckAt.value) el.scrollTop = stuckAt.value
 })
@@ -741,11 +1040,13 @@ const statusLine = computed(() => {
 
 const barTitle = computed(() => {
   const base = activeSet.value?.name
-  if (!showFavoritesOnly.value) return base ?? 'All photos'
-  const picks = selectedClientName.value
-    ? `${firstName(selectedClientName.value)}'s picks`
-    : 'Client picks'
-  return base ? `${base} · ${picks}` : picks
+  const picks = !showFavoritesOnly.value
+    ? (base ?? 'All photos')
+    : selectedClientName.value
+      ? `${firstName(selectedClientName.value)}'s picks`
+      : 'Client picks'
+  const head = base && showFavoritesOnly.value ? `${base} · ${picks}` : picks
+  return activePeople.value.length ? `${head} · with ${peopleNames(activePeople.value)}` : head
 })
 
 const formattedEventDate = computed(() => {
@@ -796,6 +1097,7 @@ async function loadAlbumImages(): Promise<void> {
 // Grouping changed in main: swap in the new fields in place, keeping picks and scroll position
 let offAnalyzed: (() => void) | null = null
 let offSetsChanged: (() => void) | null = null
+let offPeopleChanged: (() => void) | undefined
 async function refreshGrouping(): Promise<void> {
   const result = await window.api.albums.getImages(albumId)
   if (!result.success || !result.images) return
@@ -1154,6 +1456,31 @@ function initLightbox(): void {
       }
     })
 
+    // Faces: boxes over the people found in this photo
+    ui.registerElement({
+      name: 'faces-button',
+      order: 8.5,
+      isButton: true,
+      tagName: 'button',
+      title: 'Faces',
+      ariaLabel: 'Faces',
+      html: ICON(
+        '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>'
+      ),
+      onInit: (el, pswp) => {
+        lbFacesBtn = el
+        pswp.on('change', renderLbFaces)
+        pswp.on('imageSizeChange', ({ slide, width, height }) => {
+          const layer = slide.container.querySelector<HTMLElement>('.lb-faces')
+          if (layer) Object.assign(layer.style, { width: `${width}px`, height: `${height}px` })
+        })
+      },
+      onClick: () => {
+        faceMode.value = !faceMode.value
+        renderLbFaces()
+      }
+    })
+
     // Notes button opens the notes panel
     ui.registerElement({
       name: 'notes-button',
@@ -1190,6 +1517,7 @@ function initLightbox(): void {
     if (lbRoot.value) closePop()
     lbRoot.value = null
     lbTagsEl = null
+    lbFacesBtn = null
   })
 
   lightbox.init()
@@ -1237,6 +1565,12 @@ onMounted(() => {
   })
   loadSets()
   loadTagConfig()
+  loadPeople()
+  offPeopleChanged = peopleApi?.onPeopleChanged((id) => {
+    if (id !== albumId) return
+    afterPeopleEdit()
+    if (!loading.value) refreshGrouping()
+  })
   offSetsChanged = window.api.sets.onSetsChanged((id) => {
     if (id === albumId) loadSets()
   })
@@ -1253,6 +1587,8 @@ onUnmounted(() => {
   bannerObserver.disconnect()
   offAnalyzed?.()
   offSetsChanged?.()
+  offPeopleChanged?.()
+  if (peoplePoll) clearInterval(peoplePoll)
   document.removeEventListener('pointerdown', onDocPointer)
   document.removeEventListener('keydown', onDocKey)
   document.removeEventListener('wheel', onDocScroll, true)
@@ -1350,17 +1686,178 @@ onUnmounted(() => {
           <template v-if="clientNames.length">
             <div style="margin: 16px 0 8px; font-size: 13px; color: var(--ink-3)">Picked by</div>
             <div class="people">
-              <button
-                v-for="name in clientNames"
-                :key="name"
-                class="person"
-                :aria-pressed="selectedClientName === name"
-                @click="pickClient(name)"
+              <div v-for="name in clientNames" :key="name" class="person-row">
+                <button
+                  class="person"
+                  :aria-pressed="selectedClientName === name"
+                  @click="pickClient(name)"
+                >
+                  <span
+                    v-if="linkedPerson(name)"
+                    class="avatar face"
+                    :style="faceStyle(linkedPerson(name))"
+                    :title="`${name} is ${personName(linkedPerson(name))}`"
+                  ></span>
+                  <span v-else class="avatar">{{ initials(name) }}</span
+                  >{{ name }}
+                  <span class="n num">{{ nf(clientCounts[name] || 0) }}</span>
+                </button>
+                <button
+                  v-if="peopleCfg?.enabled && named.length"
+                  class="icon-btn sm plain link-face"
+                  :class="{ on: !!linkedPerson(name) }"
+                  aria-haspopup="menu"
+                  :aria-expanded="pop?.kind === 'link' && pop.client === name"
+                  :aria-label="`Which person is ${name}?`"
+                  :title="`Which person is ${name}?`"
+                  @click="openPop({ kind: 'link', client: name }, $event)"
+                >
+                  <UserRound />
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div v-if="peopleCfg" class="card faces-card">
+          <div class="faces-h">
+            <span>People</span>
+            <button
+              v-if="peopleCfg.enabled"
+              class="icon-btn sm plain"
+              aria-label="People options"
+              title="People options"
+              aria-haspopup="menu"
+              :aria-expanded="pop?.kind === 'people'"
+              @click="openPop({ kind: 'people' }, $event)"
+            >
+              <MoreHorizontal />
+            </button>
+          </div>
+
+          <template v-if="!peopleCfg.enabled">
+            <p class="faces-note">See the photos each person is in.</p>
+            <button class="btn sm ghost" aria-haspopup="dialog" @click="showPeopleOn = true">
+              <ScanFace />Find people…
+            </button>
+          </template>
+
+          <template v-else>
+            <div v-if="peopleCfg.state !== 'done'" class="faces-progress">
+              <div
+                class="bar"
+                :class="{ paused: peopleCfg.state === 'paused' }"
+                role="progressbar"
+                aria-valuemin="0"
+                :aria-valuemax="peopleCfg.total || undefined"
+                :aria-valuenow="peopleCfg.processed"
+                aria-label="Finding faces"
               >
-                <span class="avatar">{{ initials(name) }}</span
-                >{{ name }}
-                <span class="n num">{{ nf(clientCounts[name] || 0) }}</span>
+                <span
+                  :style="{ '--p': peopleCfg.total ? peopleCfg.processed / peopleCfg.total : 0 }"
+                ></span>
+              </div>
+              <p class="faces-note num" aria-live="polite">
+                <template v-if="peopleCfg.state === 'paused'">
+                  Paused to keep your computer cool and its battery up. It resumes on its own.
+                </template>
+                <template v-else-if="peopleCfg.state === 'waiting'">
+                  Starts when the photos are in.
+                </template>
+                <template v-else>
+                  Finding faces · {{ nf(peopleCfg.processed) }} of {{ photos(peopleCfg.total) }}
+                </template>
+              </p>
+            </div>
+
+            <p v-if="peopleCfg.state === 'done' && !people.length" class="faces-note">
+              No faces found in these photos.
+            </p>
+
+            <div v-if="named.length" class="faces" role="group" aria-label="People">
+              <button
+                v-for="p in named"
+                :key="p.id"
+                class="face-btn"
+                :aria-pressed="activePeople.includes(p.id)"
+                :title="`${p.name} · ${photos(p.photoCount)}`"
+                :aria-label="`${p.name}, ${photos(p.photoCount)}`"
+                @click="togglePerson(p.id)"
+                @contextmenu.prevent="openPop({ kind: 'person', person: p }, $event)"
+              >
+                <span class="avatar face" :style="faceStyle(p)"></span>
+                <span class="face-n">{{ firstName(p.name!) }}</span>
               </button>
+            </div>
+
+            <template v-if="unnamed.length">
+              <div class="faces-sub">
+                {{ named.length ? 'Not named yet' : 'Name the people who matter most' }}
+              </div>
+              <div class="faces small" role="group" aria-label="People not named yet">
+                <button
+                  v-for="(p, i) in unnamedShown"
+                  :key="p.id"
+                  class="face-btn"
+                  :aria-pressed="activePeople.includes(p.id)"
+                  :aria-label="`Unnamed person ${i + 1}, ${photos(p.photoCount)}`"
+                  :title="photos(p.photoCount)"
+                  @click="togglePerson(p.id)"
+                  @contextmenu.prevent="openPop({ kind: 'person', person: p }, $event)"
+                >
+                  <span class="avatar face" :style="faceStyle(p)"></span>
+                </button>
+                <button
+                  v-if="unnamed.length > UNNAMED_SHOWN"
+                  class="face-more num"
+                  @click="showAllUnnamed = !showAllUnnamed"
+                >
+                  {{ showAllUnnamed ? 'Fewer' : `+${nf(unnamed.length - UNNAMED_SHOWN)}` }}
+                </button>
+              </div>
+            </template>
+
+            <!-- The person whose photos are shown: name them here, while their photos are in view -->
+            <div v-if="focusPerson" class="face-focus">
+              <span class="t">{{ personName(focusPerson) }}</span>
+              <span class="n num">{{ photos(focusPerson.photoCount) }}</span>
+              <button
+                v-if="!focusPerson.name"
+                class="btn sm ghost"
+                aria-haspopup="dialog"
+                @click="namePerson(focusPerson, $event)"
+              >
+                Name…
+              </button>
+              <button
+                class="icon-btn sm plain"
+                aria-haspopup="menu"
+                :aria-expanded="pop?.kind === 'person'"
+                :aria-label="`Options for ${personName(focusPerson)}`"
+                :title="`Options for ${personName(focusPerson)}`"
+                @click="openPop({ kind: 'person', person: focusPerson }, $event)"
+              >
+                <MoreHorizontal />
+              </button>
+            </div>
+
+            <div v-if="hiddenPeople.length" class="faces-hidden">
+              <button class="link" @click="showHiddenPeople = !showHiddenPeople">
+                {{ showHiddenPeople ? 'Hide' : 'Show' }} {{ nf(hiddenPeople.length) }} hidden
+                {{ hiddenPeople.length === 1 ? 'person' : 'people' }}
+              </button>
+              <div v-if="showHiddenPeople" class="faces small" role="group" aria-label="Hidden">
+                <button
+                  v-for="p in hiddenPeople"
+                  :key="p.id"
+                  class="face-btn"
+                  :aria-label="`Show ${personName(p)} again`"
+                  :title="`Show ${personName(p)} again`"
+                  @click="hidePerson(p, false)"
+                >
+                  <span class="avatar face" :style="faceStyle(p)"></span>
+                </button>
+              </div>
             </div>
           </template>
         </div>
@@ -1519,6 +2016,12 @@ onUnmounted(() => {
           <button class="btn ghost" @click="clearTags">Clear tags</button>
         </div>
 
+        <div v-else-if="filteredImages.length === 0 && activePeople.length" class="empty">
+          <h2>No photos with {{ peopleNames(activePeople) }}</h2>
+          <p>Try fewer people{{ activeSet || showFavoritesOnly ? ', or a wider view' : '' }}.</p>
+          <button class="btn ghost" @click="activePeople = []">Show everyone</button>
+        </div>
+
         <div
           v-else-if="filteredImages.length === 0 && activeSet && !showFavoritesOnly"
           class="empty"
@@ -1617,7 +2120,7 @@ onUnmounted(() => {
         v-if="pop"
         ref="popEl"
         class="menu"
-        :class="{ 'tag-pick': pop.kind === 'tags' }"
+        :class="{ 'tag-pick': pop.kind === 'tags', 'pick-people': pop.kind === 'merge' }"
         :role="pop.kind === 'name' || pop.kind === 'tags' ? 'dialog' : 'menu'"
         :aria-label="
           pop.kind === 'name'
@@ -1698,13 +2201,96 @@ onUnmounted(() => {
               class="input"
               maxlength="120"
               autocomplete="off"
-              placeholder="Set name"
+              :placeholder="pop.placeholder ?? 'Set name'"
             />
             <button class="btn primary" :disabled="!pop.name.trim() || popBusy">
               <span v-if="popBusy" class="spin"></span>Save
             </button>
           </div>
         </form>
+        <template v-else-if="pop.kind === 'person'">
+          <button role="menuitem" @click="namePerson(pop.person)">
+            <Pencil />{{ pop.person.name ? 'Rename…' : 'Name…' }}
+          </button>
+          <button role="menuitem" @click="openPop({ kind: 'merge', person: pop.person })">
+            <UserRound />Same person as…
+          </button>
+          <hr />
+          <button role="menuitem" @click="hidePerson(pop.person, true)"><X />Not important</button>
+        </template>
+        <template v-else-if="pop.kind === 'merge'">
+          <div class="pick-h">Same person as</div>
+          <button
+            v-for="p in mergeTargets.filter((x) => x.name)"
+            :key="p.id"
+            role="menuitem"
+            @click="mergePerson(pop.person, p)"
+          >
+            <span class="avatar face xs" :style="faceStyle(p)"></span>{{ p.name
+            }}<span class="n num">{{ nf(p.photoCount) }}</span>
+          </button>
+          <template v-if="mergeTargets.some((x) => !x.name)">
+            <div class="pick-h">Not named yet</div>
+            <div class="merge-faces">
+              <button
+                v-for="(p, i) in mergeTargets.filter((x) => !x.name)"
+                :key="p.id"
+                role="menuitem"
+                :aria-label="`Unnamed person ${i + 1}, ${photos(p.photoCount)}`"
+                :title="photos(p.photoCount)"
+                @click="mergePerson(pop.person, p)"
+              >
+                <span class="avatar face" :style="faceStyle(p)"></span>
+              </button>
+            </div>
+          </template>
+        </template>
+        <template v-else-if="pop.kind === 'face'">
+          <div class="pick-h">Who is this?</div>
+          <button
+            v-for="p in named"
+            :key="p.id"
+            role="menuitem"
+            :aria-current="pop.face.personId === p.id || undefined"
+            @click="assignFace({ personId: p.id })"
+          >
+            <span class="avatar face xs" :style="faceStyle(p)"></span>{{ p.name
+            }}<Check v-if="pop.face.personId === p.id" class="cur" />
+          </button>
+          <button role="menuitem" @click="newPersonForFace"><Plus />New person…</button>
+          <template v-if="pop.face.personId">
+            <hr />
+            <button v-if="pop.face.name" role="menuitem" @click="useFaceAsCover">
+              <ImageIcon />Use this face for {{ firstName(pop.face.name) }}
+            </button>
+            <button role="menuitem" class="bad" @click="assignFace({ none: true })">
+              <X />Not {{ pop.face.name ? firstName(pop.face.name) : 'this person' }}
+            </button>
+          </template>
+        </template>
+        <template v-else-if="pop.kind === 'link'">
+          <div class="pick-h">Which person is {{ firstName(pop.client) }}?</div>
+          <button
+            v-for="p in named"
+            :key="p.id"
+            role="menuitem"
+            @click="linkClient(pop.client, p.id)"
+          >
+            <span class="avatar face xs" :style="faceStyle(p)"></span>{{ p.name
+            }}<Check v-if="clientLinks[pop.client] === p.id" class="cur" />
+          </button>
+          <template v-if="clientLinks[pop.client]">
+            <hr />
+            <button role="menuitem" @click="linkClient(pop.client, null)">
+              <X />Not in the photos
+            </button>
+          </template>
+        </template>
+        <template v-else-if="pop.kind === 'people'">
+          <button role="menuitem" class="bad" @click="(closePop(), (showPeopleOff = true))">
+            <Trash2 />Turn off People…
+          </button>
+        </template>
         <template v-else-if="pop.kind === 'add'">
           <button v-for="s in sets" :key="s.id" role="menuitem" @click="addSelectedTo(s)">
             {{ s.name }}<span class="n num">{{ nf(s.imageIds.length) }}</span>
@@ -1818,6 +2404,52 @@ onUnmounted(() => {
         </button>
         <button class="btn primary" :disabled="savingTagSet" @click="saveTagSet">
           <span v-if="savingTagSet" class="spin"></span>Save
+        </button>
+      </template>
+    </Modal>
+
+    <Modal
+      :show="showPeopleOn"
+      title="Find people in photos"
+      :sub="album?.title"
+      @close="!peopleBusy && (showPeopleOn = false)"
+    >
+      <ul class="consent">
+        <li>LumoSnap finds the faces on this computer. No photo is sent anywhere to do it.</li>
+        <li>
+          Your client's gallery gets only the names you give, each with a small crop of the face.
+        </li>
+        <li>
+          Turn it on only if
+          {{ tagConfig?.eventType === 'wedding' ? 'the couple agrees' : 'your client agrees' }}.
+        </li>
+        <li>Turn it off at any time. That deletes all face data, here and online.</li>
+      </ul>
+      <template #footer>
+        <button class="btn ghost" :disabled="peopleBusy" @click="showPeopleOn = false">
+          Cancel
+        </button>
+        <button class="btn primary" :disabled="peopleBusy" autofocus @click="turnPeopleOn">
+          <span v-if="peopleBusy" class="spin"></span>Turn on
+        </button>
+      </template>
+    </Modal>
+
+    <Modal
+      :show="showPeopleOff"
+      title="Turn off People?"
+      @close="!peopleBusy && (showPeopleOff = false)"
+    >
+      <p>
+        This deletes every face and name in this album, on this computer and in your client's
+        gallery. The photos stay. Client links to people go too.
+      </p>
+      <template #footer>
+        <button class="btn ghost" :disabled="peopleBusy" autofocus @click="showPeopleOff = false">
+          Cancel
+        </button>
+        <button class="btn danger" :disabled="peopleBusy" @click="turnPeopleOff">
+          <span v-if="peopleBusy" class="spin"></span>Turn off and delete
         </button>
       </template>
     </Modal>
@@ -2133,6 +2765,216 @@ onUnmounted(() => {
   background: var(--brand-wash);
   color: var(--ink);
 }
+/* People: the faces card in the side panel, next to Picked by */
+.faces-card {
+  padding: 16px 24px 24px;
+}
+.faces-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  margin-right: -8px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.faces-note {
+  margin: 4px 0 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.faces-progress {
+  margin-top: 8px;
+}
+.faces-progress .faces-note {
+  margin: 8px 0 0;
+  color: var(--ink-3);
+}
+.bar.paused > span {
+  background: var(--line-2);
+}
+.faces {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px 4px;
+  margin-top: 12px;
+}
+.faces.small {
+  grid-template-columns: repeat(auto-fill, 32px);
+  gap: 8px;
+  margin-top: 8px;
+}
+.face-btn {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 99px;
+}
+.avatar.face {
+  background-color: var(--inset-2);
+  background-repeat: no-repeat;
+}
+.faces .avatar {
+  width: 44px;
+  height: 44px;
+  transition: box-shadow 0.12s var(--ease);
+}
+.faces.small .avatar {
+  width: 32px;
+  height: 32px;
+}
+.face-btn:hover .avatar {
+  box-shadow:
+    0 0 0 2px var(--card),
+    0 0 0 4px var(--line-2);
+}
+.face-btn[aria-pressed='true'] .avatar {
+  box-shadow:
+    0 0 0 2px var(--card),
+    0 0 0 4px var(--brand);
+}
+.face-btn:focus-visible {
+  outline: 0;
+}
+.face-btn:focus-visible .avatar {
+  outline: 2px solid var(--brand);
+  outline-offset: 4px;
+}
+.face-n {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.face-btn[aria-pressed='true'] .face-n {
+  color: var(--ink);
+}
+.faces-sub {
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.face-more {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--inset);
+  color: var(--ink-2);
+  font-size: 11px;
+  padding: 0;
+}
+.face-more:hover {
+  background: var(--inset-2);
+}
+.face-focus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px -12px 0;
+  padding: 4px 4px 4px 12px;
+  border-radius: var(--r-ctl);
+  background: var(--inset);
+  font-size: 13px;
+}
+.face-focus .t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.face-focus .n {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin-right: auto;
+  white-space: nowrap;
+}
+.face-focus .btn.sm {
+  height: 28px;
+  padding: 0 12px;
+}
+.faces-hidden {
+  margin-top: 16px;
+  font-size: 12px;
+}
+.faces-hidden .avatar {
+  opacity: 0.5;
+}
+.menu .avatar.xs {
+  width: 24px;
+  height: 24px;
+}
+.menu .cur {
+  margin-left: auto;
+  width: 16px;
+  height: 16px;
+  color: var(--brand);
+}
+.merge-faces {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 40px);
+  gap: 4px;
+  padding: 0 8px 4px;
+}
+.menu .merge-faces button {
+  width: 40px;
+  height: 40px;
+  padding: 4px;
+  border-radius: 50%;
+}
+.pick-people {
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+}
+/* Picked by: the row is the filter; the small face button beside it links the client to a person */
+.person-row {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--line);
+}
+.person-row:last-child {
+  border-radius: 0 0 var(--r-card) var(--r-card);
+  overflow: hidden;
+}
+.person-row .person {
+  border-top: 0;
+  border-radius: 0;
+  padding-right: 8px;
+  min-width: 0;
+}
+.person-row:hover {
+  background: var(--inset);
+}
+.person-row .person:hover {
+  background: none;
+}
+.person-row:has(.person[aria-pressed='true']) {
+  background: var(--brand-wash);
+}
+.link-face {
+  flex: none;
+  margin-right: 16px;
+  color: var(--ink-3);
+  opacity: 0.5;
+}
+.person-row:hover .link-face,
+.link-face:focus-visible,
+.link-face[aria-expanded='true'] {
+  opacity: 1;
+}
+.consent {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  color: var(--ink-2);
+}
 </style>
 
 <style>
@@ -2229,6 +3071,51 @@ onUnmounted(() => {
 }
 .pswp__lb-tags[hidden] {
   display: none;
+}
+.pswp__button--faces-button[hidden] {
+  display: none;
+}
+.pswp__button.pswp__button--faces-button[aria-pressed='true'] {
+  background: white;
+  color: var(--ink);
+}
+.lb-faces {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+.lb-face {
+  position: absolute;
+  padding: 0;
+  border: 2px solid oklch(100% 0 0 / 0.9);
+  border-radius: 10px;
+  background: none;
+  box-shadow: 0 0 0 1px oklch(0% 0 0 / 0.3);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.lb-face.none {
+  border-style: dashed;
+  border-color: oklch(100% 0 0 / 0.7);
+}
+.lb-face:hover,
+.lb-face:focus-visible {
+  border-color: white;
+  background: oklch(100% 0 0 / 0.08);
+  outline: none;
+}
+.lb-face span {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translate(-50%, 6px);
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: oklch(25% 0.005 255);
+  color: oklch(90% 0 0);
+  font-size: 12px;
+  white-space: nowrap;
 }
 .pswp__button,
 .pswp__button:hover,
