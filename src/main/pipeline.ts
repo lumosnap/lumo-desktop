@@ -3,7 +3,14 @@ import { join, basename, extname } from 'path'
 import { existsSync } from 'fs'
 import { stat } from 'fs/promises'
 import sharp from 'sharp'
-import { getAlbum, getAlbumImages, updateImage, updateAlbum, Image } from './database'
+import {
+  getAlbum,
+  getAlbumImages,
+  getImageStats,
+  updateImage,
+  updateAlbum,
+  Image
+} from './database'
 import { albumsApi, uploadToPresignedUrl } from './api-client'
 import { compressionPool } from './compression-pool'
 import { notificationService } from './notifications'
@@ -698,25 +705,7 @@ class UploadPipeline {
   }
 
   getProgress(albumId: string): UploadProgress {
-    const images = getAlbumImages(albumId)
-
-    const progress: UploadProgress = {
-      albumId,
-      total: images.length,
-      pending: 0,
-      compressing: 0,
-      uploading: 0,
-      complete: 0,
-      failed: 0,
-      failed_compression: 0,
-      failed_upload: 0
-    }
-
-    images.forEach((img) => {
-      progress[img.uploadStatus]++
-    })
-
-    return progress
+    return { albumId, ...getImageStats(albumId) }
   }
 
   async retryFailed(albumId: string, mainWindow: BrowserWindow | null): Promise<void> {

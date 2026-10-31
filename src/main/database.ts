@@ -46,73 +46,78 @@ export function initDatabase(): void {
 
   // Enable foreign keys
   db.pragma('foreign_keys = ON')
+  // WAL lets reads proceed during writes; busy_timeout waits instead of SQLITE_BUSY
+  db.pragma('journal_mode = WAL')
+  db.pragma('busy_timeout = 5000')
 
   // Create tables
   createTables()
 
-  // Migration: Add serverId column if it doesn't exist
-  try {
-    const tableInfo = db.pragma('table_info(images)') as Array<{ name: string }>
-    const hasServerId = tableInfo.some((col) => col.name === 'serverId')
-    if (!hasServerId) {
-      console.log('[Database] Adding serverId column to images table')
-      db.exec('ALTER TABLE images ADD COLUMN serverId INTEGER')
-    }
-  } catch (error) {
-    // The column-existence guard above means this catch only fires on a genuine,
-    // unexpected migration failure (not the benign "column already exists" case).
-    // Do not swallow it: a half-migrated schema is worse than a surfaced failure.
-    logger.error('serverId migration failed:', getErrorMessage(error), error)
-    throw error
-  }
-
-  // Migration: Add startTime and endTime columns to albums table
-  try {
-    const tableInfo = db.pragma('table_info(albums)') as Array<{ name: string }>
-    const hasStartTime = tableInfo.some((col) => col.name === 'startTime')
-    const hasEndTime = tableInfo.some((col) => col.name === 'endTime')
-
-    if (!hasStartTime) {
-      console.log('[Database] Adding startTime column to albums table')
-      db.exec('ALTER TABLE albums ADD COLUMN startTime TEXT')
-    }
-    if (!hasEndTime) {
-      console.log('[Database] Adding endTime column to albums table')
-      db.exec('ALTER TABLE albums ADD COLUMN endTime TEXT')
-    }
-  } catch (error) {
-    logger.error('albums startTime/endTime migration failed:', getErrorMessage(error), error)
-    throw error
-  }
-
-  // Migration: Add isOrphaned column if it doesn't exist
-  try {
-    const albumInfo = db.pragma('table_info(albums)') as Array<{ name: string }>
-    const hasIsOrphaned = albumInfo.some((col) => col.name === 'isOrphaned')
-    if (!hasIsOrphaned) {
-      console.log('[Database] Adding isOrphaned column to albums table')
-      db.exec('ALTER TABLE albums ADD COLUMN isOrphaned INTEGER DEFAULT 0')
-    }
-  } catch (error) {
-    logger.error('isOrphaned migration failed:', getErrorMessage(error), error)
-    throw error
-  }
-
-  // Migration: Add albumType column if it doesn't exist
-  try {
-    const albumInfo = db.pragma('table_info(albums)') as Array<{ name: string }>
-    const hasAlbumType = albumInfo.some((col) => col.name === 'albumType')
-    if (!hasAlbumType) {
-      console.log('[Database] Adding albumType column to albums table')
-      db.exec("ALTER TABLE albums ADD COLUMN albumType TEXT DEFAULT 'watch_folder'")
-    }
-  } catch (error) {
-    logger.error('albumType migration failed:', getErrorMessage(error), error)
-    throw error
-  }
+  runMigrations(db)
 
   // Create indexes
   createIndexes()
+}
+
+function hasColumn(database: Database.Database, table: string, column: string): boolean {
+  const tableInfo = database.pragma(`table_info(${table})`) as Array<{ name: string }>
+  return tableInfo.some((col) => col.name === column)
+}
+
+/**
+ * Ordered schema migrations. Migration N runs when user_version < N, then sets
+ * user_version = N in the same transaction. Append only; never reorder.
+ */
+const migrations: Array<(database: Database.Database) => void> = [
+  // 1: legacy column additions (guarded, so idempotent for installs that already have them)
+  (database) => {
+    if (!hasColumn(database, 'images', 'serverId')) {
+      database.exec('ALTER TABLE images ADD COLUMN serverId INTEGER')
+    }
+    if (!hasColumn(database, 'albums', 'startTime')) {
+      database.exec('ALTER TABLE albums ADD COLUMN startTime TEXT')
+    }
+    if (!hasColumn(database, 'albums', 'endTime')) {
+      database.exec('ALTER TABLE albums ADD COLUMN endTime TEXT')
+    }
+    if (!hasColumn(database, 'albums', 'isOrphaned')) {
+      database.exec('ALTER TABLE albums ADD COLUMN isOrphaned INTEGER DEFAULT 0')
+    }
+    if (!hasColumn(database, 'albums', 'albumType')) {
+      database.exec("ALTER TABLE albums ADD COLUMN albumType TEXT DEFAULT 'watch_folder'")
+    }
+  },
+  // 2: browse metadata (populated later)
+  (database) => {
+    database.exec(`
+      ALTER TABLE images ADD COLUMN captured_at INTEGER;
+      ALTER TABLE images ADD COLUMN burst_id TEXT;
+      ALTER TABLE images ADD COLUMN is_burst_cover INTEGER;
+      ALTER TABLE images ADD COLUMN moment_id TEXT;
+      ALTER TABLE images ADD COLUMN phash TEXT;
+      ALTER TABLE images ADD COLUMN sharpness REAL;
+      ALTER TABLE images ADD COLUMN thumbhash TEXT;
+      CREATE INDEX IF NOT EXISTS idx_images_album_captured ON images(albumId, captured_at);
+      CREATE INDEX IF NOT EXISTS idx_images_album_status ON images(albumId, uploadStatus);
+    `)
+  }
+]
+
+export function runMigrations(database: Database.Database): void {
+  const current = database.pragma('user_version', { simple: true }) as number
+  for (let version = current + 1; version <= migrations.length; version++) {
+    try {
+      database.transaction(() => {
+        migrations[version - 1](database)
+        database.pragma(`user_version = ${version}`)
+      })()
+      logger.info(`Applied migration ${version}`)
+    } catch (error) {
+      // A half-migrated schema is worse than a surfaced failure
+      logger.error(`Migration ${version} failed:`, getErrorMessage(error), error)
+      throw error
+    }
+  }
 }
 
 function createTables(): void {
@@ -485,5 +490,9 @@ export function deleteDatabase(): void {
   if (existsSync(dbPath)) {
     unlinkSync(dbPath)
     console.log('[Database] Database file deleted:', dbPath)
+  }
+  // WAL sidecar files
+  for (const sidecar of [`${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (existsSync(sidecar)) unlinkSync(sidecar)
   }
 }

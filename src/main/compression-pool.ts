@@ -144,24 +144,13 @@ class CompressionPool {
 
       worker.on('error', (error) => {
         logger.error(`Worker ${index} error:`, error)
-
-        // Reject current task if any
-        if (workerState.currentTaskId) {
-          const pendingTask = this.pendingTasks.get(workerState.currentTaskId)
-          if (pendingTask) {
-            this.pendingTasks.delete(workerState.currentTaskId)
-            pendingTask.reject(error)
-          }
-        }
-
-        // Restart worker
-        this.restartWorker(index, workerState)
+        this.restartWorker(index, workerState, error)
       })
 
       worker.on('exit', (code) => {
         if (code !== 0 && !this.isShuttingDown) {
           logger.warn(`Worker ${index} exited with code ${code}, restarting...`)
-          this.restartWorker(index, workerState)
+          this.restartWorker(index, workerState, new Error(`Worker exited with code ${code}`))
         }
       })
 
@@ -172,10 +161,18 @@ class CompressionPool {
   }
 
   /**
-   * Restart a crashed worker
+   * Restart a crashed or hung worker, rejecting its in-flight task.
+   * No-op if this worker was already replaced (error is followed by exit).
    */
-  private restartWorker(index: number, oldState: WorkerState): void {
-    if (this.isShuttingDown) return
+  private restartWorker(index: number, oldState: WorkerState, reason: Error): void {
+    if (this.isShuttingDown || this.workers[index] !== oldState) return
+
+    const taskId = oldState.currentTaskId
+    const pendingTask = taskId ? this.pendingTasks.get(taskId) : undefined
+    if (taskId && pendingTask) {
+      this.pendingTasks.delete(taskId)
+      pendingTask.reject(reason)
+    }
 
     try {
       oldState.worker.terminate().catch(() => {})
@@ -186,6 +183,10 @@ class CompressionPool {
     const workerPath = this.getWorkerPath()
     logger.info(`Restarting worker ${index}...`)
     this.createWorker(index, workerPath)
+
+    // Keep draining the queue on the fresh worker
+    const freshState = this.workers[index]
+    if (freshState !== oldState) this.processNextTask(freshState)
   }
 
   /**
@@ -197,6 +198,14 @@ class CompressionPool {
     const task = this.taskQueue.shift()
     if (!task) return
 
+    this.dispatch(workerState, task)
+  }
+
+  /**
+   * Send a task to a worker. On timeout the worker is still running the task,
+   * so it is terminated and respawned rather than marked free.
+   */
+  private dispatch(workerState: WorkerState, task: PendingTask): void {
     workerState.busy = true
     workerState.currentTaskId = task.taskId
     this.pendingTasks.set(task.taskId, task)
@@ -209,24 +218,16 @@ class CompressionPool {
       options: task.options
     })
 
-    // Set timeout for task
     setTimeout(() => {
       if (this.pendingTasks.has(task.taskId)) {
         logger.warn(`Task ${task.taskId} timed out`)
-        this.pendingTasks.delete(task.taskId)
-        workerState.busy = false
-        workerState.currentTaskId = null
-
-        task.resolve({
-          success: false,
-          compressedPath: '',
-          thumbnailPath: '',
-          width: 0,
-          height: 0,
-          fileSize: 0,
-          hash: '',
-          error: 'Compression timed out'
-        })
+        const index = this.workers.indexOf(workerState)
+        if (index !== -1) {
+          this.restartWorker(index, workerState, new Error('Compression timed out'))
+        } else {
+          this.pendingTasks.delete(task.taskId)
+          task.reject(new Error('Compression timed out'))
+        }
       }
     }, this.workerTimeout)
   }
@@ -255,39 +256,7 @@ class CompressionPool {
       const availableWorker = this.workers.find((w) => !w.busy)
 
       if (availableWorker) {
-        // Assign immediately
-        availableWorker.busy = true
-        availableWorker.currentTaskId = taskId
-        this.pendingTasks.set(taskId, task)
-
-        availableWorker.worker.postMessage({
-          taskId,
-          inputPath,
-          outputDir: options.outputDir,
-          precomputedHash: options.precomputedHash,
-          options
-        })
-
-        // Set timeout
-        setTimeout(() => {
-          if (this.pendingTasks.has(taskId)) {
-            logger.warn(`Task ${taskId} timed out`)
-            this.pendingTasks.delete(taskId)
-            availableWorker.busy = false
-            availableWorker.currentTaskId = null
-
-            resolve({
-              success: false,
-              compressedPath: '',
-              thumbnailPath: '',
-              width: 0,
-              height: 0,
-              fileSize: 0,
-              hash: '',
-              error: 'Compression timed out'
-            })
-          }
-        }, this.workerTimeout)
+        this.dispatch(availableWorker, task)
       } else {
         // Queue the task
         this.taskQueue.push(task)

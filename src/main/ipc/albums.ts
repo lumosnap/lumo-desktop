@@ -12,7 +12,8 @@ import {
   getAlbum,
   getAllAlbums,
   deleteAlbum as dbDeleteAlbum,
-  createImage,
+  createImagesBatch,
+  runInTransaction,
   getAlbumImages,
   deleteImages,
   updateAlbum
@@ -74,26 +75,25 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         // Scan source folder for images
         const imageFiles = scanImagesInFolder(data.sourceFolderPath)
 
-        // Create image records
-        imageFiles.forEach((file, index) => {
-          const localFilePath = join(localFolderPath, file.filename)
-          createImage({
-            albumId: album.id,
-            serverId: null,
-            originalFilename: file.filename,
-            localFilePath,
-            fileSize: file.size,
-            width: file.width || 0,
-            height: file.height || 0,
-            mtime: file.mtime,
-            sourceFileHash: null,
-            uploadStatus: 'pending',
-            uploadOrder: index
-          })
+        // Create image records and update total in one transaction
+        runInTransaction(() => {
+          createImagesBatch(
+            imageFiles.map((file, index) => ({
+              albumId: album.id,
+              serverId: null,
+              originalFilename: file.filename,
+              localFilePath: join(localFolderPath, file.filename),
+              fileSize: file.size,
+              width: file.width || 0,
+              height: file.height || 0,
+              mtime: file.mtime,
+              sourceFileHash: null,
+              uploadStatus: 'pending' as const,
+              uploadOrder: index
+            }))
+          )
+          updateAlbum(album.id, { totalImages: imageFiles.length })
         })
-
-        // Update album total images count
-        updateAlbum(album.id, { totalImages: imageFiles.length })
 
         // Start compression and upload pipeline
         uploadPipeline.startPipeline(album.id, mainWindow).catch((error) => {

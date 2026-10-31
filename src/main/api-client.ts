@@ -6,7 +6,8 @@
  */
 
 import { net } from 'electron'
-import { readFileSync } from 'fs'
+import { createReadStream } from 'fs'
+import { stat } from 'fs/promises'
 import { getToken } from './auth-storage'
 
 // Get API URL from environment (set in electron.vite.config.ts)
@@ -545,11 +546,18 @@ export async function uploadToPresignedUrl(
   const http = await import('http')
   const { URL } = await import('url')
 
+  let fileSize: number
+  try {
+    fileSize = (await stat(filePath)).size
+    console.log(`[API] File size: ${fileSize} bytes`)
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[API] File read error:', message)
+    return { success: false, error: message }
+  }
+
   return new Promise((resolve) => {
     try {
-      const fileBuffer = readFileSync(filePath)
-      console.log(`[API] File size: ${fileBuffer.length} bytes`)
-
       const urlObj = new URL(presignedUrl)
       const isHttps = urlObj.protocol === 'https:'
       const httpModule = isHttps ? https : http
@@ -561,7 +569,7 @@ export async function uploadToPresignedUrl(
         method: 'PUT',
         headers: {
           'Content-Type': 'image/webp',
-          'Content-Length': fileBuffer.length
+          'Content-Length': fileSize
         }
       }
 
@@ -591,8 +599,14 @@ export async function uploadToPresignedUrl(
         resolve({ success: false, error: error.message })
       })
 
-      req.write(fileBuffer)
-      req.end()
+      // Stream the file; Content-Length is set from stat so the presigned PUT is not chunked
+      const fileStream = createReadStream(filePath)
+      fileStream.on('error', (error) => {
+        console.error('[API] File read error:', error.message)
+        req.destroy()
+        resolve({ success: false, error: error.message })
+      })
+      fileStream.pipe(req)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       console.error('[API] File read error:', message)
