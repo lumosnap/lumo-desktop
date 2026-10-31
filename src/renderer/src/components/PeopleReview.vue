@@ -171,7 +171,7 @@ function crop(f: ReviewFace): Record<string, string> {
           @keydown="onKey($event, i)"
         >
           <span class="crop" :style="crop(f)"></span>
-          <span v-if="no.has(f.faceId)" class="mark"><X />Not {{ first }}</span>
+          <span v-if="no.has(f.faceId)" class="pr-not"><X />Not {{ first }}</span>
         </button>
       </div>
     </div>
@@ -289,7 +289,7 @@ function crop(f: ReviewFace): Record<string, string> {
   outline: 2px solid var(--brand);
   outline-offset: 3px;
 }
-.pr-face .mark {
+.pr-face .pr-not {
   position: absolute;
   inset: auto 6px 6px;
   display: flex;
@@ -303,7 +303,7 @@ function crop(f: ReviewFace): Record<string, string> {
   font-size: 12px;
   white-space: nowrap;
 }
-.pr-face .mark svg {
+.pr-face .pr-not svg {
   width: 14px;
   height: 14px;
 }
