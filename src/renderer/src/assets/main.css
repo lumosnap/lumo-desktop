@@ -1119,18 +1119,18 @@ select.input {
 /* The client's note sits with the hearts and looks like them: same white chip, the icon filled
    while there's something to do, outline + tick once done. Your own note (bottom right) stays the
    one dark chip on the tile. */
-.chip.note.open:not(.mine) svg {
+.chip.nchip.open:not(.mine) svg {
   fill: var(--ink);
   stroke: var(--ink);
 }
-.chip.note.mine.open {
+.chip.nchip.mine.open {
   background: oklch(21% 0.01 255 / 0.88);
   color: white;
 }
-.chip.note.done {
+.chip.nchip.done {
   color: var(--ink-3);
 }
-.chip.note .ok {
+.chip.nchip .ok {
   color: var(--ok);
 }
 /* Your note sits bottom right; the hover name bar keeps clear of it */

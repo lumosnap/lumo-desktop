@@ -118,7 +118,7 @@ onMounted(() => {
       <!-- The client's notes come first: top right with the hearts. Ink while to do, plain once done -->
       <button
         v-if="noteState && image.notesCount"
-        class="chip note"
+        class="chip nchip"
         :class="noteState"
         :aria-label="`${image.notesCount} from your client. ${noteState === 'done' ? 'Done' : 'To do'}`"
         @click.stop="emit('notes', 'client')"
@@ -129,7 +129,7 @@ onMounted(() => {
     <!-- Your own note: bottom right, apart from the client's. On hover it rises above the name. -->
     <button
       v-if="noteState && myNote"
-      class="chip note mine"
+      class="chip nchip mine"
       :class="noteState"
       :aria-label="`Your note: ${myNote}. ${noteState === 'done' ? 'Done' : 'To do'}`"
       :title="`Your note: ${myNote}`"
