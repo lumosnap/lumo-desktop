@@ -19,6 +19,8 @@ import { updateMetadataAfterSync, getFolderStats } from './album-metadata'
 import { networkService } from './network'
 import { AsyncQueue } from './utils/async-queue'
 import { hashFile } from './hash'
+import type { ImageSignals } from './image-signals'
+import { regroupAlbum, signalColumns, signalsFromRow } from './album-analysis'
 
 const log = createLogger('Pipeline')
 
@@ -46,6 +48,7 @@ interface CompressedImage {
   height: number
   sourceFileHash: string
   uploadOrder: number
+  signals: ImageSignals
 }
 
 interface UploadedImage {
@@ -59,6 +62,7 @@ interface UploadedImage {
   height: number
   uploadOrder: number
   thumbnailKey: string | null
+  signals: ImageSignals
 }
 
 class UploadPipeline {
@@ -153,6 +157,9 @@ class UploadPipeline {
       if (mainWindow) {
         mainWindow.webContents.send('upload:complete', { albumId })
       }
+
+      // Background: group bursts/moments over the whole album and push to the server
+      regroupAlbum(albumId)
     } catch (error) {
       log.error(`[Pipeline] Pipeline failed for album ${albumId}:`, error)
       if (mainWindow) {
@@ -322,7 +329,8 @@ class UploadPipeline {
               width: metadata.width || 0,
               height: metadata.height || 0,
               sourceFileHash: image.sourceFileHash,
-              uploadOrder: image.uploadOrder
+              uploadOrder: image.uploadOrder,
+              signals: signalsFromRow(image)
             }
           }
         } catch (err) {
@@ -342,7 +350,8 @@ class UploadPipeline {
           width: result.width,
           height: result.height,
           localFilePath: result.compressedPath,
-          sourceFileHash: result.hash
+          sourceFileHash: result.hash,
+          ...(result.signals && signalColumns(result.signals))
         })
 
         return {
@@ -356,7 +365,8 @@ class UploadPipeline {
           width: result.width,
           height: result.height,
           sourceFileHash: result.hash,
-          uploadOrder: image.uploadOrder
+          uploadOrder: image.uploadOrder,
+          signals: result.signals ?? signalsFromRow(image)
         }
       } else {
         log.error(`[Image ${image.id}] Compression failed: ${result.error}`)
@@ -471,7 +481,8 @@ class UploadPipeline {
           fileSize: img.fileSize,
           width: img.width,
           height: img.height,
-          uploadOrder: img.uploadOrder
+          uploadOrder: img.uploadOrder,
+          signals: img.signals
         })
       } else {
         const errorMsg = !result.success ? 'Upload failed' : 'Thumbnail upload failed'
@@ -511,7 +522,11 @@ class UploadPipeline {
           fileSize: u.fileSize,
           width: u.width,
           height: u.height,
-          uploadOrder: u.uploadOrder
+          uploadOrder: u.uploadOrder,
+          capturedAt: u.signals.capturedAt,
+          phash: u.signals.phash,
+          sharpness: u.signals.sharpness,
+          thumbhash: u.signals.thumbhash
         }))
 
         const confirmed = await albumsApi.confirmUpload(albumId, confirmPayload)
@@ -551,7 +566,11 @@ class UploadPipeline {
           b2FileName: u.key,
           fileSize: u.fileSize,
           width: u.width,
-          height: u.height
+          height: u.height,
+          capturedAt: u.signals.capturedAt,
+          phash: u.signals.phash,
+          sharpness: u.signals.sharpness,
+          thumbhash: u.signals.thumbhash
         }))
 
         await albumsApi.updateImages(albumId, updatePayload)
@@ -615,7 +634,8 @@ class UploadPipeline {
           width: img.width,
           height: img.height,
           sourceFileHash: img.sourceFileHash,
-          uploadOrder: img.uploadOrder
+          uploadOrder: img.uploadOrder,
+          signals: signalsFromRow(img)
         })
       }
     }

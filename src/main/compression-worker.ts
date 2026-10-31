@@ -10,6 +10,7 @@ import sharp from 'sharp'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { hashBuffer } from './hash'
+import { readExifSignals, thumbnailSignals, type ImageSignals } from './image-signals'
 
 interface CompressionTask {
   taskId: string
@@ -39,6 +40,7 @@ interface CompressionResult {
   height: number
   fileSize: number
   hash: string
+  signals?: ImageSignals
   error?: string
 }
 
@@ -154,7 +156,7 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
     const thumbnailPath = path.join(thumbnailDir, outputFileName)
     
     // Create 400px thumbnail
-    await image
+    const thumbnailBuffer = await image
       .clone()
       .rotate() // Auto-rotate based on EXIF
       .resize({
@@ -164,7 +166,17 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
         withoutEnlargement: true
       })
       .webp({ quality: 80, effort: 0 }) // fast compression for thumbnails
-      .toFile(thumbnailPath)
+      .toBuffer()
+    await fs.writeFile(thumbnailPath, thumbnailBuffer)
+
+    // Browse signals: EXIF from the metadata we already have, pixels from the small thumbnail.
+    // Never fail compression over them.
+    let signals: ImageSignals | undefined
+    try {
+      signals = { ...readExifSignals(metadata), ...(await thumbnailSignals(thumbnailBuffer)) }
+    } catch {
+      signals = undefined
+    }
 
     return {
       taskId: task.taskId,
@@ -174,7 +186,8 @@ async function compressImage(task: CompressionTask): Promise<CompressionResult> 
       width: outputMetadata.width || 0,
       height: outputMetadata.height || 0,
       fileSize: finalBuffer.length,
-      hash
+      hash,
+      signals
     }
   } catch (error) {
     return {

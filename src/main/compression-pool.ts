@@ -8,6 +8,7 @@
 import { Worker } from 'worker_threads'
 import { join } from 'path'
 import { createLogger } from './logger'
+import type { ImageSignals } from './image-signals'
 
 const logger = createLogger('CompressionPool')
 
@@ -33,6 +34,7 @@ export interface CompressionResult {
   height: number
   fileSize: number
   hash: string
+  signals?: ImageSignals
   error?: string
 }
 
@@ -132,6 +134,7 @@ class CompressionPool {
             height: message.height,
             fileSize: message.fileSize,
             hash: message.hash || '',
+            signals: message.signals,
             error: message.error
           }
 

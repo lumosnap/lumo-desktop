@@ -18,6 +18,7 @@ import {
 } from '../database'
 import { scanImagesInFolder, clearScanCache } from '../storage'
 import { uploadPipeline } from '../pipeline'
+import { regroupAlbum } from '../album-analysis'
 import { createLogger, getErrorMessage } from '../logger'
 
 import {
@@ -486,6 +487,7 @@ export async function executeAlbumSync(
       // Sync completed with deletions only (no new uploads)
       // Notify user since pipeline won't do it
       notificationService.syncComplete(album.title)
+      regroupAlbum(albumId)
     }
     // Note: If only renames/skipped duplicates, don't notify (trivial silent sync)
 

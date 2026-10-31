@@ -134,6 +134,17 @@ export interface ApiImage {
   thumbnailUrl: string | null
 }
 
+/** Optional browse metadata accepted on confirm-upload and PATCH /albums/:id/images[/browse] */
+export interface ApiBrowseFields {
+  capturedAt?: number | null
+  burstId?: string | null
+  isBurstCover?: boolean | null
+  momentId?: string | null
+  phash?: string | null
+  sharpness?: number | null
+  thumbhash?: string | null
+}
+
 export interface ApiFavorite {
   id: number
   albumId: string
@@ -425,16 +436,18 @@ export const albumsApi = {
    */
   async confirmUpload(
     albumId: string,
-    images: Array<{
-      filename: string
-      sourceImageHash: string | null
-      key: string
-      thumbnailKey: string | null
-      fileSize: number
-      width: number
-      height: number
-      uploadOrder: number
-    }>
+    images: Array<
+      {
+        filename: string
+        sourceImageHash: string | null
+        key: string
+        thumbnailKey: string | null
+        fileSize: number
+        width: number
+        height: number
+        uploadOrder: number
+      } & ApiBrowseFields
+    >
   ): Promise<Array<{ id: number; originalFilename: string; b2FileName: string }>> {
     console.log(`[API] Confirming upload of ${images.length} images in album ${albumId}`)
     const response = await apiFetch<
@@ -506,19 +519,35 @@ export const albumsApi = {
   },
 
   /**
+   * Update only browse/analysis fields on existing server images (never touches files).
+   * Unknown ids or ids from another album are skipped by the server.
+   */
+  async updateImageBrowse(
+    albumId: string,
+    images: Array<{ id: number } & ApiBrowseFields>
+  ): Promise<void> {
+    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/images/browse`, {
+      method: 'PATCH',
+      body: { images }
+    })
+  },
+
+  /**
    * Update existing images with new file references (for modified files)
    * Called after re-uploading modified files
    */
   async updateImages(
     albumId: string,
-    images: Array<{
-      imageId: number
-      sourceImageHash: string | null
-      b2FileName: string
-      fileSize: number
-      width: number
-      height: number
-    }>
+    images: Array<
+      {
+        imageId: number
+        sourceImageHash?: string | null // omitted = unchanged
+        b2FileName: string
+        fileSize: number
+        width: number
+        height: number
+      } & ApiBrowseFields
+    >
   ): Promise<void> {
     console.log(`[API] Updating ${images.length} images in album ${albumId}`)
     await apiFetch<ApiResponse<void>>(`/albums/${albumId}/images`, {

@@ -23,12 +23,12 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(2)
+    expect(db.pragma('user_version', { simple: true })).toBe(3)
     expect(cols('albums')).toEqual(
       expect.arrayContaining(['startTime', 'endTime', 'isOrphaned', 'albumType'])
     )
     expect(cols('images')).toEqual(
-      expect.arrayContaining(['serverId', 'captured_at', 'burst_id', 'thumbhash', 'sharpness'])
+      expect.arrayContaining(['serverId', 'captured_at', 'burst_id', 'thumbhash', 'sharpness', 'camera_id', 'rating', 'needs_push'])
     )
     db.close()
   })

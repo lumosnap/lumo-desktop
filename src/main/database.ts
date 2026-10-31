@@ -38,6 +38,17 @@ export interface Image {
   uploadStatus: 'pending' | 'compressing' | 'uploading' | 'complete' | 'failed' | 'failed_compression' | 'failed_upload'
   uploadOrder: number
   createdAt: string
+  // Browse metadata (migrations 2-3), snake_case like their columns; null until analyzed
+  captured_at?: number | null // unix ms, EXIF wall-clock encoded as UTC
+  camera_id?: string | null
+  rating?: number | null
+  phash?: string | null
+  sharpness?: number | null
+  thumbhash?: string | null
+  burst_id?: string | null
+  is_burst_cover?: number | null // 0 or 1
+  moment_id?: string | null
+  needs_push?: number | null // 1 = browse fields changed locally, not yet PATCHed to server
 }
 
 export function initDatabase(): void {
@@ -99,6 +110,14 @@ const migrations: Array<(database: Database.Database) => void> = [
       ALTER TABLE images ADD COLUMN thumbhash TEXT;
       CREATE INDEX IF NOT EXISTS idx_images_album_captured ON images(albumId, captured_at);
       CREATE INDEX IF NOT EXISTS idx_images_album_status ON images(albumId, uploadStatus);
+    `)
+  },
+  // 3: grouping inputs + server push marker
+  (database) => {
+    database.exec(`
+      ALTER TABLE images ADD COLUMN camera_id TEXT;
+      ALTER TABLE images ADD COLUMN rating INTEGER;
+      ALTER TABLE images ADD COLUMN needs_push INTEGER DEFAULT 0;
     `)
   }
 ]

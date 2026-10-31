@@ -20,6 +20,7 @@ import {
 } from '../database'
 import { albumsApi } from '../api-client'
 import { uploadPipeline } from '../pipeline'
+import { analyzeAlbum, regroupAlbum } from '../album-analysis'
 import { watcherService } from '../watcher'
 import { createLogger, getErrorMessage } from '../logger'
 
@@ -172,6 +173,9 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         })
       }
 
+      // Background backfill + grouping, once per album per session
+      analyzeAlbum(albumId)
+
       return { success: true, album: { ...album, needsSync: album.needsSync } }
     } catch (error: unknown) {
       logger.error('Failed to get album:', getErrorMessage(error))
@@ -216,9 +220,22 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
       // Favorites are now loaded separately by the frontend to improve performance
       // Return images without favorite info (frontend will enrich later)
-      const imagesWithFavorites = images.map((img) => {
+      // Browse columns are snake_case in SQLite; the renderer gets camelCase
+      const imagesWithFavorites = images.map((row) => {
+        const { captured_at, camera_id, burst_id, is_burst_cover, moment_id, needs_push, ...img } =
+          row
+        void needs_push
         return {
           ...img,
+          capturedAt: captured_at ?? null,
+          cameraId: camera_id ?? null,
+          rating: img.rating ?? null,
+          phash: img.phash ?? null,
+          sharpness: img.sharpness ?? null,
+          thumbhash: img.thumbhash ?? null,
+          burstId: burst_id ?? null,
+          isBurstCover: is_burst_cover === 1,
+          momentId: moment_id ?? null,
           isFavorite: false,
           favoriteCount: 0,
           notesCount: 0,
@@ -249,6 +266,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
       // Delete from local database
       deleteImages([imageId])
+      regroupAlbum(albumId)
 
       // Update album total count
       const album = getAlbum(albumId)
@@ -284,6 +302,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
       // Delete from local database
       deleteImages(imageIds)
+      regroupAlbum(albumId)
 
       // Update album total count
       const album = getAlbum(albumId)
@@ -373,6 +392,12 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       logger.error('Failed to start upload:', getErrorMessage(error))
       return { success: false, error: getErrorMessage(error) }
     }
+  })
+
+  // Backfill browse signals + regroup in the background; resolves immediately
+  ipcMain.handle('album:analyze', (_event, albumId: string) => {
+    analyzeAlbum(albumId, { force: true })
+    return { success: true }
   })
 
   ipcMain.handle('album:getProgress', (_event, albumId: string) => {
