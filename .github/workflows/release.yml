@@ -13,7 +13,8 @@ jobs:
 
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        # Intel mac: on the Apple Silicon runner the x64 app shipped an arm64 better-sqlite3
+        os: [macos-15-intel, ubuntu-latest, windows-latest]
 
     steps:
       - name: Check out Git repository

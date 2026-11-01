@@ -112,6 +112,7 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 
 npmRebuild: true
+afterPack: build/after-pack.cjs
 
 publish:
   provider: github
