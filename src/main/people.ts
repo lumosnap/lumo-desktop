@@ -22,7 +22,7 @@ import {
   type FaceRow,
   type PersonRow
 } from './database'
-import { detectFaces, isMlOnBattery, isMlPaused } from './ml/embedder'
+import { detectFaces, EmbedderDown, isMlOnBattery, isMlPaused } from './ml/embedder'
 import { ensureFaceModels } from './ml/model'
 import { frontalness } from './ml/faces'
 import { uploadPipeline } from './pipeline'
@@ -66,11 +66,17 @@ let scanning: { albumId: string; waitingForUploads: boolean } | null = null
 /** Review queues per album, from the last re-match. */
 const reviews = new Map<string, Map<string, Array<{ faceId: number; score: number }>>>()
 
-/** Re-match the album's faces to the references; call after every people change or scan batch. */
-export function rematch(albumId: string): Map<string, Array<{ faceId: number; score: number }>> {
+/**
+ * Re-match the album's faces to the references; call after every people change or scan batch.
+ * push: false leaves the push to the caller (the DB counter keeps it dirty meanwhile).
+ */
+export function rematch(
+  albumId: string,
+  { push = true } = {}
+): Map<string, Array<{ faceId: number; score: number }>> {
   const { changed, review } = rematchPeople(albumId)
   reviews.set(albumId, review)
-  if (changed > 0) schedulePeoplePush(albumId)
+  if (changed > 0 && push) schedulePeoplePush(albumId)
   return review
 }
 
@@ -119,25 +125,31 @@ const thumbnailPath = (localFolderPath: string, originalFilename: string): strin
     `${basename(originalFilename, extname(originalFilename))}.webp`
   )
 
-/** The thumbnail if there is one, else the local copy; local image id → path. */
-function imagePaths(albumId: string): Map<number, string> {
+/** The thumbnail if there is one, else the local copy; local image id → path, for `ids` only. */
+function imagePaths(albumId: string, ids: Iterable<number>): Map<number, string> {
   const album = getAlbum(albumId)
   if (!album) return new Map()
+  const want = new Set(ids)
   return new Map(
-    getAlbumImages(albumId).map((i) => {
-      const thumb = thumbnailPath(album.localFolderPath, i.originalFilename)
-      return [i.id, existsSync(thumb) ? thumb : i.localFilePath]
-    })
+    getAlbumImages(albumId)
+      .filter((i) => want.has(i.id))
+      .map((i) => {
+        const thumb = thumbnailPath(album.localFolderPath, i.originalFilename)
+        return [i.id, existsSync(thumb) ? thumb : i.localFilePath]
+      })
   )
 }
 
 /** All people (every person is named), by name. */
 export function listPeople(albumId: string): PersonSummary[] {
-  const paths = imagePaths(albumId)
   const review = reviewsFor(albumId)
-  return getAlbumPeople(albumId)
-    .map((p) => {
-      const cover = coverFace(p)
+  const people = getAlbumPeople(albumId).map((p) => ({ p, cover: coverFace(p) }))
+  const paths = imagePaths(
+    albumId,
+    people.map(({ cover }) => cover.imageId)
+  )
+  return people
+    .map(({ p, cover }) => {
       return {
         id: p.id,
         name: p.name,
@@ -154,7 +166,10 @@ export function listPeople(albumId: string): PersonSummary[] {
 export function reviewQueue(albumId: string, personId: string, limit = 24): ReviewFace[] {
   const queue = reviewsFor(albumId).get(personId)?.slice(0, limit) ?? []
   const faces = new Map(getAlbumFaces(albumId).map((f) => [f.id, f]))
-  const paths = imagePaths(albumId)
+  const paths = imagePaths(
+    albumId,
+    queue.flatMap(({ faceId }) => faces.get(faceId)?.imageId ?? [])
+  )
   return queue.flatMap(({ faceId, score }) => {
     const f = faces.get(faceId)
     return f ? [{ faceId, imageId: f.imageId, path: paths.get(f.imageId)!, box: f.box, score }] : []
@@ -177,11 +192,16 @@ export function pickPhotos(albumId: string, limit = 12): PickPhoto[] {
     e.faceCount++
     byImage.set(f.imageId, e)
   }
-  const paths = imagePaths(albumId)
-  return [...byImage]
-    .filter(([id, e]) => e.score > 0 && paths.has(id))
+  const best = [...byImage]
+    .filter(([, e]) => e.score > 0)
     .sort((a, b) => b[1].score - a[1].score)
     .slice(0, limit)
+  const paths = imagePaths(
+    albumId,
+    best.map(([id]) => id)
+  )
+  return best
+    .filter(([id]) => paths.has(id))
     .map(([imageId, e]) => ({ imageId, path: paths.get(imageId)!, faceCount: e.faceCount }))
 }
 
@@ -199,7 +219,10 @@ export function imagePeople(albumId: string): Map<number, string[]> {
 }
 
 const UPLOAD_POLL_MS = 5000
-const REMATCH_EVERY = 10 // photos per re-match + UI refresh while scanning
+// Re-match is O(album faces): every 10 photos, or every 2% of the album on big ones
+const REMATCH_EVERY = 10
+const SCAN_NOTIFY_MS = 3000 // scan progress refreshes the whole album in the UI: at most this often
+const crashes = new Map<number, number>() // image id → times it took the ML worker down
 
 /**
  * Detect faces in the album's unscanned photos, matching them to people as they come. Runs on the tagging chain
@@ -216,8 +239,10 @@ export async function scanFacesNow(albumId: string, cancelled: () => boolean): P
   log.info(`Finding faces in ${todo.length} photos of ${albumId}`)
   scanning = { albumId, waitingForUploads: false }
   notifyPeopleChanged(albumId)
+  const rematchEvery = Math.max(REMATCH_EVERY, Math.floor(getPeopleProgress(albumId).total / 50))
   let since = 0
   let found = 0
+  let notified = Date.now()
   try {
     await ensureFaceModels() // download failure: abort, retry next session
     for (const img of todo) {
@@ -231,27 +256,46 @@ export async function scanFacesNow(albumId: string, cancelled: () => boolean): P
       // The original at full quality; the compressed upload copy if the original moved
       const original = join(album.sourceFolderPath, img.originalFilename)
       const path = existsSync(original) ? original : img.localFilePath
-      // ponytail: undecodable photos are marked scanned with no faces, never retried
-      const faces = existsSync(path)
-        ? await detectFaces(path).catch((error) => {
-            if (!stop()) log.warn(`Face scan failed for ${img.id}:`, getErrorMessage(error))
-            return []
-          })
-        : []
+      let faces: Awaited<ReturnType<typeof detectFaces>> = []
+      if (existsSync(path)) {
+        try {
+          faces = await detectFaces(path)
+        } catch (error) {
+          if (stop()) return
+          // Worker gone (crash, stop, model failed to load): not this photo's fault, unless it
+          // keeps killing the worker. Abort; the next pass retries from here.
+          if (error instanceof EmbedderDown) {
+            const n = error.crashed ? (crashes.get(img.id) ?? 0) + 1 : 0
+            if (n < 2) {
+              if (n) crashes.set(img.id, n)
+              log.warn(`Face scan of ${albumId} stopped:`, getErrorMessage(error))
+              return
+            }
+            log.warn(`Photo ${img.id} crashed the face scan twice, skipping it`)
+          } else {
+            // ponytail: undecodable photos are marked scanned with no faces, never retried
+            log.warn(`Face scan failed for ${img.id}:`, getErrorMessage(error))
+          }
+        }
+      }
       if (stop()) return
       saveImageFaces(img.id, faces)
       found += faces.length
-      if (++since >= REMATCH_EVERY) {
+      if (++since >= rematchEvery) {
         since = 0
-        rematch(albumId)
+        rematch(albumId, { push: false }) // pushed once at the end of the pass
+      }
+      if (Date.now() - notified >= SCAN_NOTIFY_MS) {
+        notified = Date.now()
         notifyPeopleChanged(albumId)
       }
     }
-    rematch(albumId)
+    rematch(albumId, { push: false })
     log.info(`Found ${found} faces in ${todo.length} photos of ${albumId}`)
   } finally {
     scanning = null
     notifyPeopleChanged(albumId)
+    if (!cancelled()) schedulePeoplePush(albumId) // an aborted pass still pushes what it matched
   }
   await pushPeople(albumId)
 }

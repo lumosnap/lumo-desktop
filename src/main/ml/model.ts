@@ -10,6 +10,7 @@ import {
   existsSync,
   mkdirSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync
 } from 'fs'
@@ -21,6 +22,11 @@ import { createLogger, getErrorMessage } from '../logger'
 const log = createLogger('Model')
 
 export const MODEL_ID = 'siglip2-base-patch16-224-q8'
+// LSV1 header tag per model (16 ASCII max). The gallery's bundled tag file uses this exact string.
+// Keyed by the MODEL_ID literal: changing MODEL_ID without adding its tag fails the typecheck.
+const VECTORS_TAGS = { 'siglip2-base-patch16-224-q8': 'siglip2-b16-q8' } as const
+/** Tag for the embeddings in image_embeddings (TAG_MODEL, SigLIP2 B/16 q8 vision encoder). */
+export const VECTORS_MODEL_TAG: string = VECTORS_TAGS[MODEL_ID]
 
 interface ModelFile {
   path: string // relative to userData/models
@@ -50,6 +56,7 @@ export const SFACE: ModelFile = {
   size: 38696353
 }
 const ATTEMPTS = 5
+const STALL_MS = 60_000 // no bytes for this long: abort, the next attempt resumes
 
 const fullPath = (m: ModelFile): string => join(app.getPath('userData'), 'models', m.path)
 
@@ -62,14 +69,27 @@ async function sha256(path: string): Promise<string> {
 async function download(m: ModelFile, dest: string, part: string): Promise<void> {
   const have = existsSync(part) ? statSync(part).size : 0
   if (have < m.size) {
-    const res = await fetch(m.url, { headers: have ? { Range: `bytes=${have}-` } : {} })
-    if (res.status !== 200 && res.status !== 206) throw new Error(`HTTP ${res.status}`)
-    const append = res.status === 206 // 200 = server ignored the range, start over
-    log.info(`Downloading ${m.path}${append ? ` (resuming at ${have} bytes)` : ''}`)
-    await pipeline(
-      Readable.fromWeb(res.body as import('stream/web').ReadableStream),
-      createWriteStream(part, { flags: append ? 'a' : 'w' })
-    )
+    const abort = new AbortController()
+    let stall: ReturnType<typeof setTimeout> | undefined
+    const kick = (): void => {
+      clearTimeout(stall)
+      stall = setTimeout(() => abort.abort(new Error('download stalled')), STALL_MS)
+    }
+    kick()
+    try {
+      const res = await fetch(m.url, {
+        headers: have ? { Range: `bytes=${have}-` } : {},
+        signal: abort.signal
+      })
+      if (res.status !== 200 && res.status !== 206) throw new Error(`HTTP ${res.status}`)
+      const append = res.status === 206 // 200 = server ignored the range, start over
+      log.info(`Downloading ${m.path}${append ? ` (resuming at ${have} bytes)` : ''}`)
+      const body = Readable.fromWeb(res.body as import('stream/web').ReadableStream)
+      body.on('data', kick)
+      await pipeline(body, createWriteStream(part, { flags: append ? 'a' : 'w' }))
+    } finally {
+      clearTimeout(stall)
+    }
   }
   if (statSync(part).size !== m.size || (await sha256(part)) !== m.sha256) {
     unlinkSync(part)
@@ -105,6 +125,27 @@ function ensureFile(m: ModelFile): Promise<string> {
   })
   ready.set(m.path, p)
   return p
+}
+
+/**
+ * A model file failed to load. Delete it for re-download only if it no longer matches its pinned
+ * hash: OOM, an unsupported CPU or an AV lock also fail the load, and re-downloading won't fix those.
+ */
+export async function discardModel(path: string): Promise<void> {
+  for (const m of [SIGLIP, YUNET, SFACE]) {
+    if (fullPath(m) !== path) continue
+    const intact = await sha256(path).then(
+      (h) => h === m.sha256,
+      () => existsSync(path) // unreadable (AV lock): keep it; gone: let ensure* fetch it again
+    )
+    if (intact) {
+      log.warn(`${m.path} failed to load but is intact on disk, keeping it`)
+      continue
+    }
+    ready.delete(m.path)
+    rmSync(path, { force: true })
+    log.warn(`${m.path} failed to load, deleted for re-download`)
+  }
 }
 
 export const modelPath = (): string => fullPath(SIGLIP)

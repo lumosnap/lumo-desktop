@@ -3,7 +3,7 @@
  * never loads the face models.
  * In:  { id, op: 'embed', model, paths } → result: (Float32Array | null)[] (null = undecodable)
  *      { id, op: 'faces', models: { yunet, sface }, path } → result: WorkerFace[]
- * Out: { id, result } or { id, error }
+ * Out: { id, result } or { id, error, badModel? } (badModel = path of a model that failed to load)
  */
 import * as ort from 'onnxruntime-node'
 import sharp from 'sharp'
@@ -30,8 +30,10 @@ function getSession(path: string): Promise<ort.InferenceSession> {
       interOpNumThreads: 1,
       graphOptimizationLevel: 'all',
       logSeverityLevel: 3 // YuNet's initializer-as-input warnings are noise
+    }).catch((error) => {
+      sessions.delete(path)
+      throw Object.assign(new Error((error as Error).message ?? String(error)), { badModel: path })
     })
-    s.catch(() => sessions.delete(path))
     sessions.set(path, s)
   }
   return s
@@ -187,6 +189,10 @@ process.parentPort?.on('message', async (e) => {
   try {
     process.parentPort.postMessage({ id: msg.id, result: await handle(msg) })
   } catch (error) {
-    process.parentPort.postMessage({ id: msg.id, error: (error as Error).message ?? String(error) })
+    process.parentPort.postMessage({
+      id: msg.id,
+      error: (error as Error).message ?? String(error),
+      badModel: (error as { badModel?: string }).badModel
+    })
   }
 })
