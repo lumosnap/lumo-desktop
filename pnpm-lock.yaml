@@ -17,9 +17,6 @@ importers:
       '@fontsource/outfit':
         specifier: ^5.2.8
         version: 5.2.8
-      '@tailwindcss/vite':
-        specifier: ^4.1.17
-        version: 4.1.17(vite@7.2.6(@types/node@22.19.1)(jiti@2.6.1)(lightningcss@1.30.2))
       '@tanstack/vue-virtual':
         specifier: ^3.13.50
         version: 3.13.50(vue@3.5.25(typescript@5.9.3))
@@ -62,9 +59,6 @@ importers:
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
-      tailwindcss:
-        specifier: ^4.1.17
-        version: 4.1.17
       thumbhash:
         specifier: ^0.1.1
         version: 0.1.1
@@ -87,6 +81,9 @@ importers:
       '@sunjw8888/electron-icon-builder':
         specifier: ^3.0.0
         version: 3.0.0
+      '@tailwindcss/vite':
+        specifier: ^4.1.17
+        version: 4.1.17(vite@7.2.6(@types/node@22.19.1)(jiti@2.6.1)(lightningcss@1.30.2))
       '@types/node':
         specifier: ^22.18.6
         version: 22.19.1
@@ -114,6 +111,9 @@ importers:
       prettier:
         specifier: ^3.6.2
         version: 3.7.4
+      tailwindcss:
+        specifier: ^4.1.17
+        version: 4.1.17
       typescript:
         specifier: ^5.9.2
         version: 5.9.3
