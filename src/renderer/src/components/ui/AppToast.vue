@@ -15,9 +15,20 @@ function place(): void {
   d?.addEventListener('close', () => (host.value = 'body'), { once: true })
 }
 watch(current, place, { flush: 'post' })
+// A dialog taken out by v-if (Esc with @cancel.prevent) sends no close: notice it is gone
+const gone = new MutationObserver(() => {
+  if (host.value !== 'body' && !host.value.isConnected) place()
+})
+watch(host, (h) => {
+  gone.disconnect()
+  if (h !== 'body') gone.observe(document.body, { childList: true, subtree: true })
+})
 // A dialog opened while a toast is up takes the toast along, so its "Try again" stays usable
 onMounted(() => document.addEventListener('toggle', onToggle, true))
-onUnmounted(() => document.removeEventListener('toggle', onToggle, true))
+onUnmounted(() => {
+  document.removeEventListener('toggle', onToggle, true)
+  gone.disconnect()
+})
 function onToggle(e: Event): void {
   if (current.value && e.target instanceof HTMLDialogElement && e.target.open) place()
 }

@@ -40,10 +40,12 @@ const chosen = ref<PickPhoto | null>(null)
 const faces = ref<Face[] | null>([]) // null while the chosen photo's faces load
 const at = ref(-1) // the face being named
 const query = ref('')
-const hi = ref(-1) // highlighted option in the name list; -1: Enter skips the face
+// The highlighted option by key, so a reload or re-sort of people keeps it on the same person;
+// null: Enter skips the face
+const hiKey = ref<string | null>(null)
 const busy = ref(false)
 // Where the spinner goes while a name saves: the option that was taken, or "Not Anjali"
-const savingAt = ref<number | 'not' | null>(null)
+const savingAt = ref<string | 'not' | null>(null)
 
 const facesWord = (n: number): string => `${n} ${n === 1 ? 'face' : 'faces'}`
 
@@ -66,6 +68,13 @@ const options = computed<Array<{ person: Person } | { newName: string }>>(() => 
   ...match.value.matches.map((person) => ({ person })),
   ...(query.value.trim() && !match.value.exact ? [{ newName: query.value.trim() }] : [])
 ])
+type Option = (typeof options.value)[number]
+const keyOf = (o: Option): string => ('person' in o ? o.person.id : 'new')
+const hi = computed(() => options.value.findIndex((o) => keyOf(o) === hiKey.value))
+const highlight = (i: number): void => {
+  const o = options.value[i]
+  hiKey.value = o ? keyOf(o) : null
+}
 
 async function loadPicks(quiet = false): Promise<void> {
   if (!quiet) picks.value = null
@@ -97,18 +106,21 @@ watch(
   }
 )
 
-async function loadFaces(): Promise<void> {
-  if (!chosen.value) return
-  faces.value = byPosition(
-    await props.api.facesInImage(props.albumId, chosen.value.imageId).catch(() => [])
-  )
+// False when another photo was chosen meanwhile: its faces aren't this one's
+async function loadFaces(): Promise<boolean> {
+  const id = chosen.value?.imageId
+  if (id === undefined) return false
+  const list = byPosition(await props.api.facesInImage(props.albumId, id).catch(() => []))
+  if (chosen.value?.imageId !== id) return false
+  faces.value = list
+  return true
 }
 
 async function choose(p: PickPhoto): Promise<void> {
   chosen.value = p
   faces.value = null
   at.value = -1
-  await loadFaces()
+  if (!(await loadFaces())) return
   openFace(nextToName(faces.value ?? [], -1))
 }
 
@@ -117,7 +129,7 @@ async function openFace(i: number): Promise<void> {
   query.value = ''
   // The app's guess is ready to accept with Enter
   const guess = faces.value?.[i]?.personId
-  hi.value = guess ? props.people.findIndex((p) => p.id === guess) : -1
+  hiKey.value = guess ?? null
   await nextTick()
   if (i < 0) doneBtn.value?.focus()
   else nameIn.value?.focus()
@@ -127,13 +139,13 @@ async function save(target: FaceTarget): Promise<void> {
   const f = face.value
   if (!f || busy.value) return
   busy.value = true
-  savingAt.value = 'none' in target ? 'not' : hi.value
+  savingAt.value = 'none' in target ? 'not' : hiKey.value
   try {
     // contextBridge can't clone Vue reactive proxies: send a plain copy
     const r = await props.api.assignFace(props.albumId, f.faceId, { ...target })
     if (!r.success) throw new Error(r.error)
     emit('changed')
-    await loadFaces()
+    if (!(await loadFaces())) return
     const list = faces.value ?? []
     openFace(
       nextToName(
@@ -154,7 +166,7 @@ async function save(target: FaceTarget): Promise<void> {
   }
 }
 
-function pick(o: (typeof options.value)[number] | undefined): void {
+function pick(o: Option | undefined): void {
   if (busy.value) return
   if (!o) {
     // Enter with no name: skip to the next face without one
@@ -167,15 +179,15 @@ function pick(o: (typeof options.value)[number] | undefined): void {
 
 function onNameKey(e: KeyboardEvent): void {
   const n = options.value.length
-  if (e.key === 'ArrowDown' && n) hi.value = (hi.value + 1) % n
-  else if (e.key === 'ArrowUp' && n) hi.value = hi.value <= 0 ? n - 1 : hi.value - 1
+  if (e.key === 'ArrowDown' && n) highlight((hi.value + 1) % n)
+  else if (e.key === 'ArrowUp' && n) highlight(hi.value <= 0 ? n - 1 : hi.value - 1)
   else return
   e.preventDefault()
 }
 
 // Typing filters the list; the best match is the one Enter takes
 function onInput(): void {
-  hi.value = query.value.trim() ? 0 : -1
+  highlight(query.value.trim() ? 0 : -1)
 }
 
 function back(): void {
@@ -311,12 +323,12 @@ const label = (f: Face): string => (f.name ? (f.source === 'ref' ? f.name : `${f
               <li
                 v-for="(o, i) in options"
                 :id="`pp-o${i}`"
-                :key="'person' in o ? o.person.id : 'new'"
+                :key="keyOf(o)"
                 role="option"
                 :aria-selected="i === hi"
                 @pointerdown.prevent
                 @click="!busy && pick(o)"
-                @pointermove="hi = i"
+                @pointermove="hiKey = keyOf(o)"
               >
                 <template v-if="'person' in o">
                   <span class="avatar face" :style="faceStyle(o.person)"></span>{{ o.person.name }}
@@ -326,7 +338,7 @@ const label = (f: Face): string => (f.name ? (f.source === 'ref' ? f.name : `${f
                   />
                 </template>
                 <template v-else><Plus />New person “{{ o.newName }}”</template>
-                <span v-if="savingAt === i" class="spin" aria-hidden="true"></span>
+                <span v-if="savingAt === keyOf(o)" class="spin" aria-hidden="true"></span>
               </li>
             </ul>
             <button

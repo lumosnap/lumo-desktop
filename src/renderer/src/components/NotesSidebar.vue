@@ -22,7 +22,10 @@ const props = defineProps<{
   isOpen: boolean
   image: Image | null
   note: string
+  loaded: boolean // the saved notes have arrived; until then there is nothing safe to edit
+  loadError?: boolean
   saveNote: (imageId: number, body: string) => Promise<boolean>
+  saveNoteNow: (imageId: number, body: string) => boolean
   state: 'open' | 'done' | null // null: no note yet, nothing to mark
   doneAt?: number
   busy: boolean
@@ -33,6 +36,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   toggleDone: []
+  retry: []
 }>()
 
 const doneDate = computed(() =>
@@ -67,6 +71,10 @@ const saveFor =
   (id: number) =>
   (body: string): Promise<boolean> =>
     props.saveNote(id, body)
+const saveNowFor =
+  (id: number) =>
+  (body: string): boolean =>
+    props.saveNoteNow(id, body)
 // Each opening, and each photo, starts on the tab the opener asked for
 watch(
   () => [props.isOpen, props.image?.id, props.openOn],
@@ -191,14 +199,20 @@ function formatDate(dateString: string): string {
             <template v-else>Press <kbd>D</kbd></template>
           </span>
         </div>
+        <!-- Only once the saved note is here: the box would start empty and save over it -->
+        <p v-if="loadError" class="none bad">
+          Couldn't load your notes. <button class="link" @click="emit('retry')">Try again</button>
+        </p>
+        <p v-else-if="!loaded" class="none" aria-busy="true"><span class="spin"></span></p>
         <!-- Keyed, so moving to another photo saves the note of the one before -->
         <PrivateNote
-          v-if="image"
+          v-else-if="image"
           :key="image.id"
           :value="note"
           label="Your note"
           placeholder="Retouch, print size, who to send it to…"
           :save="saveFor(image.id)"
+          :save-now="saveNowFor(image.id)"
         />
       </div>
     </aside>
@@ -224,6 +238,9 @@ function formatDate(dateString: string): string {
   padding: 0 8px;
   font-size: 13px;
   color: var(--ink-2);
+}
+.none.bad {
+  color: var(--bad);
 }
 #np-mine {
   padding: 0 24px;

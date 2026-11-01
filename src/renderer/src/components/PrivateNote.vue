@@ -10,12 +10,13 @@ const props = defineProps<{
   label: string
   placeholder: string
   save: (body: string) => Promise<boolean>
+  saveNow: (body: string) => boolean // blocking, for the window closing
   autofocus?: boolean
 }>()
 
 const id = useId()
 const body = ref(props.value)
-const { status, edit, flush } = useAutosave(props.save)
+const { status, edit, flush, dirty } = useAutosave(props.save)
 const el = ref<HTMLTextAreaElement>()
 
 function grow(): void {
@@ -28,15 +29,18 @@ function onInput(): void {
   edit(body.value)
   grow()
 }
-const flushQuiet = (): void => void flush()
+// The window is closing (quit): an async save may not land before the DB closes, so block on it
+const saveOnUnload = (): void => {
+  if (dirty()) props.saveNow(body.value)
+}
 onMounted(() => {
   grow()
   if (props.autofocus) el.value?.focus()
-  addEventListener('beforeunload', flushQuiet)
+  addEventListener('beforeunload', saveOnUnload)
 })
 // Closing the panel or moving to another photo saves what was typed; a failure says so
 onBeforeUnmount(async () => {
-  removeEventListener('beforeunload', flushQuiet)
+  removeEventListener('beforeunload', saveOnUnload)
   const save = props.save
   const text = body.value
   if (!(await flush()))

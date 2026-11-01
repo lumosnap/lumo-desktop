@@ -165,7 +165,11 @@ const showShareNext = ref(false)
 
 // Notes panel
 const showNotesSidebar = ref(false)
-const currentNotesImage = ref<Image | null>(null)
+// By id, looked up live: picks merged in later show, and the lightbox can move it on
+const notesImageId = ref<number | null>(null)
+const currentNotesImage = computed(
+  () => images.value.find((img) => img.id === notesImageId.value) ?? null
+)
 const notesTab = ref<'client' | 'mine'>('client')
 let notesReturnFocus: HTMLElement | null = null
 
@@ -524,8 +528,10 @@ const tagQuery = ref('')
 const hasTags = computed(
   () => images.value.some((img) => img.tags?.length) || !!tagConfig.value?.enabled
 )
+// Counted apart from the search, so typing in it doesn't recount the album
+const scopedTagCounts = computed(() => tagCounts(scopedImages.value))
 const tagChips = computed(() => {
-  const counts = tagCounts(scopedImages.value)
+  const counts = scopedTagCounts.value
   const shown = tagQuery.value ? searchTags(counts, tagQuery.value) : counts.slice(0, 10)
   // Active tags stay visible first, even when out of scope or not matching the search
   const n = new Map(counts)
@@ -557,8 +563,10 @@ async function loadTagConfig(): Promise<void> {
   }
 }
 
+let tagGen = 0 // counts tag edits; refreshGrouping drops answers that predate one
 async function editTag(op: 'add' | 'remove', ids: number[], slug: string): Promise<boolean> {
   // Show it now; main's refetch (albums.onAnalyzed) confirms it, a failure puts it back
+  tagGen++ // a refresh already on its way predates this edit: it's dropped
   const edit = retag(images.value, ids, slug, op)
   images.value = edit.images
   try {
@@ -581,22 +589,27 @@ async function editTag(op: 'add' | 'remove', ids: number[], slug: string): Promi
 
 // Tag picker (popover): tags on the photos, the album's tag set by category, More tags, custom
 const pickPop = computed(() => (pop.value?.kind === 'tags' ? pop.value : null))
+// Counts read the picker's photos, not its query: typing only filters them
+const pickCounts = computed(() =>
+  pickPop.value ? tagCountsFor(images.value, new Set(pickPop.value.ids)) : []
+)
+const albumTagCounts = computed(() => tagCounts(images.value))
 const pickPresent = computed(() => {
   const p = pickPop.value
-  return p ? searchTags(tagCountsFor(images.value, new Set(p.ids)), p.query) : []
+  return p ? searchTags(pickCounts.value, p.query) : []
 })
 const pickGroups = computed(() => {
   const p = pickPop.value
   const c = tagConfig.value
   if (!p || !c) return []
-  const present = new Set(tagCountsFor(images.value, new Set(p.ids)).map(([t]) => t))
+  const present = new Set(pickCounts.value.map(([t]) => t))
   const groups = pickerGroups(
     c.vocabulary.filter((t) => !present.has(t.slug)),
     c.enabled ?? c.pack,
     p.query
   )
   // Custom tags already used in this album
-  const custom = searchTags(tagCounts(images.value), p.query)
+  const custom = searchTags(albumTagCounts.value, p.query)
     .filter(([t]) => !vocabBySlug.value.has(t) && !present.has(t))
     .map(([slug]) => ({ slug, label: tagLabel(slug), category: 'custom' }))
   return custom.length ? [...groups, { category: 'custom', label: 'Custom', tags: custom }] : groups
@@ -833,6 +846,8 @@ async function turnPeopleOff(): Promise<void> {
   peopleBusy.value = false
 }
 
+// Every people change in main (edits here, in Pick and Review, scans) sends album:peopleChanged,
+// which runs this; the edits themselves don't call it again
 async function afterPeopleEdit(): Promise<void> {
   faceCache.clear()
   await loadPeople()
@@ -849,9 +864,7 @@ function renamePerson(p: Person, e?: Event): void {
         (x) => x.id !== p.id && x.name.toLowerCase() === name.toLowerCase()
       )
       if (same) return mergePerson(p, same)
-      const ok = await peopleCall(() => peopleApi!.rename(albumId, p.id, name), 'save the name')
-      if (ok) await afterPeopleEdit()
-      return ok
+      return peopleCall(() => peopleApi!.rename(albumId, p.id, name), 'save the name')
     },
     e,
     'Name'
@@ -864,7 +877,6 @@ async function mergePerson(from: Person, into: Person): Promise<boolean> {
   activePeople.value = activePeople.value.map((id) => (id === from.id ? into.id : id))
   if (lastPerson.value === from.id) lastPerson.value = into.id
   toast(`Merged into ${personName(into)}`)
-  await afterPeopleEdit()
   return true
 }
 
@@ -897,7 +909,6 @@ async function hidePerson(p: Person, hidden: boolean): Promise<void> {
       : `${p.name} shows in your client's gallery again`,
     hidden ? { label: 'Undo', run: () => hidePerson(p, false) } : undefined
   )
-  await afterPeopleEdit()
 }
 
 async function removePerson(): Promise<void> {
@@ -907,7 +918,6 @@ async function removePerson(): Promise<void> {
   if (await peopleCall(() => peopleApi!.remove(albumId, p.id), 'remove')) {
     personToRemove.value = null
     activePeople.value = activePeople.value.filter((id) => id !== p.id)
-    await afterPeopleEdit()
   }
   peopleBusy.value = false
 }
@@ -946,9 +956,11 @@ const facesFor = (imageId: number): Promise<Face[]> => {
 }
 
 let lbFacesBtn: HTMLElement | null = null
+let facesRender = 0 // only the latest render appends its layer
 async function renderLbFaces(): Promise<void> {
   const pswp = lightbox?.pswp
   if (!pswp) return
+  const token = ++facesRender
   const on = !!peopleCfg.value?.enabled
   if (lbFacesBtn) {
     lbFacesBtn.hidden = !on
@@ -959,7 +971,7 @@ async function renderLbFaces(): Promise<void> {
   const img = slideImage(pswp)
   if (!on || !faceMode.value || !slide || !img) return
   const faces = await facesFor(img.id)
-  if (pswp.currSlide !== slide || !faceMode.value) return
+  if (token !== facesRender || pswp.currSlide !== slide || !faceMode.value) return
   const layer = document.createElement('div')
   layer.className = 'lb-faces'
   const el = slide.content.element
@@ -997,10 +1009,7 @@ async function assignFace(to: FaceTarget, faceId?: number): Promise<boolean> {
   const id = faceId ?? (p?.kind === 'face' ? p.face.faceId : undefined)
   if (id === undefined) return false
   const ok = await peopleCall(() => peopleApi!.assignFace(albumId, id, to), 'save')
-  if (ok) {
-    closePop()
-    await afterPeopleEdit()
-  }
+  if (ok) closePop()
   return ok
 }
 
@@ -1020,7 +1029,6 @@ function useFaceAsCover(): Promise<void> {
     if (!(await peopleCall(() => peopleApi!.setCover(albumId, personId, faceId), 'set the face')))
       return false
     toast(`${name ?? 'This person'} now shows this face`)
-    await afterPeopleEdit()
     return true
   })
 }
@@ -1240,10 +1248,34 @@ async function reloadPhotos(): Promise<void> {
 let offAnalyzed: (() => void) | null = null
 let offSetsChanged: (() => void) | null = null
 let offPeopleChanged: (() => void) | undefined
-// Quiet: runs on its own after analysis, so a failure keeps the grid as it is
-async function refreshGrouping(): Promise<boolean> {
+// Quiet: runs on its own after analysis, so a failure keeps the grid as it is.
+// One at a time: a call while one runs asks for one more pass after it.
+let refreshing: Promise<boolean> | null = null
+let refreshAgain = false
+function refreshGrouping(): Promise<boolean> {
+  if (refreshing) {
+    refreshAgain = true
+    return refreshing
+  }
+  refreshing = (async () => {
+    let ok: boolean
+    do {
+      refreshAgain = false
+      ok = await fetchGrouping()
+    } while (refreshAgain)
+    return ok
+  })().finally(() => (refreshing = null))
+  return refreshing
+}
+async function fetchGrouping(): Promise<boolean> {
+  const gen = tagGen
   const result = await window.api.albums.getImages(albumId).catch(() => null)
   if (!result?.success || !result.images) return false
+  // A tag edit made meanwhile isn't in this answer: ask again rather than undo it on screen
+  if (gen !== tagGen) {
+    refreshAgain = true
+    return true
+  }
   const prev = new Map(images.value.map((img) => [img.id, img]))
   const top = scrollEl.value?.scrollTop
   images.value = result.images.map((img) => {
@@ -1443,6 +1475,10 @@ async function markSelectedDone(): Promise<void> {
   toast(`${photos(ids.length)} marked done`, { label: 'Undo', run: () => void setDone(ids, false) })
 }
 
+const saveImageNoteNow = (imageId: number, body: string): boolean =>
+  window.api.notes.saveNow(albumId, imageId, body)
+const saveAlbumNoteNow = (body: string): boolean => window.api.notes.saveNow(albumId, null, body)
+
 async function saveAlbumNote(body: string): Promise<boolean> {
   const r = await window.api.notes.setAlbum(albumId, body)
   if (r.success) albumNote.value = body
@@ -1521,13 +1557,13 @@ async function showAlbumFolder(): Promise<void> {
 function openNotesSidebar(image: Image, tab: 'client' | 'mine' = 'client'): void {
   notesReturnFocus = document.activeElement as HTMLElement | null
   notesTab.value = tab
-  currentNotesImage.value = image
+  notesImageId.value = image.id
   showNotesSidebar.value = true
 }
 
 function closeNotesSidebar(): void {
   showNotesSidebar.value = false
-  currentNotesImage.value = null
+  notesImageId.value = null
   notesReturnFocus?.focus()
 }
 
@@ -1629,7 +1665,7 @@ function renderLbTags(): void {
     x.setAttribute('aria-label', `Remove tag ${labelOf(slug)}`)
     x.title = 'Remove tag'
     x.innerHTML = ICON('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>')
-    x.onclick = () => editTag('remove', [img.id], slug)
+    x.onclick = () => run('tags', () => editTag('remove', [img.id], slug))
     if (tagConfig.value) chip.append(x)
     el.append(chip)
   }
@@ -1761,6 +1797,10 @@ function initLightbox(): void {
             openNotesSidebar(image, privateNotes.value[image.id]?.trim() ? 'mine' : 'client')
         }
         pswp.on('change', renderLbNote)
+        // A click, swipe or wheel to another photo takes the open notes panel along
+        pswp.on('change', () => {
+          if (showNotesSidebar.value) notesImageId.value = slideImage(pswp)?.id ?? null
+        })
       }
     })
 
@@ -1782,7 +1822,9 @@ function initLightbox(): void {
 
   // Zoom from the tile while it's mounted; null falls back to a fade
   lightbox.addFilter('thumbEl', (_el, _data, index) => {
-    const at = lbFromGrid ? index : grid.value.tiles.findIndex((t) => t.image.id === lbItems[0]?.id)
+    // By id: the grid may have changed under the lightbox (Done under To do, a tag filter)
+    const id = lbItems[lbFromGrid ? index : 0]?.id
+    const at = grid.value.tiles.findIndex((t) => t.image.id === id)
     return document.querySelector(`#gallery [data-pswp-index="${at}"] img`) as HTMLElement // null falls back to a fade
   })
 
@@ -1790,7 +1832,8 @@ function initLightbox(): void {
   const scrollToCurrent = (): void => {
     const index = lightbox?.pswp?.currIndex
     if (!lbFromGrid || index === undefined) return
-    const row = grid.value.tileRow[index]
+    const at = grid.value.tiles.findIndex((t) => t.image.id === lbItems[index]?.id)
+    const row = at < 0 ? undefined : grid.value.tileRow[at]
     if (row !== undefined) rowVirtualizer.value.scrollToIndex(row)
   }
   lightbox.on('change', scrollToCurrent)
@@ -1839,7 +1882,8 @@ function onKeydown(e: KeyboardEvent): void {
     !e.metaKey &&
     !e.ctrlKey &&
     !e.altKey &&
-    !t.closest?.('input, textarea, [contenteditable]')
+    !t.closest?.('input, textarea, [contenteditable], dialog') &&
+    !document.querySelector('dialog:modal')
   ) {
     const pswp = lightbox?.pswp
     const img = showNotesSidebar.value
@@ -1850,7 +1894,7 @@ function onKeydown(e: KeyboardEvent): void {
     if (img && stateOf(img)) {
       e.stopImmediatePropagation()
       e.preventDefault()
-      void toggleDone(images.value.find((i) => i.id === img.id) ?? img)
+      void toggleDone(img)
       return
     }
   }
@@ -2217,6 +2261,8 @@ onUnmounted(() => {
             placeholder="Venue, the couple's wishes, what's left to edit…"
             :autofocus="showAlbumNote && !albumNote"
             :save="saveAlbumNote"
+            :save-now="saveAlbumNoteNow"
+            @focusin="showAlbumNote = true"
           />
           <button v-else class="link notes-add" @click="showAlbumNote = true">
             <NotebookPen />Add a note for yourself
@@ -2989,7 +3035,6 @@ onUnmounted(() => {
       :face-style="faceStyle"
       :last-viewed-id="lastViewedId"
       :scan="peopleCfg"
-      @changed="afterPeopleEdit"
       @close="showPick = false"
     />
     <PeopleReview
@@ -2999,7 +3044,6 @@ onUnmounted(() => {
       :person="reviewing"
       :aspect="photoAspect"
       :face-style="faceStyle"
-      @changed="afterPeopleEdit"
       @close="reviewing = null"
     />
 
@@ -3007,12 +3051,16 @@ onUnmounted(() => {
       :is-open="showNotesSidebar"
       :image="currentNotesImage"
       :note="(currentNotesImage && privateNotes[currentNotesImage.id]) || ''"
+      :loaded="notesLoaded"
+      :load-error="notesError"
       :save-note="saveImageNote"
+      :save-note-now="saveImageNoteNow"
       :state="currentNotesImage && stateOf(currentNotesImage)"
       :done-at="currentNotesImage ? doneAt[currentNotesImage.id] : undefined"
       :busy="!!currentNotesImage && pending === `done:${currentNotesImage.id}`"
       :locked="!!currentNotesImage && lockedFor(`done:${currentNotesImage.id}`)"
       :open-on="notesTab"
+      @retry="retryNotes"
       @toggle-done="currentNotesImage && toggleDone(currentNotesImage)"
       @close="closeNotesSidebar"
     />
