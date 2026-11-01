@@ -20,6 +20,11 @@ directories:
 files:
   - '!**/.vscode/*'
   - '!src/*'
+  # dist/ is this build's output: without this the arm64 app, packed second, carried the x64
+  # .dmg and .zip inside it (~250 MB). build/ holds icons and build hooks, not app code.
+  # ponytail: src/ subfolders (~2 MB of sources) still get packed; '!src/**' didn't take.
+  - '!build/**/*'
+  - '!dist/**/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
