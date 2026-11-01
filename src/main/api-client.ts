@@ -13,6 +13,9 @@ import { getToken } from './auth-storage'
 // Get API URL from environment (set in electron.vite.config.ts)
 const API_URL = process.env.API_URL || 'http://localhost:8787/api/v1'
 const APP_DOMAIN = process.env.APP_DOMAIN || 'https://lumosnap.app'
+const API_TIMEOUT_MS = 60_000 // whole request; a hung connection must not freeze the queues behind it
+const SLOW_API_TIMEOUT_MS = 10 * 60_000 // confirm/delete do server-side work that scales with the album
+const UPLOAD_IDLE_MS = 60_000 // presigned PUT: socket idle, so big files on slow links still finish
 
 // Generic fetch wrapper
 async function apiFetch<T>(
@@ -21,16 +24,22 @@ async function apiFetch<T>(
     method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
     body?: object
     headers?: Record<string, string>
+    timeoutMs?: number
   } = {}
 ): Promise<T> {
   const url = `${API_URL}${endpoint}`
   console.log(`[API] ${options.method || 'GET'} ${url}`)
 
-  return new Promise((resolve, reject) => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return new Promise<T>((resolve, reject) => {
     const request = net.request({
       method: options.method || 'GET',
       url
     })
+    timer = setTimeout(() => {
+      request.abort()
+      reject(new Error(`Request timed out: ${options.method || 'GET'} ${endpoint}`))
+    }, options.timeoutMs ?? API_TIMEOUT_MS)
 
     // Set headers
     request.setHeader('Content-Type', 'application/json')
@@ -63,16 +72,24 @@ async function apiFetch<T>(
             resolve(parsed as T)
           } else {
             console.error('[API] Error response:', parsed)
-            reject(new Error(parsed.message || 'API request failed'))
+            // status lets callers tell e.g. a 409 conflict from a network failure
+            reject(
+              Object.assign(new Error(parsed.message || 'API request failed'), {
+                status: response.statusCode
+              })
+            )
           }
         } catch (error) {
           console.error('[API] Failed to parse response:', responseData)
           // Preserve the original parse error as the cause and include response
           // context, instead of discarding it behind a vague message.
           reject(
-            new Error(
-              `Failed to parse API response (status ${response.statusCode ?? 'unknown'}): ${responseData.slice(0, 500)}`,
-              { cause: error }
+            Object.assign(
+              new Error(
+                `Failed to parse API response (status ${response.statusCode ?? 'unknown'}): ${responseData.slice(0, 500)}`,
+                { cause: error }
+              ),
+              { status: response.statusCode }
             )
           )
         }
@@ -90,7 +107,7 @@ async function apiFetch<T>(
     }
 
     request.end()
-  })
+  }).finally(() => clearTimeout(timer))
 }
 
 // Types
@@ -411,7 +428,8 @@ export const albumsApi = {
   async delete(albumId: string): Promise<void> {
     console.log(`[API] Deleting album ${albumId}`)
     await apiFetch<ApiResponse<void>>(`/albums/${albumId}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      timeoutMs: SLOW_API_TIMEOUT_MS
     })
     console.log('[API] Album deleted')
   },
@@ -455,7 +473,8 @@ export const albumsApi = {
       ApiResponse<Array<{ id: number; originalFilename: string; b2FileName: string }>>
     >(`/albums/${albumId}/confirm-upload`, {
       method: 'POST',
-      body: { images }
+      body: { images },
+      timeoutMs: SLOW_API_TIMEOUT_MS
     })
     console.log('[API] Upload confirmed')
     return response.data || []
@@ -473,7 +492,8 @@ export const albumsApi = {
       `/albums/${albumId}/images`,
       {
         method: 'DELETE',
-        body: { imageIds }
+        body: { imageIds },
+        timeoutMs: SLOW_API_TIMEOUT_MS
       }
     )
     console.log('[API] Deletion result:', response.data)
@@ -696,6 +716,7 @@ export async function uploadToPresignedUrl(
         })
       })
 
+      req.setTimeout(UPLOAD_IDLE_MS, () => req.destroy(new Error('Upload timed out')))
       req.on('error', (error) => {
         console.error('[API] Upload error:', error)
         resolve({ success: false, error: error.message })

@@ -23,6 +23,8 @@ import {
   getAlbumEmbeddings,
   getAlbumEmbeddedServerIds,
   getAlbumEmbeddingsSignature,
+  getAlbumEmbeddingsCount,
+  clearImagesPushed,
   getAlbumTagSet,
   saveImageEmbeddings,
   saveImageTags,
@@ -31,12 +33,13 @@ import {
   Album,
   Image
 } from './database'
-import { embedBatch, stopEmbedder, BATCH_SIZE } from './ml/embedder'
+import { embedBatch, stopEmbedder, shutdownEmbedder, BATCH_SIZE } from './ml/embedder'
+import { VECTORS_MODEL_TAG } from './ml/model'
 import { TAG_MODEL, TAG_SCORING_VERSION, selectAlbumTags, tagLogits } from './tags/select'
 import { TAG_PACKS, eventTypeOf } from './tags/vocabulary'
 import { uploadPipeline } from './pipeline'
 import { albumsApi, uploadToPresignedUrl } from './api-client'
-import { encodeVectorsFile, vectorsFileHash, VECTORS_MODEL_TAG } from './vectors-file'
+import { encodeVectorsFile, vectorsFileHash } from './vectors-file'
 import { groupImages } from './grouping'
 import { readExifSignals, thumbnailSignals, ImageSignals } from './image-signals'
 import { scanFacesNow } from './people'
@@ -70,11 +73,24 @@ export function signalColumns(s: ImageSignals): Partial<Image> {
 }
 
 let queue: Promise<void> = Promise.resolve()
+let quitting = false
 function enqueue(label: string, job: () => Promise<void>): Promise<void> {
+  if (quitting) return Promise.resolve()
   queue = queue.then(job).catch((error) => {
-    log.error(`${label} failed:`, getErrorMessage(error))
+    // After quit the DB is closing under in-flight jobs; their failures are expected
+    if (!quitting) log.error(`${label} failed:`, getErrorMessage(error))
   })
   return queue
+}
+
+/** App quit: start no new jobs, drop pending pushes (their dirty flags persist), stop ML. */
+export function stopAnalysis(): void {
+  quitting = true
+  for (const timers of [vectorsTimers, setsPushTimers, tagsPushTimers]) {
+    for (const t of timers.values()) clearTimeout(t)
+    timers.clear()
+  }
+  shutdownEmbedder()
 }
 
 /** Recompute bursts/moments for an album and push what changed. */
@@ -87,10 +103,15 @@ const analyzedThisSession = new Set<string>()
 /** Backfill missing signals, then regroup. Runs once per album per session unless forced. */
 export function analyzeAlbum(albumId: string, { force = false } = {}): Promise<void> {
   if (!force && analyzedThisSession.has(albumId)) return Promise.resolve()
-  analyzedThisSession.add(albumId)
+  analyzedThisSession.add(albumId) // also blocks repeats while queued; removed again on failure
   return enqueue(`Analyze ${albumId}`, async () => {
-    await backfillNow(albumId)
-    await regroupNow(albumId)
+    try {
+      await backfillNow(albumId)
+      await regroupNow(albumId)
+    } catch (error) {
+      analyzedThisSession.delete(albumId) // retry on the next open
+      throw error
+    }
     tagAlbum(albumId)
   })
 }
@@ -202,6 +223,7 @@ const vectorsSigs = new Map<string, string>()
 
 /** Debounced rebuild + upload of the album's search vectors, once uploads and tagging are idle. */
 export function scheduleVectorsPush(albumId: string): void {
+  if (quitting) return
   clearTimeout(vectorsTimers.get(albumId))
   vectorsTimers.set(
     albumId,
@@ -212,6 +234,11 @@ export function scheduleVectorsPush(albumId: string): void {
       enqueue(`Push vectors ${albumId}`, () => pushVectors(albumId))
     }, VECTORS_PUSH_DEBOUNCE_MS)
   )
+}
+
+/** A photo's pixels changed: the next push rebuilds even if the signature looks the same. */
+export function forgetPushedVectors(albumId: string): void {
+  vectorsSigs.delete(albumId)
 }
 
 async function pushVectors(albumId: string): Promise<void> {
@@ -262,7 +289,17 @@ async function pushVectors(albumId: string): Promise<void> {
       ...headers
     })
     if (!put.success) throw new Error(`Vectors upload failed: ${put.error}`)
-    await albumsApi.putVectors(albumId, key, items.length, VECTORS_MODEL_TAG)
+    await albumsApi.putVectors(albumId, key, items.length, VECTORS_MODEL_TAG).catch((error) => {
+      // 409: the album's vectors changed meanwhile; 400: the uploaded object is missing.
+      // Retrying this PUT can't succeed: forget what was pushed so the next push rebuilds.
+      // Keep vectors_hash: the server still holds a file, and a later empty album must delete it.
+      const status = (error as { status?: number }).status
+      if (status === 409 || status === 400) {
+        vectorsSigs.delete(albumId)
+        updateAlbum(albumId, { vectors_ids: null })
+      }
+      throw error
+    })
     updateAlbum(albumId, {
       vectors_hash: hash,
       vectors_ids: JSON.stringify(items.map((i) => i.serverId))
@@ -346,9 +383,8 @@ async function pushDirty(albumId: string): Promise<void> {
         tags: embedded.has(r.id) || r.tags_need_push ? (tags.get(r.id) ?? []) : undefined
       }))
     )
-    updateImagesBatch(
-      batch.map((r) => ({ id: r.id, changes: { needs_push: 0, tags_need_push: 0 } }))
-    )
+    // A tag edit during the PATCH bumps the counter, so that row stays dirty for the next push
+    clearImagesPushed(batch.map((r) => ({ id: r.id, tagsSeen: r.tags_need_push ?? 0 })))
   }
   log.info(`Pushed browse fields for ${dirty.length} images in ${albumId}`)
 }
@@ -360,7 +396,8 @@ let tagChain: Promise<void> = Promise.resolve()
 const tagQueued = new Set<string>()
 const tagCancelled = new Set<string>()
 let taggingAlbum: string | null = null
-const TAG_PUSH_EVERY = 200 // images between incremental pushes + UI refreshes
+let mlAlbum: string | null = null // tagging or finding faces
+const TAG_PUSH_EVERY = 200 // min images between incremental rescores, pushes + UI refreshes
 const UPLOAD_POLL_MS = 5000
 
 /**
@@ -374,17 +411,21 @@ export function tagAlbum(albumId: string): void {
   tagChain = tagChain
     .then(() => {
       tagQueued.delete(albumId) // a call during the run queues one more pass for new images
+      mlAlbum = albumId
       return tagNow(albumId)
     })
     .catch((error) => log.error(`Tagging ${albumId} failed:`, getErrorMessage(error)))
-    .then(() => scanFacesNow(albumId, () => tagCancelled.has(albumId)))
+    .then(() => scanFacesNow(albumId, () => tagCancelled.has(albumId) || quitting))
     .catch((error) => log.error(`People for ${albumId} failed:`, getErrorMessage(error)))
+    .then(() => {
+      mlAlbum = null
+    })
 }
 
 /** Stop tagging an album (e.g. it was deleted). Work done so far is kept. */
 export function cancelTagging(albumId: string): void {
   tagCancelled.add(albumId)
-  if (taggingAlbum === albumId) stopEmbedder()
+  if (mlAlbum === albumId) stopEmbedder() // also releases a request parked on battery
 }
 
 const TAGS_PUSH_DEBOUNCE_MS = 2000
@@ -406,28 +447,30 @@ export function scheduleTagsPush(albumId: string): void {
 /**
  * Recompute an album's AI tags from stored embeddings (no model run). Album-relative, so it
  * runs over the whole album whenever its embedded set, tag set or the scoring version changes.
+ * Synchronous, so it never waits behind network pushes on `queue` and nothing interleaves with it.
  * Returns how many photos' tags changed.
  */
-export function rescoreAlbum(albumId: string, { force = false } = {}): Promise<number> {
-  let changed = 0
-  return enqueue(`Rescore ${albumId}`, async () => {
-    const album = getAlbum(albumId)
-    if (!album) return
-    const rows = getAlbumEmbeddings(albumId, TAG_MODEL)
-    const tagSet = getAlbumTagSet(albumId)
-    const eventType = eventTypeOf(album.event_type)
-    const enabled = tagSet ?? TAG_PACKS[eventType]
-    const key = `${TAG_SCORING_VERSION}:${TAG_MODEL}:${rows.length}:${rows.reduce((s, r) => s + r.imageId, 0)}:${tagSet?.join() ?? eventType}`
-    if (!force && album.tags_scored === key) return
-    // ponytail: O(album) on the main thread, ~1s per 5k photos; move to the embedder process if it janks
-    const tags = selectAlbumTags(
-      rows.map((r) => tagLogits(r.vec)),
-      new Set(enabled)
-    )
-    changed = saveImageTags(rows.map((r, i) => ({ imageId: r.imageId, tags: tags[i] })))
-    setAlbumTagsScored(albumId, key)
-    if (changed > 0) log.info(`Rescored ${albumId}: ${changed}/${rows.length} images changed`)
-  }).then(() => changed)
+export function rescoreAlbum(albumId: string, { force = false } = {}): number {
+  if (quitting) return 0
+  const album = getAlbum(albumId)
+  if (!album) return 0
+  const tagSet = getAlbumTagSet(albumId)
+  const eventType = eventTypeOf(album.event_type)
+  const enabled = tagSet ?? TAG_PACKS[eventType]
+  // Key from a COUNT/SUM query, so an unchanged album costs no vector decoding
+  const { n, s } = getAlbumEmbeddingsCount(albumId, TAG_MODEL)
+  const key = `${TAG_SCORING_VERSION}:${TAG_MODEL}:${n}:${s}:${tagSet?.join() ?? eventType}`
+  if (!force && album.tags_scored === key) return 0
+  const rows = getAlbumEmbeddings(albumId, TAG_MODEL)
+  // ponytail: O(album) on the main thread, ~1s per 5k photos; move to the embedder process if it janks
+  const tags = selectAlbumTags(
+    rows.map((r) => tagLogits(r.vec)),
+    new Set(enabled)
+  )
+  const changed = saveImageTags(rows.map((r, i) => ({ imageId: r.imageId, tags: tags[i] })))
+  setAlbumTagsScored(albumId, key)
+  if (changed > 0) log.info(`Rescored ${albumId}: ${changed}/${rows.length} images changed`)
+  return changed
 }
 
 async function tagNow(albumId: string): Promise<void> {
@@ -441,11 +484,13 @@ async function tagNow(albumId: string): Promise<void> {
   taggingAlbum = albumId
   let done = 0
   let sinceRescore = 0
-  // Album-relative scores: every flush rescores the whole album (cheap, embeddings are stored)
+  let embeddedTotal = getAlbumEmbeddingsCount(albumId, TAG_MODEL).n
+  // Album-relative scores: every flush rescores the whole album, O(album) on the main thread,
+  // so flushes come at growing steps (every 200 photos or 20% more, whichever is larger)
   const flush = async (): Promise<void> => {
     const embedded = sinceRescore
     sinceRescore = 0
-    if ((await rescoreAlbum(albumId)) > 0 || embedded > 0) notifyAnalyzed(albumId)
+    if (rescoreAlbum(albumId) > 0 || embedded > 0) notifyAnalyzed(albumId)
     await enqueue(`Push tags ${albumId}`, () => pushDirty(albumId))
   }
   try {
@@ -466,15 +511,17 @@ async function tagNow(albumId: string): Promise<void> {
       })
       done += items.length
       sinceRescore += items.length
-      if (sinceRescore >= TAG_PUSH_EVERY) await flush()
+      embeddedTotal += items.length
+      const scored = embeddedTotal - sinceRescore
+      if (sinceRescore >= Math.max(TAG_PUSH_EVERY, 0.2 * scored)) await flush()
     }
   } catch (error) {
-    if (tagCancelled.has(albumId)) return
+    if (tagCancelled.has(albumId) || quitting) return
     throw error
   } finally {
     taggingAlbum = null
     // Also covers albums scored with an older TAG_SCORING_VERSION or with deleted photos
-    if (!tagCancelled.has(albumId)) {
+    if (!tagCancelled.has(albumId) && !quitting) {
       await flush()
       scheduleVectorsPush(albumId)
     }

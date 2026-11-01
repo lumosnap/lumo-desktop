@@ -76,7 +76,7 @@ export interface Image {
   is_burst_cover?: number | null // 0 or 1
   moment_id?: string | null
   needs_push?: number | null // 1 = browse fields changed locally, not yet PATCHed to server
-  tags_need_push?: number | null // migration 5: 1 = AI tags changed, not yet PATCHed
+  tags_need_push?: number | null // migration 5: >0 = AI/manual tags changed since the last PATCH (a counter)
   faces_scanned?: number | null // migration 8: 1 = face detection ran (even if it found none)
 }
 
@@ -883,21 +883,59 @@ export function getEmbeddedImageIds(albumId: string): Set<number> {
   return new Set(rows.map((r) => r.image_id))
 }
 
-/** Album's stored embeddings from `model`, by image id. */
 /**
- * Cheap fingerprint of an album's shippable embeddings (which photos, their server ids, which
- * embedding rows): lets the vectors push skip decoding + encoding when nothing changed.
+ * Cheap fingerprint of an album's shippable embeddings (which photos, their server ids): lets the
+ * vectors push skip decoding + encoding when nothing changed. A re-embed of the same photo does
+ * not change it; resetImageAnalysis forces that rebuild instead.
  */
 export function getAlbumEmbeddingsSignature(albumId: string, model: string): string {
   const r = conn()
     .prepare(
-      `SELECT COUNT(*) AS n, COALESCE(SUM(i.serverId), 0) AS s, COALESCE(SUM(e.rowid), 0) AS r
+      `SELECT COUNT(*) AS n, COALESCE(SUM(i.serverId), 0) AS s
        FROM image_embeddings e JOIN images i ON i.id = e.image_id
        WHERE i.albumId = ? AND e.model = ? AND i.serverId IS NOT NULL`
     )
-    .get(albumId, model) as { n: number; s: number; r: number }
-  return `${r.n}:${r.s}:${r.r}`
+    .get(albumId, model) as { n: number; s: number }
+  return `${r.n}:${r.s}`
 }
+
+/** How many photos have an embedding from `model`, and the sum of their ids (no vector decoding). */
+export function getAlbumEmbeddingsCount(albumId: string, model: string): { n: number; s: number } {
+  return conn()
+    .prepare(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(e.image_id), 0) AS s
+       FROM image_embeddings e JOIN images i ON i.id = e.image_id
+       WHERE i.albumId = ? AND e.model = ?`
+    )
+    .get(albumId, model) as { n: number; s: number }
+}
+
+/**
+ * A photo's file changed: drop everything derived from the old pixels (embedding, AI tags, faces)
+ * so tagging and People redo it. Manual tag overrides stay. Clears the album's scoring key and
+ * pushed vector ids so the next rescore and vectors push rebuild in full.
+ */
+export function resetImageAnalysis(albumId: string, imageIds: number[]): void {
+  const d = conn()
+  const mine = 'IN (SELECT id FROM images WHERE id = ? AND albumId = ?)'
+  const delVec = d.prepare(`DELETE FROM image_embeddings WHERE image_id ${mine}`)
+  const delTags = d.prepare(`DELETE FROM image_tags WHERE image_id ${mine}`)
+  const delFaces = d.prepare(`DELETE FROM faces WHERE image_id ${mine}`)
+  const unscan = d.prepare('UPDATE images SET faces_scanned = 0 WHERE id = ? AND albumId = ?')
+  d.transaction(() => {
+    let faces = 0
+    for (const id of imageIds) {
+      delVec.run(id, albumId)
+      delTags.run(id, albumId)
+      faces += delFaces.run(id, albumId).changes
+      unscan.run(id, albumId)
+    }
+    d.prepare('UPDATE albums SET tags_scored = NULL, vectors_ids = NULL WHERE id = ?').run(albumId)
+    if (faces > 0) bumpPeople(d, albumId)
+  })()
+}
+
+/** Album's stored embeddings from `model`, by image id. */
 
 /** Server ids of photos with an embedding for `model` (no vector decoding). */
 export function getAlbumEmbeddedServerIds(albumId: string, model: string): number[] {
@@ -941,7 +979,9 @@ export function saveImageEmbeddings(
   )
   const exists = d.prepare('SELECT 1 FROM images WHERE id = ?')
   const hadVec = d.prepare('SELECT 1 FROM image_embeddings WHERE image_id = ?')
-  const dirty = d.prepare('UPDATE images SET tags_need_push = 1 WHERE id = ?')
+  const dirty = d.prepare(
+    'UPDATE images SET tags_need_push = COALESCE(tags_need_push, 0) + 1 WHERE id = ?'
+  )
   let saved = 0
   d.transaction(() => {
     for (const { imageId, vec } of items) {
@@ -965,7 +1005,9 @@ export function saveImageTags(
   const oldTags = d.prepare('SELECT tag FROM image_tags WHERE image_id = ? ORDER BY score DESC')
   const clear = d.prepare('DELETE FROM image_tags WHERE image_id = ?')
   const put = d.prepare('INSERT INTO image_tags (image_id, tag, score) VALUES (?, ?, ?)')
-  const dirty = d.prepare('UPDATE images SET tags_need_push = 1 WHERE id = ?')
+  const dirty = d.prepare(
+    'UPDATE images SET tags_need_push = COALESCE(tags_need_push, 0) + 1 WHERE id = ?'
+  )
   const exists = d.prepare('SELECT 1 FROM images WHERE id = ?')
   let changed = 0
   d.transaction(() => {
@@ -981,6 +1023,22 @@ export function saveImageTags(
     }
   })()
   return changed
+}
+
+/**
+ * Images were PATCHed. needs_push is only written on the analysis queue, which the PATCH runs on,
+ * so it clears outright; tags_need_push clears only if no tag edit landed since `tagsSeen` was read.
+ */
+export function clearImagesPushed(items: Array<{ id: number; tagsSeen: number }>): void {
+  const d = conn()
+  const clear = d.prepare(
+    `UPDATE images SET needs_push = 0,
+       tags_need_push = CASE WHEN COALESCE(tags_need_push, 0) = ? THEN 0 ELSE tags_need_push END
+     WHERE id = ?`
+  )
+  d.transaction(() => {
+    for (const { id, tagsSeen } of items) clear.run(tagsSeen, id)
+  })()
 }
 
 export function setAlbumTagsScored(albumId: string, key: string): void {
@@ -1023,7 +1081,9 @@ export function setTagOverride(
     `INSERT OR REPLACE INTO image_tag_overrides (image_id, tag, action)
      SELECT id, ?, ? FROM images WHERE id = ? AND albumId = ?`
   )
-  const dirty = d.prepare('UPDATE images SET tags_need_push = 1 WHERE id = ? AND albumId = ?')
+  const dirty = d.prepare(
+    'UPDATE images SET tags_need_push = COALESCE(tags_need_push, 0) + 1 WHERE id = ? AND albumId = ?'
+  )
   d.transaction(() => {
     for (const id of imageIds) {
       put.run(tag, action, id, albumId)

@@ -11,8 +11,6 @@
 import { createHash } from 'crypto'
 
 export const VECTORS_DIMS = 768
-/** Tag for the embeddings in image_embeddings (TAG_MODEL, SigLIP2 B/16 q8 vision encoder). */
-export const VECTORS_MODEL_TAG = 'siglip2-b16-q8'
 const HEADER = 64
 
 export function encodeVectorsFile(

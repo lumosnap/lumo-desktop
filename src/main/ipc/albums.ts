@@ -58,7 +58,7 @@ import {
   type EventType,
   type TagCategory
 } from '../tags/vocabulary'
-import { TAG_SLUG } from '../tags/select'
+import { MAX_IMAGE_TAGS, TAG_SLUG } from '../tags/select'
 import { imagePeople, peoplePhotosChanged } from '../people'
 import { watcherService } from '../watcher'
 import { createLogger, getErrorMessage } from '../logger'
@@ -200,7 +200,10 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           })
         }
 
-        return { ...album, needsSync: album.needsSync, thumbnail }
+        // vectors_ids is a JSON list of every embedded photo: main-process only
+        const { vectors_ids, ...rest } = album
+        void vectors_ids
+        return { ...rest, needsSync: album.needsSync, thumbnail }
       })
 
       return { success: true, albums: albumsWithThumbnails }
@@ -228,7 +231,9 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       // Background backfill + grouping, once per album per session
       analyzeAlbum(albumId)
 
-      return { success: true, album: { ...album, needsSync: album.needsSync } }
+      const { vectors_ids, ...rest } = album
+      void vectors_ids
+      return { success: true, album: { ...rest, needsSync: album.needsSync } }
     } catch (error: unknown) {
       logger.error('Failed to get album:', getErrorMessage(error))
       return { success: false, error: getErrorMessage(error) }
@@ -581,6 +586,20 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
   handleIpc('notes:setAlbum', logger, (_event, albumId: string, body: unknown) => {
     setAlbumNote(String(albumId), noteBody(body))
   })
+  // Sync, for the window closing: an async save can still be in flight when the DB closes on quit.
+  // imageId null is the album note.
+  ipcMain.on('notes:saveNow', (event, albumId: string, imageId: unknown, body: unknown) => {
+    try {
+      if (imageId === null) setAlbumNote(String(albumId), noteBody(body))
+      else if (Number.isInteger(imageId))
+        setImageNote(String(albumId), imageId as number, noteBody(body))
+      else throw new Error('Photo id is required')
+      event.returnValue = true
+    } catch (error) {
+      logger.error('notes:saveNow failed', getErrorMessage(error))
+      event.returnValue = false
+    }
+  })
 
   // AI tags: per-album tag set + manual per-photo overrides
   const vocabulary = TAGS.map((t) => ({
@@ -603,22 +622,22 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
     }
   }
   ipcMain.handle('tags:getAlbumConfig', (_event, albumId: string) => tagConfig(albumId))
-  ipcMain.handle('tags:setAlbumConfig', async (_event, albumId: string, enabled: unknown) => {
+  ipcMain.handle('tags:setAlbumConfig', (_event, albumId: string, enabled: unknown) => {
     if (!getAlbum(albumId)) throw new Error('Album not found')
     const known = new Set(TAGS.map((t) => t.slug))
     setAlbumTagSet(
       albumId,
       Array.isArray(enabled) ? [...new Set(enabled.filter((s) => known.has(s)))] : null
     )
-    await rescoreAlbum(albumId) // tag set is part of the scoring key, so this always recomputes
+    rescoreAlbum(albumId) // tag set is part of the scoring key, so this always recomputes
     scheduleTagsPush(albumId)
     return tagConfig(albumId)
   })
-  ipcMain.handle('tags:setEventType', async (_event, albumId: string, eventType: unknown) => {
+  ipcMain.handle('tags:setEventType', (_event, albumId: string, eventType: unknown) => {
     if (!getAlbum(albumId)) throw new Error('Album not found')
     if (!isEventType(eventType)) throw new Error('Invalid event type')
     setAlbumEventType(albumId, eventType) // also resets the tag set to the pack
-    await rescoreAlbum(albumId)
+    rescoreAlbum(albumId)
     scheduleTagsPush(albumId)
     return tagConfig(albumId)
   })
@@ -627,6 +646,17 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       try {
         if (typeof tag !== 'string' || !TAG_SLUG.test(tag)) throw new Error('Invalid tag')
         if (!getAlbum(albumId)) throw new Error('Album not found')
+        if (action === 'add') {
+          const tags = getAlbumTags(albumId)
+          const full = ids(imageIds).filter((id) => {
+            const t = tags.get(id) ?? []
+            return t.length >= MAX_IMAGE_TAGS && !t.includes(tag)
+          })
+          if (full.length > 0)
+            throw new Error(
+              `${full.length === 1 ? 'This photo already has' : `${full.length} photos already have`} ${MAX_IMAGE_TAGS} tags. Remove one first.`
+            )
+        }
         setTagOverride(albumId, ids(imageIds), tag, action)
         scheduleTagsPush(albumId)
         return { success: true }

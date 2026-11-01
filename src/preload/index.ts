@@ -249,7 +249,10 @@ const api = {
     ): Promise<{ success: true; doneAt: number } | { success: false; error: string }> =>
       ipcRenderer.invoke('notes:setDone', albumId, imageIds, done),
     setAlbum: (albumId: string, body: string): Promise<Result> =>
-      ipcRenderer.invoke('notes:setAlbum', albumId, body)
+      ipcRenderer.invoke('notes:setAlbum', albumId, body),
+    // Blocking save for beforeunload; imageId null is the album note
+    saveNow: (albumId: string, imageId: number | null, body: string): boolean =>
+      ipcRenderer.sendSync('notes:saveNow', albumId, imageId, body)
   },
   sync: {
     detectChanges: (albumId: string): Promise<SyncResult> =>

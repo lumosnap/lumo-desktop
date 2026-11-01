@@ -5,8 +5,8 @@
  */
 
 import { BrowserWindow, ipcMain } from 'electron'
-import { copyFileSync } from 'fs'
-import { join } from 'path'
+import { copyFileSync, rmSync } from 'fs'
+import { basename, extname, join } from 'path'
 import {
   getAlbum,
   getAlbumImages,
@@ -14,11 +14,12 @@ import {
   createImage,
   deleteImages,
   updateImage,
-  getImageByHash
+  getImageByHash,
+  resetImageAnalysis
 } from '../database'
 import { scanImagesInFolder, clearScanCache } from '../storage'
 import { uploadPipeline } from '../pipeline'
-import { regroupAlbum } from '../album-analysis'
+import { forgetPushedVectors, regroupAlbum } from '../album-analysis'
 import { peoplePhotosChanged } from '../people'
 import { createLogger, getErrorMessage } from '../logger'
 
@@ -435,6 +436,7 @@ export async function executeAlbumSync(
     // Process modified files
     if (changes.modified && changes.modified.length > 0) {
       logger.info(`Processing ${changes.modified.length} modified files`)
+      const edited: number[] = []
 
       for (const file of changes.modified) {
         const localFilePath = join(album.localFolderPath, file.filename)
@@ -447,6 +449,10 @@ export async function executeAlbumSync(
           logger.error(`Failed to copy updated file ${file.filename}:`, getErrorMessage(err))
           continue
         }
+        // Stale thumbnail: tagging would embed the old pixels before the pipeline re-compresses.
+        // The pipeline writes a fresh one; until then tagging/backfill skip it, as for a new photo.
+        const stem = basename(file.filename, extname(file.filename))
+        rmSync(join(album.localFolderPath, '.thumbnail', `${stem}.webp`), { force: true })
 
         // Update database record: reset status to pending
         updateImage(file.existingId, {
@@ -456,6 +462,12 @@ export async function executeAlbumSync(
           width: file.width || 0,
           height: file.height || 0
         })
+        edited.push(file.existingId)
+      }
+      // New pixels: the old embedding, AI tags and faces describe a photo that no longer exists
+      if (edited.length > 0) {
+        resetImageAnalysis(albumId, edited)
+        forgetPushedVectors(albumId)
       }
     }
 

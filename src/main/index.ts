@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
+import { rm } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { initDatabase, closeDatabase, getAllAlbums, getImagesByStatus } from './database'
@@ -14,6 +15,7 @@ import { compressionPool } from './compression-pool'
 import { copyWatcherRegistry } from './copy-watcher'
 import { networkService } from './network'
 import { AppUpdater } from './AppUpdater'
+import { stopAnalysis } from './album-analysis'
 
 // Scoped logger for main process
 const logger = createLogger('Main')
@@ -242,6 +244,8 @@ app.whenReady().then(() => {
   try {
     initDatabase()
     logger.info('✓ Database initialized successfully')
+    // Vectors files a crash or quit left mid-upload; each push writes a fresh one
+    rm(join(app.getPath('userData'), 'tmp'), { recursive: true, force: true }).catch(() => {})
   } catch (error) {
     const message = getErrorMessage(error)
     logger.error('✗ Failed to initialize database:', message)
@@ -445,7 +449,6 @@ app.on('window-all-closed', () => {
   // Only quit if isQuitting is true (user explicitly quit)
   if (isQuitting) {
     logger.info('All windows closed and quitting, cleaning up...')
-    closeDatabase()
     try {
       watcherService.closeAll()
     } catch {
@@ -465,10 +468,16 @@ app.on('before-quit', () => {
   trayManager.destroy()
   copyWatcherRegistry.disposeAll()
   compressionPool.shutdown().catch(() => {})
-  closeDatabase()
+  stopAnalysis() // no new analysis jobs, pending pushes dropped, ML worker stopped
   try {
     watcherService.closeAll()
   } catch {
     // Ignore
   }
+})
+
+// Windows have unloaded by now (a note's beforeunload save has landed), so the DB can close.
+// Jobs still in flight after this fail quietly against the closed DB.
+app.on('will-quit', () => {
+  closeDatabase()
 })

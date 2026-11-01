@@ -22,7 +22,9 @@ import {
   listPeople,
   notifyPeopleChanged,
   peopleConfig,
+  peoplePayload,
   pickPhotos,
+  pushPeople,
   rematch,
   reviewQueue,
   schedulePeoplePush,
@@ -163,6 +165,12 @@ export function registerPeopleHandlers(): void {
         const name = str(clientName, 'client').slice(0, 200)
         const pid = personId == null ? null : str(personId, 'person')
         if (pid && !hasPerson(albumId, pid)) throw new Error('Person not found')
+        // The server only knows pushed people (named, shown, with an uploaded photo)
+        if (pid) {
+          await pushPeople(albumId)
+          if (!peoplePayload(albumId).people.some((p) => p.id === pid))
+            throw new Error('Name this person and upload a photo of them first')
+        }
         await albumsApi.putClientPerson(albumId, name, pid)
         setClientPerson(albumId, name, pid)
         notifyPeopleChanged(albumId)

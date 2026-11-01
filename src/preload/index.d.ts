@@ -248,6 +248,7 @@ declare global {
           done: boolean
         ) => Promise<{ success: true; doneAt: number } | { success: false; error: string }>
         setAlbum: (albumId: string, body: string) => Promise<{ success: boolean; error?: string }>
+        saveNow: (albumId: string, imageId: number | null, body: string) => boolean
       }
       sync: {
         detectChanges: (albumId: string) => Promise<SyncResult>

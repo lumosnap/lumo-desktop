@@ -130,12 +130,15 @@ export function selectAlbumTags(
 /** Slug rule for manual tags (any slug, not only the vocabulary). */
 export const TAG_SLUG = /^[a-z0-9-]{1,40}$/
 
-/** Tags shown/pushed for a photo: manual adds first, then AI tags not manually removed. */
+/** The server rejects a photo with more tags than this, failing the whole PATCH batch. */
+export const MAX_IMAGE_TAGS = 12
+
+/** Tags shown/pushed for a photo: manual adds first, then AI tags not manually removed. Capped. */
 export function effectiveTags(
   ai: string[],
   overrides: Array<{ tag: string; action: 'add' | 'remove' }>
 ): string[] {
   const adds = overrides.filter((o) => o.action === 'add').map((o) => o.tag)
   const removed = new Set(overrides.filter((o) => o.action === 'remove').map((o) => o.tag))
-  return [...new Set([...adds, ...ai.filter((t) => !removed.has(t))])]
+  return [...new Set([...adds, ...ai.filter((t) => !removed.has(t))])].slice(0, MAX_IMAGE_TAGS)
 }
