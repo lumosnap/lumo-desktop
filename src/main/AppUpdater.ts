@@ -1,18 +1,30 @@
 import { autoUpdater, type UpdateInfo } from 'electron-updater'
 import log from 'electron-log'
-import { app, dialog, BrowserWindow } from 'electron'
+import { app, dialog, shell, BrowserWindow } from 'electron'
+
+// The macOS builds aren't code-signed, and Squirrel.Mac won't install into an unsigned app
+// ("Could not get code signature for running application"). On a Mac the app only says a new
+// version is out and links its .dmg; the user installs it by hand.
+const manualMac = process.platform === 'darwin'
+
+// The .dmg for this Mac's chip; an Intel build running under Rosetta gets the Apple Silicon one
+function macDownloadUrl(version: string): string {
+  const arch = process.arch === 'arm64' || app.runningUnderARM64Translation ? 'arm64' : 'x64'
+  return `https://github.com/lumosnap/lumo-desktop/releases/download/v${version}/lumosnap-${version}-${arch}.dmg`
+}
 
 export class AppUpdater {
   private mainWindow: BrowserWindow | null = null
+  private announced = '' // the version whose download dialog was shown this session
 
   constructor(mainWindow?: BrowserWindow) {
     this.mainWindow = mainWindow || null
-    
+
     // Configure logging
     log.transports.file.level = 'info'
     autoUpdater.logger = log
-    autoUpdater.autoDownload = true
-    autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.autoDownload = !manualMac
+    autoUpdater.autoInstallOnAppQuit = !manualMac
 
     // Setup event listeners
     this.setupEventListeners()
@@ -43,7 +55,28 @@ export class AppUpdater {
 
     autoUpdater.on('update-available', (info) => {
       log.info('Update available:', info.version)
-      this.sendStatusToWindow(`Update available: ${info.version}`)
+      if (!manualMac) {
+        this.sendStatusToWindow(`Update available: ${info.version}`)
+        return
+      }
+      const url = macDownloadUrl(info.version)
+      this.sendStatusToWindow(`Version ${info.version} is available`, url)
+      if (this.announced === info.version) return // the 4-hourly check doesn't nag again
+      this.announced = info.version
+      dialog
+        .showMessageBox({
+          type: 'info',
+          title: 'Update Available',
+          message: `Version ${info.version} is available`,
+          detail:
+            "Updates can't install themselves on macOS yet. Download the new version, quit LumoSnap, then drag it into Applications.",
+          buttons: ['Download', 'Later'],
+          defaultId: 0,
+          cancelId: 1
+        })
+        .then(({ response }) => {
+          if (response === 0) void shell.openExternal(url)
+        })
     })
 
     autoUpdater.on('update-not-available', (info) => {
@@ -71,10 +104,10 @@ export class AppUpdater {
     })
   }
 
-  private sendStatusToWindow(message: string) {
+  private sendStatusToWindow(message: string, downloadUrl?: string) {
     // Send status to renderer process if you want to show updates in UI
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('update-status', message)
+      this.mainWindow.webContents.send('update-status', message, downloadUrl)
     }
   }
 

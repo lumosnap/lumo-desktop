@@ -4,6 +4,7 @@ import type { IpcRendererEvent } from 'electron'
 export function useUpdater() {
   const updateStatus = ref<string>('')
   const updateAvailable = ref(false)
+  const downloadUrl = ref('') // macOS: the new version's .dmg, installed by hand
 
   let removeListener: (() => void) | null = null
 
@@ -14,8 +15,9 @@ export function useUpdater() {
     }
   })
 
-  const handleUpdateStatus = (_event: IpcRendererEvent, message: string): void => {
+  const handleUpdateStatus = (_event: IpcRendererEvent, message: string, url?: string): void => {
     updateStatus.value = message
+    if (url) downloadUrl.value = url
     if (message.includes('Update available')) {
       updateAvailable.value = true
     }
@@ -36,6 +38,7 @@ export function useUpdater() {
   return {
     updateStatus,
     updateAvailable,
+    downloadUrl,
     checkForUpdates
   }
 }

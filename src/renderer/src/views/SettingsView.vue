@@ -25,7 +25,8 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const profileStore = useProfileStore()
-const { updateStatus, checkForUpdates } = useUpdater()
+const { updateStatus, downloadUrl, checkForUpdates } = useUpdater()
+const isMac = window.electron.process.platform === 'darwin'
 const link = useBookingUrl()
 
 // No "Watch folder" tab: albums watch their own source folders, there is no master folder.
@@ -560,6 +561,10 @@ onMounted(() => {
           <template v-else-if="tab === 'updates'">
             <div class="card">
               <h2>LumoSnap {{ appVersion }}</h2>
+              <div v-if="isMac" class="sub">
+                Updates don't install themselves on macOS yet. When a new version is out, download it
+                and drag it into Applications.
+              </div>
               <div class="row-actions">
                 <button
                   class="btn ghost"
@@ -575,6 +580,9 @@ onMounted(() => {
                   ><Check />You have the latest version</span
                 >
                 <span v-else-if="updateStatus" class="status">{{ updateStatus }}</span>
+                <a v-if="downloadUrl" class="link" :href="downloadUrl" target="_blank">
+                  <Download />Download
+                </a>
               </div>
             </div>
           </template>
