@@ -27,10 +27,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
-          version: 8
+          version: 9 # reads the lockfile (v9.0); pnpm 8 ignored it and resolved newer deps
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build Electron app
         run: pnpm run build
