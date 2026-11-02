@@ -45,8 +45,8 @@ importers:
         specifier: ^2.0.2
         version: 2.0.2
       lucide-vue-next:
-        specifier: ^0.555.0
-        version: 0.555.0(vue@3.5.25(typescript@5.9.3))
+        specifier: ^1.0.0
+        version: 1.0.0(vue@3.5.25(typescript@5.9.3))
       onnxruntime-node:
         specifier: 1.23.2
         version: 1.23.2
@@ -2837,8 +2837,8 @@ packages:
     resolution: {integrity: sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA==}
     engines: {node: '>=12'}
 
-  lucide-vue-next@0.555.0:
-    resolution: {integrity: sha512-7hczPsiMD/y+VNLpal5Q5Wv09kQxlHS0l/cM1xagrd+MA3i5umMm+PUXqllvsbgwAl3PHv27fo59h4PN02GM5A==}
+  lucide-vue-next@1.0.0:
+    resolution: {integrity: sha512-V6SPvx1IHTj/UY+FrIYWV5faISsPSb8BnWSFDxAtezWKvWc9ZZ40PDrdu1/Qb5vg4lHWr1hs1BAMGVGm6V1Xdg==}
     deprecated: Package deprecated. Please use @lucide/vue instead.
     peerDependencies:
       vue: '>=3.0.1'
@@ -6576,7 +6576,7 @@ snapshots:
 
   lru-cache@7.18.3: {}
 
-  lucide-vue-next@0.555.0(vue@3.5.25(typescript@5.9.3)):
+  lucide-vue-next@1.0.0(vue@3.5.25(typescript@5.9.3)):
     dependencies:
       vue: 3.5.25(typescript@5.9.3)
 
