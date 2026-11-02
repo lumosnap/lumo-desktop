@@ -17,6 +17,22 @@ const API_TIMEOUT_MS = 60_000 // whole request; a hung connection must not freez
 const SLOW_API_TIMEOUT_MS = 10 * 60_000 // confirm/delete do server-side work that scales with the album
 const UPLOAD_IDLE_MS = 60_000 // presigned PUT: socket idle, so big files on slow links still finish
 
+/**
+ * The server's definite "this album does not exist" (deleted, or its database was reset). Only a
+ * 404 with this exact message from the album routes: network errors, timeouts, 5xx, a 403 for
+ * another account's album and an unknown route's "Not Found" never match.
+ */
+export function isAlbumGone(error: unknown): boolean {
+  const e = error as { status?: number; message?: string } | null
+  return e?.status === 404 && e.message === 'Album not found'
+}
+
+// Told once per album call that came back isAlbumGone, whichever caller made it
+let albumGoneHandler: ((albumId: string) => void) | null = null
+export function onAlbumGone(handler: (albumId: string) => void): void {
+  albumGoneHandler = handler
+}
+
 // Generic fetch wrapper
 async function apiFetch<T>(
   endpoint: string,
@@ -73,11 +89,12 @@ async function apiFetch<T>(
           } else {
             console.error('[API] Error response:', parsed)
             // status lets callers tell e.g. a 409 conflict from a network failure
-            reject(
-              Object.assign(new Error(parsed.message || 'API request failed'), {
-                status: response.statusCode
-              })
-            )
+            const error = Object.assign(new Error(parsed.message || 'API request failed'), {
+              status: response.statusCode
+            })
+            const albumId = endpoint.match(/^\/albums\/([^/?]+)/)?.[1]
+            if (albumId && isAlbumGone(error)) albumGoneHandler?.(albumId)
+            reject(error)
           }
         } catch (error) {
           console.error('[API] Failed to parse response:', responseData)
@@ -430,6 +447,8 @@ export const albumsApi = {
     await apiFetch<ApiResponse<void>>(`/albums/${albumId}`, {
       method: 'DELETE',
       timeoutMs: SLOW_API_TIMEOUT_MS
+    }).catch((error) => {
+      if (!isAlbumGone(error)) throw error // already gone from the server: nothing to delete
     })
     console.log('[API] Album deleted')
   },
@@ -495,7 +514,12 @@ export const albumsApi = {
         body: { imageIds },
         timeoutMs: SLOW_API_TIMEOUT_MS
       }
-    )
+    ).catch((error) => {
+      // The album is gone from the server, so its photos are too: local deletes go on
+      if (isAlbumGone(error))
+        return { success: true, message: '', data: { deletedCount: 0, failedCount: 0 } }
+      throw error
+    })
     console.log('[API] Deletion result:', response.data)
     return response.data || { deletedCount: 0, failedCount: 0 }
   },

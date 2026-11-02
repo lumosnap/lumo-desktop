@@ -14,7 +14,8 @@ import {
   MoreHorizontal,
   FolderOpen,
   ImagePlus,
-  RotateCw
+  RotateCw,
+  Upload
 } from 'lucide-vue-next'
 import type { Album } from '../stores/album'
 import type { IpcRendererEvent } from 'electron'
@@ -78,6 +79,11 @@ const isSyncLoading = ref(false)
 
 // Share state
 const shareAlbum = ref<Album | null>(null)
+
+// Upload again: the server lost this album (e.g. its database was reset)
+const reuploadAlbum = ref<Album | null>(null)
+const isReuploading = ref(false)
+const reuploadError = ref('')
 
 const isRefreshing = ref(false)
 
@@ -235,6 +241,34 @@ function handleSyncComplete(): void {
   loadAlbums()
 }
 
+// Upload again
+function openReupload(album: Album): void {
+  closeMenu()
+  reuploadError.value = ''
+  reuploadAlbum.value = album
+}
+
+async function handleReupload(): Promise<void> {
+  const album = reuploadAlbum.value
+  if (!album) return
+  isReuploading.value = true
+  reuploadError.value = ''
+  try {
+    const result = await window.api.albums.reupload(album.id)
+    if (!result.success) throw new Error(result.error || 'Could not upload the album again')
+    reuploadAlbum.value = null
+    loadAlbums() // the album has a new id now
+  } catch (error) {
+    reuploadError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    isReuploading.value = false
+  }
+}
+
+function closeReupload(): void {
+  if (!isReuploading.value) reuploadAlbum.value = null
+}
+
 // Upload pill
 function dismissUpload(): void {
   uploadDone.value = false
@@ -282,10 +316,12 @@ const onError = (_e: IpcRendererEvent, data?: { error?: string }): void => {
 
 const onAlbumStatusChanged = (
   _e: IpcRendererEvent,
-  data: { albumId: string; needsSync: number }
+  data: { albumId: string; needsSync: number; serverMissing?: number }
 ): void => {
   const album = albumStore.albums.find((a) => a.id === data.albumId)
-  if (album) album.needsSync = data.needsSync
+  if (!album) return
+  album.needsSync = data.needsSync
+  if (data.serverMissing) album.server_missing = 1
 }
 
 const onAlbumsRefresh = (): void => {
@@ -420,11 +456,14 @@ onUnmounted(() => {
           @keydown.enter.self.prevent="openAlbum(album)"
           @keydown.space.self.prevent="openAlbum(album)"
         >
-          <div class="cover" :class="{ muted: album.isOrphaned }">
+          <div class="cover" :class="{ muted: album.isOrphaned || album.server_missing }">
             <img v-if="album.thumbnail" :src="`file://${album.thumbnail}`" alt="" loading="lazy" />
             <div v-else class="empty-cover"><ImagePlus /></div>
             <div v-if="album.isOrphaned" class="flag">
               <span class="tag"><span class="dot bad"></span>Folder missing</span>
+            </div>
+            <div v-else-if="album.server_missing" class="flag">
+              <span class="tag"><span class="dot bad"></span>Not on LumoSnap</span>
             </div>
             <div v-else-if="album.needsSync" class="flag">
               <span class="tag"><span class="dot warn"></span>Folder changed</span>
@@ -463,6 +502,9 @@ onUnmounted(() => {
               <div v-if="album.isOrphaned" class="hint">
                 Client link still works. The folder was moved or deleted on this computer.
               </div>
+              <div v-else-if="album.server_missing" class="hint">
+                The client link stopped working. Your photos here are safe.
+              </div>
               <div v-else-if="!album.totalImages && !isUploading(album)" class="hint">
                 Drop photos into its folder to fill it
               </div>
@@ -494,7 +536,20 @@ onUnmounted(() => {
         <button v-if="menuFor.needsSync" role="menuitem" @click="openSyncModal(menuFor)">
           <RefreshCw />Review folder changes
         </button>
-        <hr v-if="(!menuFor.isOrphaned && menuFor.sourceFolderPath) || menuFor.needsSync" />
+        <button
+          v-if="menuFor.server_missing && !menuFor.isOrphaned"
+          role="menuitem"
+          @click="openReupload(menuFor)"
+        >
+          <Upload />Upload again…
+        </button>
+        <hr
+          v-if="
+            (!menuFor.isOrphaned && menuFor.sourceFolderPath) ||
+            menuFor.needsSync ||
+            menuFor.server_missing
+          "
+        />
         <button role="menuitem" class="bad" @click="openDeleteModal(menuFor)">
           <Trash2 />Delete album…
         </button>
@@ -524,6 +579,31 @@ onUnmounted(() => {
       :album-title="shareAlbum?.title || ''"
       @close="shareAlbum = null"
     />
+
+    <Modal
+      :show="!!reuploadAlbum"
+      :title="`Upload “${reuploadAlbum?.title || ''}” again?`"
+      @close="closeReupload"
+    >
+      <p>
+        LumoSnap no longer has this album. This makes a new one and uploads its
+        {{ nf(reuploadAlbum?.totalImages || 0) }} photos again, with their sets, people and tags.
+        Your client gets a new link; picks made on the old link can’t be brought back. Nothing in
+        your folder changes.
+      </p>
+      <p v-if="reuploadError" class="err"><span class="dot bad"></span>{{ reuploadError }}</p>
+      <template #footer>
+        <button class="btn ghost" :disabled="isReuploading" @click="closeReupload">Cancel</button>
+        <button
+          class="btn primary"
+          :disabled="isReuploading || !networkStore.isOnline"
+          @click="handleReupload"
+        >
+          <span v-if="isReuploading" class="spin"></span
+          >{{ !networkStore.isOnline ? 'Offline' : isReuploading ? 'Starting…' : 'Upload again' }}
+        </button>
+      </template>
+    </Modal>
 
     <Modal
       :show="showDeleteModal"

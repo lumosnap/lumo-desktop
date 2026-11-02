@@ -31,7 +31,8 @@ import {
   setAlbumTagsScored,
   updateAlbum,
   Album,
-  Image
+  Image,
+  isServerMissing
 } from './database'
 import { embedBatch, stopEmbedder, shutdownEmbedder, BATCH_SIZE } from './ml/embedder'
 import { VECTORS_MODEL_TAG } from './ml/model'
@@ -243,7 +244,7 @@ export function forgetPushedVectors(albumId: string): void {
 
 async function pushVectors(albumId: string): Promise<void> {
   const album = getAlbum(albumId)
-  if (!album) return
+  if (!album || album.server_missing) return
   const sig = getAlbumEmbeddingsSignature(albumId, TAG_MODEL)
   if (album.vectors_hash && vectorsSigs.get(albumId) === sig) return
   // Only deletions since the last upload: the gallery drops ids missing from its manifest, so the
@@ -334,7 +335,7 @@ export function scheduleSetsPush(albumId: string): void {
  */
 async function pushSets(albumId: string): Promise<void> {
   const seen = getAlbum(albumId)?.sets_need_push ?? 0
-  if (!seen) return
+  if (!seen || isServerMissing(albumId)) return // stays dirty for the re-upload
   const serverIds = new Map(getAlbumImages(albumId).map((r) => [r.id, r.serverId]))
   let complete = true
   const toServer = (id: number): number | null => {
@@ -359,6 +360,7 @@ async function pushSets(albumId: string): Promise<void> {
 
 /** PATCH rows marked needs_push. Failures stay marked and retry on the next run. */
 async function pushDirty(albumId: string): Promise<void> {
+  if (isServerMissing(albumId)) return // rows stay marked for the re-upload
   const dirty = getAlbumImages(albumId).filter(
     (r) => (r.needs_push || r.tags_need_push) && r.serverId != null
   )

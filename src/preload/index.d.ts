@@ -116,6 +116,9 @@ declare global {
           albumId: string
         ) => Promise<{ success: true; album: Album } | { success: false; error: string }>
         delete: (albumId: string) => Promise<{ success: boolean; error?: string }>
+        reupload: (
+          albumId: string
+        ) => Promise<{ success: boolean; albumId?: string; error?: string }>
         getImages: (
           albumId: string
         ) => Promise<{ success: boolean; images: AlbumImageWithFavorites[]; error?: string }>

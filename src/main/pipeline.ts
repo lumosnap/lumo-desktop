@@ -9,7 +9,8 @@ import {
   getImageStats,
   updateImage,
   updateAlbum,
-  Image
+  Image,
+  isServerMissing
 } from './database'
 import { albumsApi, uploadToPresignedUrl } from './api-client'
 import { compressionPool } from './compression-pool'
@@ -89,6 +90,12 @@ class UploadPipeline {
     // Store mainWindow reference for queue processing
     if (mainWindow) {
       this.mainWindowRef = mainWindow
+    }
+
+    // Nowhere to upload to until the photographer uploads the album again
+    if (isServerMissing(albumId)) {
+      log.info(`[Pipeline] Album ${albumId} is not on the server, skipping`)
+      return
     }
 
     if (this.isRunning) {

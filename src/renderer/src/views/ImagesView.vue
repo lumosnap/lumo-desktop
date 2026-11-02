@@ -126,6 +126,7 @@ interface Album {
   sourceFolderPath?: string
   needsSync?: number
   isOrphaned?: number
+  server_missing?: number
 }
 
 const nf = (n: number): string => n.toLocaleString()
@@ -1158,6 +1159,7 @@ const statusLine = computed(() => {
   if (processingCount.value)
     return { dot: 'brand', text: `Adding ${nf(processingCount.value)} new` }
   if (album.value?.isOrphaned) return { dot: 'bad', text: 'Folder missing' }
+  if (album.value?.server_missing) return { dot: 'bad', text: 'Not on LumoSnap' }
   if (album.value?.needsSync) return { dot: 'warn', text: 'Folder changed' }
   return { dot: 'ok', text: 'Synced' }
 })
@@ -1906,8 +1908,11 @@ function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') closeNotesSidebar()
 }
 
-const onAlbumStatusChanged = (_e: unknown, data: { albumId: string; needsSync: number }): void => {
-  if (data.albumId === albumId && data.needsSync) {
+const onAlbumStatusChanged = (
+  _e: unknown,
+  data: { albumId: string; needsSync: number; serverMissing?: number }
+): void => {
+  if (data.albumId === albumId && (data.needsSync || data.serverMissing)) {
     window.api.albums.get(albumId).then((result) => {
       if (result.success) album.value = result.album
     })
@@ -2011,7 +2016,10 @@ onUnmounted(() => {
             <button
               class="btn primary"
               style="flex: 1"
-              :disabled="!networkStore.isOnline || isGeneratingLink"
+              :disabled="!networkStore.isOnline || isGeneratingLink || !!album?.server_missing"
+              :title="
+                album?.server_missing ? 'Upload this album again from Albums to share it' : ''
+              "
               :aria-busy="isGeneratingLink"
               @click="generateShareLink"
             >

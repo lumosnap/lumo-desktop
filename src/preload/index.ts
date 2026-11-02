@@ -103,6 +103,9 @@ const api = {
       ipcRenderer.invoke('album:get', albumId),
     delete: (albumId: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('album:delete', albumId),
+    // The server lost this album: make a new one and upload the photos again
+    reupload: (albumId: string): Promise<{ success: boolean; albumId?: string; error?: string }> =>
+      ipcRenderer.invoke('album:reupload', albumId),
     getImages: (
       albumId: string
     ): Promise<{ success: boolean; images: AlbumImageWithFavorites[]; error?: string }> =>

@@ -33,6 +33,7 @@ export interface Album {
   people_need_push?: number // migration 8: >0 = people changed locally since the last full push
   vectors_hash?: string | null // migration 11: hash of the LSV1 search file last uploaded; null = none
   vectors_ids?: string | null // migration 12: JSON server ids in that file (deletes-only changes skip the upload)
+  server_missing?: number // migration 14: 1 = the server answered "Album not found" (e.g. its database was reset)
 }
 
 export interface AlbumSet {
@@ -289,6 +290,10 @@ const migrations: Array<(database: Database.Database) => void> = [
         done_at INTEGER NOT NULL
       );
     `)
+  },
+  // 14: albums the server no longer has. Server calls skip them until the photographer uploads again.
+  (database) => {
+    database.exec('ALTER TABLE albums ADD COLUMN server_missing INTEGER DEFAULT 0')
   }
 ]
 
@@ -506,6 +511,37 @@ export function getAlbumBySourcePath(sourceFolderPath: string): Album | null {
 
   const stmt = db.prepare('SELECT * FROM albums WHERE sourceFolderPath = ?')
   return stmt.get(sourceFolderPath) as Album | null
+}
+
+/** The server answered "Album not found" for it: server calls skip it until it is uploaded again. */
+export function isServerMissing(id: string): boolean {
+  return getAlbum(id)?.server_missing === 1
+}
+
+/**
+ * Move an album the server lost onto a new server album id, ready for the pipeline to upload it
+ * again. The local id is the server id, so every row that names the album moves with it in one
+ * transaction (foreign keys checked at commit). Photos go back to pending with no server id;
+ * every push flag is set so sets, people, tags and vectors go up again. Files are not touched.
+ */
+export function rekeyAlbumForReupload(oldId: string, newId: string): void {
+  const d = conn()
+  d.transaction(() => {
+    d.pragma('defer_foreign_keys = ON') // resets itself at commit
+    d.prepare(
+      `UPDATE albums SET id = ?, server_missing = 0, lastSyncedAt = NULL, vectors_hash = NULL,
+         vectors_ids = NULL, sets_need_push = COALESCE(sets_need_push, 0) + 1,
+         people_need_push = COALESCE(people_need_push, 0) + COALESCE(people_enabled, 0)
+       WHERE id = ?`
+    ).run(newId, oldId)
+    d.prepare(
+      `UPDATE images SET albumId = ?, serverId = NULL, uploadStatus = 'pending', needs_push = 1,
+         tags_need_push = COALESCE(tags_need_push, 0) + 1
+       WHERE albumId = ?`
+    ).run(newId, oldId)
+    for (const table of ['album_sets', 'people', 'client_people'])
+      d.prepare(`UPDATE ${table} SET album_id = ? WHERE album_id = ?`).run(newId, oldId)
+  })()
 }
 
 export function updateAlbum(id: string, updates: Partial<Album>): void {

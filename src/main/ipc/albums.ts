@@ -36,9 +36,10 @@ import {
   getAlbumNote,
   setAlbumNote,
   getImageDone,
-  setImageDone
+  setImageDone,
+  rekeyAlbumForReupload
 } from '../database'
-import { albumsApi } from '../api-client'
+import { albumsApi, onAlbumGone } from '../api-client'
 import { uploadPipeline } from '../pipeline'
 import {
   analyzeAlbum,
@@ -75,6 +76,19 @@ export interface TagConfig {
 }
 
 export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
+  // The server lost an album (e.g. its database was reset): mark it once, like a missing folder
+  onAlbumGone((albumId) => {
+    const album = getAlbum(albumId)
+    if (!album || album.server_missing) return
+    logger.warn(`Album ${albumId} is not on the server; marking it`)
+    updateAlbum(albumId, { server_missing: 1 })
+    mainWindow.webContents.send('album:status-changed', {
+      albumId,
+      needsSync: album.needsSync,
+      serverMissing: 1
+    })
+  })
+
   ipcMain.handle(
     'album:create',
     async (
@@ -163,6 +177,33 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       }
     }
   )
+
+  // Upload an album the server lost to a new server album. The photographer's files stay put;
+  // the existing pipeline uploads the cached photos again.
+  ipcMain.handle('album:reupload', async (_event, albumId: string) => {
+    try {
+      const album = getAlbum(albumId)
+      if (!album) return { success: false, error: 'Album not found' }
+      if (!album.server_missing) return { success: false, error: 'This album is on LumoSnap' }
+
+      const apiAlbum = await albumsApi.create({ title: album.title, eventDate: album.eventDate })
+      logger.info(`Re-uploading ${albumId} as ${apiAlbum.id}`)
+
+      // Work queued under the old id finds no album and stops
+      watcherService.unwatch(albumId)
+      cancelTagging(albumId)
+      rekeyAlbumForReupload(albumId, apiAlbum.id)
+      if (album.sourceFolderPath) watcherService.watch(apiAlbum.id, album.sourceFolderPath)
+
+      uploadPipeline.startPipeline(apiAlbum.id, mainWindow).catch((error) => {
+        logger.error('Pipeline failed:', getErrorMessage(error))
+      })
+      return { success: true, albumId: apiAlbum.id }
+    } catch (error: unknown) {
+      logger.error('Failed to re-upload album:', getErrorMessage(error))
+      return { success: false, error: getErrorMessage(error) }
+    }
+  })
 
   ipcMain.handle('album:list', () => {
     logger.debug('Listing albums (optimized)')
