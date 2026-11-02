@@ -27,11 +27,15 @@ export function registerAuthHandlers(): void {
 
   ipcMain.handle('auth:requestDeviceCode', async () => {
     logger.info('Requesting device authorization code')
-    return requestDeviceCode()
+    const result = await requestDeviceCode()
+    if (!result.success) logger.warn(`Device code request failed: ${result.error}`)
+    return result
   })
 
   ipcMain.handle('auth:pollDeviceToken', async (_event, deviceCode: string) => {
-    return pollDeviceToken(deviceCode)
+    const result = await pollDeviceToken(deviceCode)
+    if (!result.success && !result.pending) logger.warn(`Device token poll failed: ${result.error}`)
+    return result
   })
 
   ipcMain.handle('auth:logout', () => {

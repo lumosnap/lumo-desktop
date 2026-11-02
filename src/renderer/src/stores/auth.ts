@@ -45,33 +45,24 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * Start the auth flow - opens browser to auth page
    */
+  // Leaves loading/error to the caller: AuthSignIn races this against the device code, which
+  // stays valid (30 min) after the browser flow gives up (5 min)
   async function startAuth(): Promise<void> {
-    loading.value = true
-    error.value = null
+    const result = await window.api.auth.startAuth()
 
-    try {
-      const result = await window.api.auth.startAuth()
+    if (!result.success) {
+      throw new Error(result.error || 'Authentication failed')
+    }
 
-      if (!result.success) {
-        throw new Error(result.error || 'Authentication failed')
+    if (result.user) {
+      user.value = {
+        id: result.user.id,
+        email: result.user.email,
+        name: result.user.name || result.user.email.split('@')[0],
+        image: result.user.image || undefined
       }
-
-      if (result.user) {
-        user.value = {
-          id: result.user.id,
-          email: result.user.email,
-          name: result.user.name || result.user.email.split('@')[0],
-          image: result.user.image || undefined
-        }
-        isAuthenticated.value = true
-        console.log('[Auth] Authentication successful')
-      }
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Authentication failed. Please try again.'
-      error.value = message
-      throw e
-    } finally {
-      loading.value = false
+      isAuthenticated.value = true
+      console.log('[Auth] Authentication successful')
     }
   }
 
