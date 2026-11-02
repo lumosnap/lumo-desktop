@@ -1185,13 +1185,13 @@ const formattedEventDate = computed(() => {
   })
 })
 
-// Thumbnail lives in a .thumbnails subfolder; falls back to the original on error
+// Thumbnail lives in the .thumbnail subfolder the compressor writes; falls back to the original on error
 function getThumbnailPath(localFilePath: string): string {
   const lastSlash = localFilePath.lastIndexOf('/')
   if (lastSlash === -1) return localFilePath
   const dir = localFilePath.substring(0, lastSlash)
   const filename = localFilePath.substring(lastSlash + 1)
-  return `${dir}/.thumbnails/${filename}`
+  return `${dir}/.thumbnail/${filename}`
 }
 
 async function loadAlbumImages(): Promise<void> {

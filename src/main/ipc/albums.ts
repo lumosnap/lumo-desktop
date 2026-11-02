@@ -188,8 +188,14 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       const albumsWithThumbnails = validAlbums.map((album) => {
         // Performance: we don't scan folders here - just fetch minimal data from DB
         const images = getAlbumImages(album.id)
-        const randomIndex = images.length > 0 ? Math.floor(Math.random() * images.length) : 0
-        const thumbnail = images.length > 0 ? images[randomIndex].localFilePath : null
+        // Until a photo is compressed its localFilePath names a file that isn't written yet,
+        // so walk on from a random start to the first one that is on disk
+        const start = Math.floor(Math.random() * images.length)
+        let thumbnail: string | null = null
+        for (let i = 0; i < images.length && !thumbnail; i++) {
+          const path = images[(start + i) % images.length].localFilePath
+          if (existsSync(path)) thumbnail = path
+        }
 
         // Trigger background sync check
         // This runs asynchronously and will notify frontend if status changes

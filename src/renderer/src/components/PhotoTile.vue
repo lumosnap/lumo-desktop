@@ -52,6 +52,13 @@ onMounted(() => {
     // a bad hash just means no placeholder
   }
 })
+
+// No thumbnail yet: try the full photo once. If that is missing too, leave it (main.ts hides it)
+function onThumbError(e: Event): void {
+  const img = e.target as HTMLImageElement
+  const full = `file://${props.image.localFilePath}`
+  if (img.getAttribute('src') !== full) img.src = full
+}
 </script>
 
 <template>
@@ -85,7 +92,7 @@ onMounted(() => {
         :src="thumb"
         :alt="image.originalFilename"
         loading="lazy"
-        @error="(e) => ((e.target as HTMLImageElement).src = `file://${image.localFilePath}`)"
+        @error="onThumbError"
       />
     </a>
     <span v-if="status === 'Failed'" class="chip">Failed</span>
