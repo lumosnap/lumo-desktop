@@ -90,7 +90,9 @@ export class AppUpdater {
     })
 
     autoUpdater.on('download-progress', (progressObj) => {
-      const message = `Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent}%`
+      const mb = (bytes: number): string => (bytes / 1048576).toFixed(1)
+      const { percent, transferred, total, bytesPerSecond } = progressObj
+      const message = `Downloading ${Math.floor(percent)}% (${mb(transferred)} of ${mb(total)} MB, ${mb(bytesPerSecond)} MB/s)`
       log.info(message)
       this.sendStatusToWindow(message)
     })

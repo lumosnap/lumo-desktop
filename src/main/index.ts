@@ -18,6 +18,10 @@ import { AppUpdater } from './AppUpdater'
 import { stopAnalysis } from './album-analysis'
 
 // Scoped logger for main process
+// pnpm dev talks to a local backend: keep its database, config and sign-in apart from the
+// installed app's, so dev never marks real albums missing or re-uploads them elsewhere
+if (is.dev) app.setPath('userData', `${app.getPath('userData')}-dev`)
+
 const logger = createLogger('Main')
 
 // App State
