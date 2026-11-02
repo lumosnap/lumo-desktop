@@ -20,7 +20,8 @@ import {
   saveImageFaces,
   setPeopleEnabled as dbSetPeopleEnabled,
   type FaceRow,
-  type PersonRow
+  type PersonRow,
+  isServerMissing
 } from './database'
 import { detectFaces, EmbedderDown, isMlOnBattery, isMlPaused } from './ml/embedder'
 import { ensureFaceModels } from './ml/model'
@@ -75,8 +76,15 @@ export function rematch(
   { push = true } = {}
 ): Map<string, Array<{ faceId: number; score: number }>> {
   const { changed, review } = rematchPeople(albumId)
+  // The web also shows "Is this X?" candidates, so a changed queue is a change to push.
+  // The first match of a session counts as changed: one push brings older uploads in line.
+  const key = (q: typeof review): string =>
+    [...q].flatMap(([p, fs]) => fs.map((f) => `${p}:${f.faceId}`)).sort().join()
+  const before = reviews.get(albumId)
+  const reviewChanged = !before || key(before) !== key(review)
+  if (reviewChanged && getAlbum(albumId)?.people_enabled) markPeopleDirty(albumId)
   reviews.set(albumId, review)
-  if (changed > 0 && push) schedulePeoplePush(albumId)
+  if ((changed > 0 || reviewChanged) && push) schedulePeoplePush(albumId)
   return review
 }
 
@@ -326,7 +334,11 @@ export function schedulePeoplePush(albumId: string): void {
   )
 }
 
-/** Named, non-hidden people in server ids. complete = false if some photos aren't uploaded yet. */
+/**
+ * Named, non-hidden people in server ids. complete = false if some photos aren't uploaded yet.
+ * A person's photos include their "Is this X?" candidates (T_REVIEW up to T_AUTO): on the web a
+ * possible match beats a missing one, and a "no" on the desktop takes it off.
+ */
 export function peoplePayload(albumId: string): {
   people: Array<{
     id: string
@@ -341,6 +353,8 @@ export function peoplePayload(albumId: string): {
   const album = getAlbum(albumId)
   if (!album?.people_enabled) return { people: [], complete: true }
   const serverId = new Map(getAlbumImages(albumId).map((i) => [i.id, i.serverId]))
+  const review = reviewsFor(albumId)
+  const faceImage = new Map(getAlbumFaces(albumId).map((f) => [f.id, f.imageId]))
   let complete = true
   const people = getAlbumPeople(albumId)
     .filter((p) => !p.hidden)
@@ -356,7 +370,15 @@ export function peoplePayload(albumId: string): {
           name: p.name,
           coverImageId: serverId.get(cover.imageId)!,
           box: cover.box,
-          imageIds: [...new Set(uploaded.map((f) => serverId.get(f.imageId)!))]
+          imageIds: [
+            ...new Set([
+              ...uploaded.map((f) => serverId.get(f.imageId)!),
+              ...(review.get(p.id) ?? []).flatMap(({ faceId }) => {
+                const sid = serverId.get(faceImage.get(faceId)!)
+                return sid == null ? [] : [sid]
+              })
+            ])
+          ]
         }
       ]
     })
@@ -368,7 +390,7 @@ export function peoplePayload(albumId: string): {
 export function pushPeople(albumId: string): Promise<void> {
   const run = async (): Promise<void> => {
     const seen = getAlbum(albumId)?.people_need_push ?? 0
-    if (!seen) return
+    if (!seen || isServerMissing(albumId)) return // stays dirty for the re-upload
     const { people, complete } = peoplePayload(albumId)
     await albumsApi.putPeople(albumId, people)
     // A change during the PUT bumps the counter, so this no-ops and that change's push follows
