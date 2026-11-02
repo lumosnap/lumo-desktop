@@ -25,7 +25,7 @@ jobs:
           node-version: 20
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v6
         with:
           version: 9 # reads the lockfile (v9.0); pnpm 8 ignored it and resolved newer deps
 
