@@ -13,7 +13,6 @@ jobs:
 
     strategy:
       matrix:
-        # Intel mac: on the Apple Silicon runner the x64 app shipped an arm64 better-sqlite3
         os: [macos-15-intel, ubuntu-latest, windows-latest]
 
     steps:
@@ -39,6 +38,9 @@ jobs:
       # Main change: Use conditional publishing
       - name: Package and publish app
         env:
+          # On CI electron-builder hard-links node_modules into the app, so the arm64 rebuild of
+          # better-sqlite3 overwrote the x64 app's copy (v0.2.8's Intel app could not start).
+          USE_HARD_LINKS: 'false'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_DOMAIN: https://lumosnap.com
           VITE_API_URL: https://backend.lumosnap.com/api/v1

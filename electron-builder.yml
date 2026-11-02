@@ -117,7 +117,7 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 
 npmRebuild: true
-afterPack: build/after-pack.cjs
+afterAllArtifactBuild: build/check-mac-arch.cjs
 
 publish:
   provider: github
