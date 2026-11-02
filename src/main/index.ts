@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join } from 'path'
 import { rm } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -108,12 +108,29 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
+// The smallest layout the app is designed for (body has min-width 960px)
+const MIN_W = 960
+const MIN_H = 600
+
+// A display scaled so far that it has less room than MIN_W×MIN_H (e.g. a 1080p screen at
+// 300% gives 640×360) zooms the app out to fit instead of cutting it off or scrolling
+function fitToDisplay(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  const { width, height } = screen.getDisplayMatching(win.getBounds()).workAreaSize
+  const zoom = Math.min(1, width / MIN_W, height / MIN_H)
+  win.webContents.setZoomFactor(zoom)
+  win.setMinimumSize(Math.floor(MIN_W * zoom), Math.floor(MIN_H * zoom))
+}
+
 // Window Management
 function createWindow(): void {
   logger.info('Creating browser window...')
+  const workArea = screen.getPrimaryDisplay().workAreaSize
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: Math.min(1400, workArea.width),
+    height: Math.min(900, workArea.height),
+    minWidth: Math.min(MIN_W, workArea.width),
+    minHeight: Math.min(MIN_H, workArea.height),
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
@@ -131,6 +148,17 @@ function createWindow(): void {
   }
 
   logger.info('Browser window created')
+
+  const win = mainWindow
+  const fit = (): void => fitToDisplay(win)
+  win.webContents.on('did-finish-load', fit)
+  win.on('moved', fit) // dragged to another display
+  screen.on('display-metrics-changed', fit) // scale changed in system settings
+  screen.on('display-removed', fit)
+  win.on('closed', () => {
+    screen.off('display-metrics-changed', fit)
+    screen.off('display-removed', fit)
+  })
 
   mainWindow.on('ready-to-show', () => {
     logger.info('Browser window ready to show')

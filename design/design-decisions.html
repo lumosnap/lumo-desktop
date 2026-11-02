@@ -174,6 +174,240 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-11-02-auth-frame">
+<h2>Session 2026-11-02 (3): sign-in and setup show the job in one drawing (first tried: one frame of a wedding day)</h2>
+<p>Existing work, Revamp level, component scope: the left panel of the sign-in screen (<code>LoginView.vue</code>) and the 3-step setup (<code>SetupWizard.vue</code>). The look is kept. The form side stays, with one fit change for short windows. Screens: 960 &times; 600 (the new window minimum) to 2560 px, desktop only. User request: replace the wall of frames with real photos that make a first impression, but keep it simple, because the print stack in the sidebar is already the delight piece.</p>
+<ul>
+<li><b>For:</b> a wedding or portrait photographer who opens LumoSnap for the first time, or after a sign-out.</li>
+<li><b>Job:</b> sign in and get to the albums. The panel does no job; it tells the photographer that this app is made for their kind of work.</li>
+<li><b>Moment:</b> the first screen of the app. The photographer reads 1 heading and presses 1 button.</li>
+<li><b>Before:</b> a white card with a 4 &times; 3 grid of 12 grey blank frames (a contact sheet with no photos). Step 3 put a blue outline on frame 6. The mock used 12 picsum photos.</li>
+<li><b>Feel:</b> the photographer sees their own world (henna, marigolds, a veil, a couple) before they see the app. Calm, not a show.</li>
+<li><b>Delight piece:</b> none here, because the print stack is the one delight piece. The panel has no hover, no drag and no loop.</li>
+</ul>
+<h3>Direction</h3>
+<ul>
+<li><b>Default to beat:</b> a split screen with a stock hero photo, a dark gradient over it and a quote or a tagline in white. Or a mosaic of 12 photos (the contact sheet, which the ledger already holds for this product).</li>
+<li><b>World gathered:</b> the mehndi the day before; marigold garlands; the veil and the pheras; the couple portrait after the ceremony; the camera file name; the credit line under a published photo; the order of a wedding day; the edit late at night.</li>
+<li><b>Directions sampled:</b>
+  <ul>
+  <li>One wedding day, one frame per setup step (chosen). Structure from film: a sequence. The setup moves from the getting-ready detail to the ceremony to the couple. Typicality about 20%.</li>
+  <li>Contact sheet of real photos. Typicality about 45%. Beat: the trade cliché, and 12 small photos read as a stock wall at 960 px.</li>
+  <li>The client view: a small copy of the client gallery with one pick heart. Typicality about 25%. Beat: it is a second piece to look at, and it competes with the print stack.</li>
+  <li>Rolled candidate (very round, soft contrast, bare; far domain: industrial design): the photo in a large round lens crop. Beat: the circle fights the 22 px cards and cuts faces.</li>
+  </ul></li>
+<li><b>Mutation:</b> remove the grid. One photo fills the card.</li>
+<li><b>Motif:</b> none new. The card keeps the 22 px radius of every card in the app.</li>
+<li><b>Concept placed:</b> 1 place only, the step change in setup. The sign-in screen shows the ceremony frame, the same frame as the sign-in step of setup.</li>
+</ul>
+<div class="dirs"><div class="on"><b>One day, one frame</b>3 photos, step by step</div><div><b>Contact sheet</b>12 small photos</div><div><b>Client view</b>gallery with a pick</div><div><b>Lens crop</b>rolled; round frame</div></div>
+<h3>Photos</h3>
+<p>All 3 photos come from Pexels (Pexels License: free use, no credit needed). Each is cropped to 1280 &times; 1600 px (4:5, about 2&times; the panel at 1400 &times; 900), at saturation 0.9, WebP. The portrait is also at brightness 0.9 and saturation 0.82, so its light background is near the other 2 and the card edge holds against the grey canvas. The files are in <code>src/renderer/src/assets/auth/</code>.</p>
+<table>
+<tr><th>File</th><th>Step</th><th>Photo</th><th>Photographer</th><th>Source</th><th>Size</th></tr>
+<tr><td><code>ready.webp</code></td><td>Setup 1</td><td>Henna on the bride's feet, on marigolds</td><td>Anil Sharma (@shootsaga)</td><td><a href="https://www.pexels.com/photo/intricate-henna-design-on-bride-s-feet-with-marigold-flowers-30868063/">pexels.com/photo/30868063</a></td><td>148 KB (quality 58)</td></tr>
+<tr><td><code>vows.webp</code></td><td>Setup 2, sign-in</td><td>Bride and groom under a red veil, backlit</td><td>Ashraful Raj</td><td><a href="https://www.pexels.com/photo/young-couple-at-an-indian-wedding-19230329/">pexels.com/photo/19230329</a></td><td>67 KB (quality 66)</td></tr>
+<tr><td><code>portrait.webp</code></td><td>Setup 3</td><td>Couple portrait, the groom kisses the bride's forehead</td><td>Perfect Pixles</td><td><a href="https://www.pexels.com/photo/portrait-of-indian-wedding-couple-19733687/">pexels.com/photo/19733687</a></td><td>100 KB (quality 66, saturation 0.82, brightness 0.9)</td></tr>
+</table>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Left panel</td><td>One photo fills the card (<code>object-fit: cover</code>), 22 px radius, the inset grey shows before it loads</td><td>One large photo shows the work at the size a photographer judges it. The rest of the app stays grey, so the photo is the only colour, as the design language says</td><td class="rejected">The 12 blank frames; 12 small real photos</td></tr>
+<tr><td>Subjects</td><td>An Indian wedding day: a detail, the ceremony, the couple</td><td>The brief names photographers in India who shoot weddings. These are the 3 kinds of frame they deliver from every wedding</td><td class="rejected">Generic stock: a camera on a desk, a laptop, a landscape</td></tr>
+<tr><td>Setup steps</td><td>Each step shows the next frame of the day; the photo cross-fades in 600 ms</td><td>The setup moves forward as a wedding day does. It is the one quiet change, and it happens only when the person acts</td><td class="rejected">A slow zoom or a slideshow on a timer, which is a second moving piece next to the print stack</td></tr>
+<tr><td>Sign-in screen</td><td>The ceremony frame (the same as setup step 2)</td><td>Sign-in is the same moment in both places, so it gets the same photo</td><td class="rejected">A random frame per launch</td></tr>
+<tr><td>Credit</td><td>A white pill at the bottom left: "Photo by Anil Sharma", 12 px, ink-2 on solid card white</td><td>The people who use this app are photographers. A credit line is what they expect under a published photo, even when the license does not ask for it</td><td class="rejected">No credit; a gradient scrim with a white tagline</td></tr>
+<tr><td>Crop</td><td>4:5 files, a focus point per photo (faces at 25% from the top in the portrait, the veil at 40% from the left)</td><td>The panel is 0.82 to 0.94 wide for each 1 high from 960 to 2560 px. The faces stay in the frame at each size</td><td class="rejected">Centre crop for all</td></tr>
+<tr><td>Page height</td><td><code>.auth</code> is window high (one <code>minmax(0, 1fr)</code> row, as <code>.app</code>); the form side scrolls inside itself if it must</td><td>The page never scrolls. Before, <code>min-height: 100vh</code> let a tall form side make the whole page scroll</td><td class="rejected"><code>overflow: hidden</code>, which cuts the form off</td></tr>
+<tr><td>Form side, short window</td><td>At 700 px high or less: 24 px top and bottom padding (was 40 px), 24 px under the logo (was 48 px). Centring is <code>safe center</code></td><td>At 960 &times; 600 the device-code card was 53 px taller than the window. Now it fits with no scroll</td><td class="rejected">Keep 40 px and let the form side scroll</td></tr>
+</table>
+<h3>States</h3>
+<p>Photo loading: the card shows the inset grey (local files, so this is 1 frame at most). Photo file missing: the <code>data-missing</code> rule from the earlier session hides it, so the grey card shows. Setup step 1, 2, 3: one photo each. Sign-in waiting with the code card: the photo stays; the form side fits at 960 &times; 600. Offline: the photos are bundled, so they show offline. Reduced motion: the step change is instant.</p>
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>Here</th></tr>
+<tr><td>Signed out</td><td>The sign-in screen with the ceremony frame</td></tr>
+<tr><td>First launch</td><td>Setup with 1 frame per step</td></tr>
+<tr><td>Offline</td><td>The photos show (bundled in the app); the sign-in button says "Offline" (unchanged)</td></tr>
+<tr><td>Small window (960 &times; 600)</td><td>No page scroll; the photo crops to fit; the form side fits</td></tr>
+<tr><td>Not found, no access, crash</td><td>Not applicable: these screens have no data</td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th><th>Reduced motion</th></tr>
+<tr><td>Setup step changes</td><td>transition</td><td>The old photo fades out and the new one fades in, opacity, 600 ms, <code>--ease</code></td><td>Instant (the global rule)</td></tr>
+<tr><td>Sign-in screen opens</td><td>none</td><td>The photo is there at once</td><td>Same</td></tr>
+</table>
+<h3>Copy, in reading order</h3>
+<p>"Photo by Anil Sharma", "Photo by Ashraful Raj", "Photo by Perfect Pixles". The panel is <code>aria-hidden</code>: the photos and the credit are decoration for a screen reader. The form copy is unchanged.</p>
+<h3>Removed</h3>
+<p>The 12-frame grid in both views, the scoped <code>.sheet span</code> and <code>.pick</code> styles, and the unused <code>.sheet</code>, <code>.sheet img</code>, <code>.sheet img.pick</code> and <code>.sheet .frame-no</code> rules in <code>main.css</code>. The mock (<code>lumosnap-mock.html</code>) still has the picsum sheet; this session did not change the mock.</p>
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Shared panel</td><td>components/AuthFrame.vue (new), assets/auth/*.webp (new), assets/main.css (<code>.auth</code>, <code>.auth-frame</code>)</td><td>this session</td><td>A decorative left panel, <code>aria-hidden</code>, no controls</td><td>Same: no controls, hidden from screen readers; photos in place of blank frames</td></tr>
+<tr><td>Sign-in screen</td><td>views/LoginView.vue</td><td>this session</td><td>"Sign in with browser" starts the browser and code sign-in; done goes to /albums; cancel and error show under the button</td><td>Same: only the panel markup changed; AuthSignIn and its events are untouched</td></tr>
+<tr><td>Setup</td><td>views/SetupWizard.vue</td><td>this session</td><td>Step 1 "Get started" goes to step 2; sign-in done goes to step 3; "Open LumoSnap" goes to /albums; step bar shows the step</td><td>Same steps and buttons; <code>step</code> is typed 1 | 2 | 3; the panel follows the step</td></tr>
+<tr><td>Form side fit</td><td>assets/main.css (<code>.auth-body</code>)</td><td>this session</td><td>Content centred in the right half</td><td>Same above 700 px high; at 700 px or less, less padding; never a page scroll</td></tr>
+</table>
+<h3>Mechanics</h3>
+<p>Unchanged: global rules in <code>main.css</code>, unlayered. The images are imported in the component, so Vite bundles them; no remote URL, so the CSP and offline use do not matter.</p>
+<h3>Look notes</h3>
+<p>Looked at captures of a static copy of the 6 states (sign-in, sign-in waiting with the code card, setup 1, 2, 2 waiting and 3) with the real <code>main.css</code>, the bundled Outfit font and the real WebP files, in Chromium at 960 &times; 600, 1280 &times; 720 and 1400 &times; 900. The page width and height equal the window in all 18 captures. The faces stay in the frame at each size. The red veil photo is the strongest colour; it sits on the sign-in step only. A capture at 250 ms into the step 1 to 2 change shows the cross-fade (opacity 0.12 and 0.88); with reduced motion the change is instant. Owed: the running Electron app was not rendered in the signed-out state.</p>
+<h3>Critique caught</h3>
+<p>A fresh reviewer (a new subagent, not a fork) read the brief, the log rows and 6 captures. It found 5 points:</p>
+<ul>
+<li>The portrait was brighter and cooler than the other 2, and its light lower right edge merged with the grey canvas. Fixed: brightness 0.9 and saturation 0.82 on that file; the card edge now shows.</li>
+<li>The credit pill was 86% white over a busy photo. Fixed: solid card white.</li>
+<li>The sign-in screen shows the middle frame of the day. Kept: sign-in is the same moment as setup step 2, and a returning photographer does not read the panel as a story.</li>
+<li>The code card text wraps at 960 px, and the form block sits left in a wide right half at 1280 px and up. Not changed: the brief keeps the form side. Listed under "For the owner".</li>
+</ul>
+<h3>For the owner</h3>
+<ul>
+<li>The "Cancel" link under "Waiting for your browser…" is 43 &times; 20 px, under the 24 px target. It is on the form side, which this session keeps.</li>
+<li>In the code card at 960 px, "Browser didn't open? Use a code." and "Expires in 15 min" wrap to 2 lines. Also on the form side.</li>
+<li>At 1280 px and up, the form block sits at the left of a wide right half. A max width or a centred block would relate it to the photo card. This needs a form-side change.</li>
+</ul>
+<h3>Checks</h3>
+<p><code>pnpm typecheck</code> passes. <code>check.py src/renderer/src</code>: 0 errors; 3 ASKs. The middle-dot ASK named the new credit, so the credit now says "Photo by". The other 2 (reduced motion stops the spinners, straight quotes) are app-wide and older than this session. <code>check.py --inventory</code> run. <code>render_check.py --widths=960,1400</code> on the static sign-in, setup 1 and setup 2 waiting pages: no findings, except the "Cancel" target on the form side. On the running app: owed.</p>
+<h3>Follow-up: a drawing replaces the photos</h3>
+<p>The user tried the photos in the dev app and said: "it's kind of like somebody else's photos showing as a cover. Good idea, but I'd prefer an SVG animation or something else instead of a photo." The photos were other photographers' work, and the person who signs in is a photographer. So the panel now shows the job, not a cover. This section replaces the photo decisions above. The 3 WebP files, the <code>assets/auth/</code> folder and the credit pill are removed.</p>
+<ul>
+<li><b>Direction:</b> the whole job in one drawing. A folder of edited photos, the route bar that fills as frames travel along it, the client's phone with the one private link in its address bar, and a heart on one photo. It is the same flow that the setup step 1 text describes.</li>
+<li><b>Directions set aside:</b> a camera or a lens drawing (the trade's costume, not this product's job); one drawing for each setup step (the step bar already shows progress, and 3 sequences are 3 moving pieces); a loop (it keeps moving next to the form, which competes with the print stack).</li>
+<li><b>Motif:</b> the route bar from the design language (a track, two end dots, a blue fill). The heart is the same white chip and ink heart that a photo tile in the gallery shows.</li>
+</ul>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Panel</td><td>An inline SVG in the white card, <code>aria-hidden</code>, no text in the drawing. The drawing is 430 px wide at 960 &times; 600, 597 px at 1280 &times; 720 and 660 px at 1400 &times; 900 (720 px at most), a little above the centre</td><td>The drawing tells the job before the photographer reads the form. At about 85% of the card width it holds the card</td><td class="rejected">Stock photos (the user's feedback); a drawing at 60% of the card, which looked unfinished in the review</td></tr>
+<tr><td>Colours</td><td>Only tokens that exist: <code>--line</code>, <code>--line-2</code>, <code>--inset</code>, <code>--inset-2</code>, <code>--card</code>, <code>--ink</code>, <code>--brand</code> (the route bar fill) and <code>--brand-soft</code> (the link line). No new tokens</td><td>Blue means progress and links in this app, and the drawing uses it for exactly those 2 things. Everything else is the grey ladder, so the drawing stays quieter than the print stack</td><td class="rejected">A colour for the photos in the drawing</td></tr>
+<tr><td>Prints in the folder</td><td>A sun and a hill on each print, in <code>--line-2</code></td><td>Plain grey boxes read as paper or files; the review asked for a sign that they are photos</td><td class="rejected">Blank rectangles</td></tr>
+<tr><td>Client gallery</td><td>5 tiles of mixed shape: 1 wide, 2 tall, 2 short</td><td>An edited set mixes landscape and portrait frames. A grid of equal squares reads as a placeholder</td><td class="rejected">A 2 &times; 3 grid of equal tiles</td></tr>
+<tr><td>Heart</td><td>A 26 px white chip with an ink heart, inside a tall tile</td><td>The heart is the end of the story, so it is the strongest mark in the drawing. The review found the first 18 px chip too small</td><td class="rejected">A red heart, which is a new colour and means error in this app</td></tr>
+<tr><td>Same on every screen</td><td>The drawing does not change with the setup step, and it does not play again on a step change</td><td>The step bar on the form side already shows the step. A second animation at each step is noise next to the form</td><td class="rejected">A different state of the drawing for each step</td></tr>
+</table>
+<h3>Motion map (follow-up)</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th><th>Reduced motion</th></tr>
+<tr><td>The panel opens (sign-in or setup)</td><td>moment, once</td><td>The route bar fills (scaleX, 1.6 s from 0.4 s). 3 frames travel along it (translateX and opacity, 0.85 s, 0.35 s apart). The gallery tiles fade in as each frame reaches the end dot (1.25 s to 1.95 s). The heart chip comes in at 2.4 s (scale 0.6 to 1 and opacity, 0.35 s). Then nothing moves. All on <code>--ease</code>, no overshoot</td><td><code>animation: none</code>; the base styles are the finished frame</td></tr>
+<tr><td>Setup step changes</td><td>none</td><td>The drawing stays as it is</td><td>Same</td></tr>
+</table>
+<h3>States (follow-up)</h3>
+<p>Start of the sequence: folder, empty route bar and empty phone. Finished frame: full route bar, 5 tiles, heart. Reduced motion: the finished frame at once. Offline: the drawing is inline, so it shows. Sign-in waiting with the code card: the drawing stays still; the form side fits at 960 &times; 600 (the short-window rules stay).</p>
+<h3>Chunks (follow-up)</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Shared panel</td><td>components/AuthFrame.vue, assets/main.css (<code>.auth-frame</code>, <code>.af-*</code>); assets/auth/ removed</td><td>this session</td><td>A decorative left panel, <code>aria-hidden</code>, no controls, same card shape and size</td><td>Same card, same grid track; a drawing in place of the photo; no prop now</td></tr>
+<tr><td>Sign-in screen and setup</td><td>views/LoginView.vue, views/SetupWizard.vue</td><td>this session</td><td>Same as above: sign-in, steps, done goes to /albums</td><td>Same; only <code>&lt;AuthFrame /&gt;</code> lost its <code>step</code> prop. <code>step</code> is <code>ref(1)</code> again</td></tr>
+</table>
+<h3>Look notes (follow-up)</h3>
+<p>Rendered the real component (compiled from <code>AuthFrame.vue</code> with Vue's server renderer) with the real <code>main.css</code> and the Outfit font, in Chromium at 960 &times; 600, 1280 &times; 720 and 1400 &times; 900. The captures show 5 states each, frames at 700 ms, 1400 ms and 2000 ms, and the reduced-motion frame at 100 ms. The page width and height equal the window in all captures. At 1400 ms one frame is on the route bar, and the first 2 tiles are in the phone. The reduced-motion capture at 100 ms is the same as the finished frame. The drawing is wide and not tall (10:7), so at 1280 &times; 720 the card has space above and below it. Owed: the running Electron app in the signed-out state.</p>
+<h3>Critique caught (follow-up)</h3>
+<p>A fresh reviewer read the brief and the first captures. It found 5 points:</p>
+<ul>
+<li>The drawing filled about 55% of the card and looked like it floated. Fixed: about 85% of the card width, 720 px at most, a little above the centre.</li>
+<li>The heart chip was smaller than other marks. Fixed: 26 px, inside the tile.</li>
+<li>The prints read as paper. Fixed: a sun and a hill on each.</li>
+<li>The travelling frames did not land anywhere. Fixed: the tiles appear as each frame reaches the end dot.</li>
+<li>The log did not say why the drawing is the same on every screen. Fixed: the "Same on every screen" row above.</li>
+</ul>
+<h3>Checks (follow-up)</h3>
+<p><code>pnpm typecheck</code> and <code>npx electron-vite build</code> pass. <code>check.py src/renderer/src</code>: 0 errors, 4 ASKs. The new ASK is the reduced-motion rule for <code>.auth-frame</code>, which stops the animation. It stays because the drawing is not a progress indicator: nothing in it shows work in progress, and the finished frame is the honest still. The other 3 ASKs are older and app-wide. <code>check.py --inventory</code> run. <code>render_check.py --widths=960,1400</code> on the sign-in, setup 1 and setup 2 waiting pages: no findings, except the older "Cancel" target on the form side.</p>
+</article>
+
+<article id="session-2026-11-02-small-windows">
+<h2>Session 2026-11-02 (2): the app fits small windows; dialogs do not scroll sideways</h2>
+<p>Existing work, Minimal level, component scope: the app shell, the sidebar and every dialog built on <code>Modal.vue</code>. The look is kept. Screens: 960 px to 2560 px, desktop only (Electron); checked at 1093 &times; 614 (1366 &times; 768 at 125 % scale), 1280 &times; 692 and 1366 &times; 740. User report: on a lower-resolution display the whole app scrolled, and the New album dialog scrolled sideways.</p>
+<ul>
+<li><b>For:</b> the photographer on a laptop or a small external display.</li>
+<li><b>Job:</b> use every view without the page moving under them.</li>
+<li><b>Cause 1:</b> <code>.app</code> had no row size, so a sidebar taller than the window made the row, and the page, taller than the window.</li>
+<li><b>Cause 2:</b> the folder path in <code>.path-row .p</code> is one line that does not wrap. Its full width went up through the grid tracks of the form and <code>.dlg-b</code>, so the dialog content was 834 px in a 460 px dialog.</li>
+</ul>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>App shell</td><td>One row, <code>minmax(0, 1fr)</code>, window high</td><td>The page never scrolls; each region scrolls inside itself</td><td class="rejected"><code>overflow: hidden</code> on body, which cuts content off</td></tr>
+<tr><td>Sidebar</td><td>Scrolls inside itself when taller than the window, thin scrollbar, same as <code>.g-side</code></td><td>The user said scrolling is better than cutting off; the print stack keeps its 200 px</td><td class="rejected">Shrink or hide the print stack on short windows</td></tr>
+<tr><td>Folder path</td><td><code>contain: inline-size</code> on the path text</td><td>Fix the cause: the path ellipsizes and never sets the width of its row. Also fixes the storage path in Settings</td><td class="rejected"><code>overflow-x: hidden</code> on the dialog, which hides the cut-off path and buttons</td></tr>
+<tr><td>Dialog text</td><td><code>overflow-wrap: anywhere</code> on dialogs</td><td>An album name with no spaces (in "Delete &hellip;?" and "Type &hellip; to confirm") wraps instead of making the dialog scroll sideways</td><td class="rejected">Ellipsis on the title, which hides the name the person must type</td></tr>
+<tr><td>Dialog height</td><td>A dialog with <code>.dlg-b</code> is a column; only the body scrolls</td><td>On a short window the title and the buttons stay in view</td><td class="rejected">The browser default, where the whole dialog scrolls with its buttons</td></tr>
+<tr><td>Window size</td><td><code>minWidth: 960</code>, <code>minHeight: 600</code> on the BrowserWindow</td><td>Body has <code>min-width: 960px</code>; a narrower window scrolled sideways</td><td class="rejected">No minimum</td></tr>
+</table>
+<h3>States</h3>
+<p>Window taller than the sidebar: as before, no scrollbar. Shorter: the sidebar scrolls. Dialog that fits: as before. Dialog taller than the window: the body scrolls between a fixed title and fixed buttons. Long path: ellipsis, full path in the tooltip (unchanged).</p>
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>Here</th></tr>
+<tr><td>Small or short window</td><td>The page never scrolls; the sidebar, the main area and dialog bodies scroll inside themselves</td></tr>
+<tr><td>Offline, signed out, no access, not found, crash, first launch</td><td>Not applicable: layout only</td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th></tr>
+<tr><td>None new</td><td>none</td><td>The dialog keeps its pop</td></tr>
+</table>
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Shell and sidebar</td><td>assets/main.css (<code>.app</code>, <code>.side</code>)</td><td>this session</td><td>Sidebar and main fill the window; main scrolls</td><td>Same when the sidebar fits; when it does not, the sidebar scrolls, not the page</td></tr>
+<tr><td>Path row</td><td>assets/main.css (<code>.path-row .p</code>)</td><td>this session</td><td>Path on one line with ellipsis</td><td>Same; now it also fits its dialog</td></tr>
+<tr><td>Dialogs</td><td>assets/main.css (<code>dialog</code>, <code>.dlg-b</code>)</td><td>this session</td><td>460 px wide, all content in view, Esc and backdrop close</td><td>Same; tall bodies scroll inside; PeoplePick and PeopleReview (no <code>.dlg-b</code>) unchanged</td></tr>
+<tr><td>Window minimum</td><td>src/main/index.ts</td><td>this session</td><td>Opens at 1400 &times; 900</td><td>Same; cannot go below 960 &times; 600</td></tr>
+</table>
+<h3>Mechanics</h3>
+<p>Unchanged: global rules in <code>main.css</code>, unlayered.</p>
+<h3>Look notes</h3>
+<p>Looked at captures of a static copy of the shell and the New album dialog, with the real <code>main.css</code>, in Chromium at the three sizes. Before: dialog content 834 px in 460 px, page 720 px high in a 692 px window. After: no sideways scroll, page equal to the window, sidebar scrolls. Owed: the running Electron app was not rendered. Owed: the print stack fan on hover near the sidebar edge, now that the sidebar clips. From the code the prints stay inside its 12 px padding.</p>
+<h3>Checks</h3>
+<p><code>pnpm typecheck</code> passes. <code>check.py</code>: 0 errors; the three ASKs are app-wide and older than this session. <code>check.py --inventory</code> run. <code>render_check.py</code> on the static copy at 1093, 1280 and 1366 px: no findings. On the running app: owed.</p>
+</article>
+
+<article id="session-2026-11-02-missing-photo">
+<h2>Session 2026-11-02: a photo that is not on disk yet shows a plain surface</h2>
+<p>Existing work, Minimal level, control scope: every <code>&lt;img&gt;</code> of a photo (album cover, photo tile, print stack, people pick, upload pill). The look is kept. Screens: 960 px to 2560 px, desktop only (Electron). User report: during an upload the album cover was the browser's broken-image icon.</p>
+<ul>
+<li><b>For:</b> the photographer, watching an album fill while it uploads.</li>
+<li><b>Job:</b> see which album is which, and that work is in progress, not broken.</li>
+<li><b>Cause:</b> the album list picked a random photo as the cover. Before a photo is compressed, its stored path names a file that is not written yet (<code>src/main/ipc/albums.ts</code>, the cover pick; the path comes from album create and sync).</li>
+</ul>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Cover pick</td><td>Start at a random photo and take the first one that is on disk; none on disk gives no cover (the existing empty cover)</td><td>Fix the cause: the cover never points at a file that is not there</td><td class="rejected">Hide the broken cover in the renderer only</td></tr>
+<tr><td>Missing photo, any view</td><td>One capture listener in <code>main.ts</code> marks an image that fails with <code>data-missing</code>; one CSS rule hides it, so its frame shows. A later load clears the mark</td><td>One mechanism for all five places, no change to each template</td><td class="rejected">An @error handler in each view; a new image component</td></tr>
+<tr><td>Placeholder look</td><td>The frame's own surface (<code>--inset</code> on covers and tiles, white paper on a print, the thumbhash blur on a tile when there is one). No icon</td><td>It is the same surface a tile shows while it loads. A missing photo during upload is "not yet", not an error; an icon would say "problem". Failed photos keep their own ImageOff state</td><td class="rejected">An ImageOff icon on each missing photo</td></tr>
+<tr><td>Tile fallback</td><td>The tile tries the full photo once after the thumbnail fails, not again</td><td>When both are missing, setting the same src again looped error events</td><td class="rejected">The unguarded swap</td></tr>
+<tr><td>Tile thumbnail path</td><td><code>.thumbnail</code>, the folder the compressor writes; was <code>.thumbnails</code></td><td>Every tile failed first and loaded the full photo; now the 400 px thumbnail loads</td><td class="rejected">Keep the full-photo fallback as the normal path</td></tr>
+</table>
+<h3>States</h3>
+<p>Cover: photo on disk (photo), album with photos and none compressed yet (empty cover, under the upload bar), photo removed later (surface). Tile: thumbnail, full photo only, neither (surface or thumbhash), failed (unchanged).</p>
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>Here</th></tr>
+<tr><td>Missing or not-yet-written photo file</td><td>The frame's plain surface; never the broken-image icon. The album cover comes back on the next album list load (upload complete reloads it)</td></tr>
+<tr><td>Offline, signed out, no access, not found, crash, first launch</td><td>Not applicable: all images here are local files</td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th></tr>
+<tr><td>Photo fails, or loads later</td><td>none</td><td>instant, as a photo loading today</td></tr>
+</table>
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Cover pick</td><td>src/main/ipc/albums.ts</td><td>this session</td><td>A random photo of the album as the cover; null with no photos</td><td>Same, among photos on disk; null when none is on disk yet</td></tr>
+<tr><td>Missing-image fallback</td><td>src/renderer/src/main.ts, assets/main.css</td><td>this session</td><td>Images that load show as before</td><td>Unchanged for images that load; failed ones show the frame</td></tr>
+<tr><td>Photo tile</td><td>PhotoTile.vue, ImagesView.vue</td><td>this session</td><td>Thumbnail, else the full photo</td><td>Same order; now the thumbnail path is right and the fallback runs once</td></tr>
+</table>
+<h3>Mechanics</h3>
+<p>Unchanged: global rules in <code>main.css</code>, unlayered. The new rule is an attribute selector, so it wins over the per-view <code>img</code> rules that set size only.</p>
+<h3>Look notes</h3>
+<p>Owed: the app was not run with an album mid-upload. Read from the code: <code>.cover</code>, <code>.ph</code> and <code>.pp-tile</code> have an inset surface behind the image; the print front is white paper; the upload pill thumbnail leaves an empty 40 px slot (rare now that the cover is fixed at the cause).</p>
+<h3>Checks</h3>
+<p><code>pnpm typecheck</code> passes. <code>check.py</code>: 0 errors; the three ASKs are app-wide and older than this session. <code>check.py --inventory</code> run. <code>render_check.py</code>: owed, the Electron app was not rendered.</p>
+</article>
+
 <article id="session-2026-11-01-notes-card">
 <h2>Session 2026-11-01 (10): notes get their own card; the notes panel gets tabs</h2>
 <p>Existing work, Revamp level, component scope: the album side panel, the photo bar and the private note box. The look is kept. Screens: 960 px to 2560 px, desktop only (Electron). User feedback: the To do / Done buttons got in the way at the top right of the grid, did not look selected, and needed a second click to undo; the lock on "Your note" made the box look locked.</p>

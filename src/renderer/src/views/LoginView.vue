@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import AuthSignIn from '../components/AuthSignIn.vue'
+import AuthFrame from '../components/AuthFrame.vue'
 
 const router = useRouter()
 </script>
 
 <template>
   <div class="auth">
-    <!-- no photos before sign-in, so the contact sheet is blank frames -->
-    <div class="sheet" aria-hidden="true"><span v-for="i in 12" :key="i"></span></div>
+    <AuthFrame />
     <div class="auth-body">
       <div class="mark"><img src="../assets/logo.png" alt="" />LumoSnap</div>
       <div class="label">Welcome back</div>
@@ -21,10 +21,3 @@ const router = useRouter()
   </div>
 </template>
 
-<style scoped>
-.sheet span {
-  background: var(--inset);
-  border-radius: 8px;
-  min-height: 0;
-}
-</style>

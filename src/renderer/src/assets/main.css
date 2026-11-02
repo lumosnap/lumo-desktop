@@ -85,6 +85,8 @@ svg.lucide {
 .app {
   display: grid;
   grid-template-columns: 232px 1fr;
+  /* one window-high row: a tall sidebar scrolls inside itself, never the whole page */
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
 }
 .side {
@@ -93,6 +95,9 @@ svg.lucide {
   padding: 24px 12px 12px;
   gap: 4px;
   margin: 16px 0 16px 16px;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   background: var(--card);
   border-radius: var(--r-card);
 }
@@ -692,6 +697,11 @@ select.input {
   display: grid;
   place-items: center;
   color: var(--ink-3);
+}
+/* Set from main.ts when a photo can't load: its frame's --inset surface shows through, the
+   same plain surface a tile has while it loads */
+img[data-missing] {
+  visibility: hidden;
 }
 .cover.muted img {
   filter: grayscale(1) opacity(0.55);
@@ -1715,6 +1725,7 @@ select.input {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  contain: inline-size; /* a long path ellipsizes; it must not widen the row or its dialog */
 }
 .steps {
   list-style: none;
@@ -1945,54 +1956,145 @@ table.bk {
 }
 
 /* ---------- auth ---------- */
+/* window-high, like .app: the photo never pushes the page into a scroll */
 .auth {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
   grid-template-columns: 1.1fr 1fr;
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
   padding: 16px;
 }
-.sheet {
-  background: var(--card);
+/* The whole job in one drawing: folder, route bar, the client's phone, one heart. It plays once
+   and settles. The base styles are the finished frame, so reduced motion (animation: none) shows it. */
+.auth-frame {
+  margin: 0;
   border-radius: var(--r-card);
-  padding: 24px;
+  background: var(--card);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: 1fr;
-  gap: 8px;
-  position: relative;
+  place-items: center;
+  overflow: hidden;
 }
-.sheet img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 8px;
-  display: block;
-  min-height: 0;
+/* about 85% of the card, a little above centre, so the drawing holds the card instead of floating in it */
+.auth-frame svg {
+  width: min(100% - 48px, 720px);
+  max-height: calc(100% - 48px);
+  margin-bottom: 4%;
 }
-.sheet img.pick {
-  outline: 2.5px solid var(--brand);
-  outline-offset: 3px;
+.af-back {
+  fill: var(--line-2);
 }
-.sheet .frame-no {
-  position: absolute;
-  left: 28px;
-  bottom: 8px;
-  font:
-    11px ui-monospace,
-    Menlo,
-    monospace;
-  color: var(--ink-3);
-  letter-spacing: 0.08em;
+.af-front {
+  fill: var(--inset-2);
+}
+.af-print > rect:first-child {
+  fill: var(--card);
+}
+.af-img {
+  fill: var(--inset-2);
+}
+.af-scene {
+  fill: var(--line-2);
+}
+.af-tile.alt {
+  fill: var(--line);
+}
+.af-end {
+  fill: var(--line-2);
+}
+.af-track {
+  fill: var(--inset-2);
+}
+.af-fill {
+  fill: var(--brand);
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: af-fill 1.6s var(--ease) 0.4s backwards;
+}
+.af-fly {
+  fill: var(--card);
+  stroke: var(--line-2);
+  opacity: 0;
+  animation: af-fly 0.85s var(--ease) backwards;
+}
+.af-phone {
+  fill: var(--inset);
+  stroke: var(--line-2);
+}
+.af-url {
+  fill: var(--card);
+}
+/* the one private link: blue, as links are, continuing the route bar */
+.af-link {
+  fill: var(--brand-soft);
+}
+.af-tile {
+  fill: var(--inset-2);
+  animation: af-in 0.4s var(--ease) backwards;
+}
+/* the client's pick: the same white chip and ink heart as on a photo tile */
+.af-heart circle {
+  fill: var(--card);
+}
+.af-heart path {
+  fill: var(--ink);
+}
+.af-heart {
+  animation: af-heart 0.35s var(--ease) 2.4s backwards;
+}
+@keyframes af-fill {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes af-fly {
+  0% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+  20%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(84px);
+  }
+}
+@keyframes af-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes af-heart {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-frame * {
+    animation: none !important;
+  }
 }
 .auth-body {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: safe center;
   padding: 40px clamp(28px, 6vw, 88px);
+  overflow-y: auto; /* the code card on a 600 px window scrolls this side only */
 }
 .auth-body .mark {
   padding: 0 0 48px;
+}
+/* on a short window the mark comes closer, so the code card still fits without a scroll */
+@media (max-height: 700px) {
+  .auth-body {
+    padding-block: 24px;
+  }
+  .auth-body .mark {
+    padding-bottom: 24px;
+  }
 }
 .steps-bar {
   display: flex;
@@ -2089,6 +2191,12 @@ dialog {
   width: 460px;
   max-width: calc(100vw - 32px);
   box-shadow: 0 40px 80px -30px oklch(0% 0 0 / 0.4);
+  overflow-wrap: anywhere; /* an album name with no spaces wraps instead of scrolling sideways */
+}
+/* On a short window the title and the buttons stay put; only the body scrolls */
+dialog[open]:has(> .dlg-b) {
+  display: flex;
+  flex-direction: column;
 }
 dialog::backdrop {
   background: oklch(20% 0.01 255 / 0.32);
@@ -2128,6 +2236,8 @@ dialog[open] {
   padding: 16px 24px;
   display: grid;
   gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
 }
 .dlg-b p {
   margin: 0;

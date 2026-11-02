@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import AuthSignIn from '../components/AuthSignIn.vue'
+import AuthFrame from '../components/AuthFrame.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -11,10 +12,7 @@ const step = ref(1)
 
 <template>
   <div class="auth">
-    <!-- no photos before sign-in, so the contact sheet is blank frames -->
-    <div class="sheet" aria-hidden="true">
-      <span v-for="i in 12" :key="i" :class="{ pick: step === 3 && i === 6 }"></span>
-    </div>
+    <AuthFrame />
     <div class="auth-body">
       <div class="mark"><img src="../assets/logo.png" alt="" />LumoSnap</div>
       <div class="steps-bar" :aria-label="`Step ${step} of 3`">
@@ -56,14 +54,3 @@ const step = ref(1)
   </div>
 </template>
 
-<style scoped>
-.sheet span {
-  background: var(--inset);
-  border-radius: 8px;
-  min-height: 0;
-}
-.sheet span.pick {
-  outline: 2.5px solid var(--brand);
-  outline-offset: 3px;
-}
-</style>
