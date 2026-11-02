@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The delight piece: every delivered photo as a 6x4 print, piled on a desk in the sidebar.
-// Drag a print out, click it to find its album, double-click a loose one to turn it over.
+// Drag a print out, click it to find its album, double-click a loose one to turn it over,
+// drop it back on the pile (or press Home) to put it back.
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAlbumStore, type Album } from '../stores/album'
@@ -77,7 +78,9 @@ const backDate = (a: Album): string =>
 const total = computed(() => albumStore.albums.reduce((n, a) => n + (a.totalImages || 0), 0))
 const cm = computed(() => Math.round((total.value * PAPER_MM) / 10))
 const covers = computed(() => albumStore.albums.filter((a) => a.thumbnail && a.totalImages))
-const h = computed(() => Math.max(2, Math.min(24, Math.round(Math.sqrt(total.value) / 2.5))))
+// the paper block under the prints: never thinner than the mock's pile (a 2 px line reads as a rule,
+// not as prints), and it still grows with the work up to 24 px
+const h = computed(() => Math.max(18, Math.min(24, Math.round(Math.sqrt(total.value) / 2.5))))
 const loose = computed(() => covers.value.filter((a) => placed.value[a.id]))
 const pile = computed(() =>
   covers.value
@@ -96,6 +99,7 @@ const hover = ref<string | null>(null)
 const counted = ref<number | null>(null)
 const live = ref('')
 const outs = ref<Record<string, number>>({})
+const taking = ref(false) // a dragged print is over the pile and will go back on it
 const hintText = computed(() =>
   deskHint.value ? 'Drag a print out, or click it to find its album' : ''
 )
@@ -120,7 +124,7 @@ const announce = (m: string): void => {
 
 const titleOf = (id: string): string => covers.value.find((a) => a.id === id)?.title ?? ''
 const label = (a: Album): string =>
-  `${a.title}, ${nf(a.totalImages)} photos. Enter finds the album, arrow keys move the print${placed.value[a.id] ? ', Space turns it over' : ''}.`
+  `${a.title}, ${nf(a.totalImages)} photos. Enter finds the album, arrow keys move the print${placed.value[a.id] ? ', Space turns it over, Home puts it back on the pile' : ''}.`
 
 /* drag: a press without moving finds the album */
 type Drag = {
@@ -147,9 +151,13 @@ function pileStyle(a: Album, k: number): string {
   const s = seedOf(a.id)
   const rr = k === top ? -1.5 : (((s * 37) % 9) - 4) * 1.6
   const x = k === top ? 0 : (((s * 53) % 9) - 4) * 2
-  const out = outs.value[a.id] ?? (k - top / 2 > 0 ? 1 : -1) * 22 // same side the fan exposes it on
+  const fx = (k - top / 2) * 10
+  const side = outs.value[a.id] ?? (fx > 0 ? 22 : -22) // same side the fan exposes it on
+  // the outer prints are already fanned 20 px out; a full 22 px push would cut them on the sidebar edge
+  const outward = Math.sign(side) === Math.sign(x + fx)
+  const out = outward ? Math.sign(side) * Math.min(22, Math.max(0, 24 - Math.abs(x + fx))) : side
   const p = pileEl.value
-  return `--x:${x}px;--y:${k * 1.5}px;--r:${rr}deg;--fx:${(k - top / 2) * 10}px;--k:${k};--out:${out}px${dragStyle(a.id, p?.offsetLeft ?? 0, p?.offsetTop ?? 0)}`
+  return `--x:${x}px;--y:${k * 1.5}px;--r:${rr}deg;--fx:${fx}px;--k:${k};--out:${out}px${dragStyle(a.id, p?.offsetLeft ?? 0, p?.offsetTop ?? 0)}`
 }
 function looseStyle(a: Album): string {
   const q = placed.value[a.id]
@@ -192,13 +200,33 @@ function move(e: PointerEvent): void {
     y: clamp(drag.oy + dy, 0, drag.h - 80),
     dr: dragPos.value?.dr ?? (dx > 0 ? 5 : -5)
   }
+  // over the pile, the pile loosens to take the print back, and the caption says so
+  const over = overPile(e.clientX, e.clientY)
+  if (over !== taking.value) {
+    taking.value = pileOpen.value = over
+    hover.value = over ? 'Let go to put it back on the pile' : null
+  }
 }
-function up(): void {
+// The drop target is the pile itself, with room around it: the paper block, one print above it, 12 px each side
+function overPile(x: number, y: number): boolean {
+  const b = pileEl.value?.querySelector('.edge')?.getBoundingClientRect()
+  return !!b && x > b.left - 12 && x < b.right + 12 && y > b.top - 96 && y < b.bottom + 12
+}
+function up(e: PointerEvent): void {
   if (!drag) return
   const { id, moved } = drag
   const pos = dragPos.value
+  const back = taking.value
   drag = null
   dragPos.value = null
+  taking.value = false
+  if (moved && back) {
+    hover.value = null
+    return void putBack(
+      id,
+      (e.currentTarget as HTMLElement).querySelector('.paper')?.getBoundingClientRect()
+    )
+  }
   if (!moved || !pos) {
     if (!placed.value[id]) return void findAlbum(id)
     if (flipped.value === id) return flip(id, false)
@@ -228,6 +256,56 @@ function up(): void {
 function cancelDrag(): void {
   drag = null
   dragPos.value = null
+  if (taking.value) taking.value = pileOpen.value = false
+  hover.value = null
+}
+
+// Put one print back in its place in the pile: it settles from where it was let go (FLIP, transform only)
+async function putBack(id: string, from?: DOMRect): Promise<HTMLElement | undefined> {
+  const wasOut = !!placed.value[id]
+  const rest = { ...placed.value }
+  delete rest[id]
+  placed.value = rest
+  if (flipped.value === id) flipped.value = null
+  pileOpen.value = pileReady.value = false
+  saveDesk()
+  if (wasOut) {
+    hover.value = 'Back on the pile'
+    later(() => {
+      if (hover.value === 'Back on the pile') hover.value = null
+    }, 2200)
+    announce(`Back on the pile: ${titleOf(id)}`)
+  }
+  await nextTick()
+  const el =
+    pileEl.value?.querySelector<HTMLElement>(`.print[data-id="${CSS.escape(id)}"]`) ?? undefined
+  if (reduced()) return el
+  const edge = pileEl.value?.querySelector('.edge')
+  edge?.animate(
+    [{ transform: 'scaleY(1)' }, { transform: 'scaleY(.82)' }, { transform: 'scaleY(1)' }],
+    {
+      duration: 220,
+      delay: 200,
+      easing: 'ease-out'
+    }
+  )
+  const paper = el?.querySelector<HTMLElement>('.paper')
+  // Under the five shown it has no print of its own to fly; the paper block takes it
+  if (!el || !paper || !from) return el
+  // the same button may still be mid-transition from its drag lift; land it at once, the paper does the move
+  el.style.transition = 'none'
+  const to = paper.getBoundingClientRect()
+  el.style.transition = ''
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2)
+  const dy = from.top + from.height / 2 - (to.top + to.height / 2)
+  paper.animate(
+    [
+      { transform: `translate(${dx}px, ${dy}px) rotate(${dx > 0 ? 5 : -5}deg) scale(1.07)` },
+      { transform: 'none' }
+    ],
+    { duration: 380, easing: 'cubic-bezier(.3, 1.25, .5, 1)' }
+  )
+  return el
 }
 
 function flip(id: string, on: boolean): void {
@@ -289,6 +367,12 @@ function key(e: KeyboardEvent, a: Album): void {
   if (mv) {
     e.preventDefault()
     nudge(e.currentTarget as HTMLElement, a.id, mv[0], mv[1])
+  } else if (e.key === 'Home' && placed.value[a.id]) {
+    e.preventDefault()
+    const from = (e.currentTarget as HTMLElement).querySelector('.paper')?.getBoundingClientRect()
+    putBack(a.id, from).then((el) =>
+      (el ?? pileEl.value?.querySelector<HTMLElement>('.print.top'))?.focus()
+    )
   } else if (e.key === ' ' && placed.value[a.id]) {
     e.preventDefault()
     flip(a.id, flipped.value !== a.id)

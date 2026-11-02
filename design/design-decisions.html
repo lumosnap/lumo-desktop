@@ -174,6 +174,123 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-11-02-print-stack-holder">
+<h2>Session 2026-11-02 (5): the pile has its paper block again, and a print can go back on the pile</h2>
+<p>Existing work, Minimal level, component scope: the print stack in the sidebar (<code>PrintStack.vue</code>). The look is kept. Screens: 960 px to 2560 px, desktop only (Electron); checked at 1280 &times; 720 and 960 &times; 600. User request: "the stack holder is better detailed in the web, here it feels like just a line", and "let the user place images back in the stack".</p>
+<ul>
+<li><b>What the "holder" is:</b> the mock draws no tray. Under the prints it draws a block of paper edges (<code>.pile .edge</code>, white and grey 1 px lines), the side of the pile seen from the front. The app has the same CSS and markup. The difference is the height: <code>--h</code> is the square root of the photo count divided by 2.5, at least 2 px. The mock has 3,032 photos, so 22 px (11 sheets). An account with 120 photos got 4 px, and an account with fewer than 23 photos got 2 px: one line.</li>
+<li><b>Signature moment and delight piece:</b> unchanged. The print stack stays the one delight piece.</li>
+</ul>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected or kept</th></tr>
+<tr><td>Paper block</td><td>At least 18 px (9 sheets), and it still grows with the square root of the count to 24 px</td><td>18 px reads as a pile of prints, as the mock does. The block still grows as the work grows, and the caption keeps the true height in cm</td><td class="rejected">A 2 px floor (reads as a rule); a fixed 22 px (the pile never grows)</td></tr>
+<tr><td>Holder markup and CSS</td><td>No change. The <code>.pile .edge</code> rule in <code>main.css</code> is the same as the mock</td><td>The mock and the app had the same rule; only the number was different</td><td>Kept: the mock's rule, one to one</td></tr>
+<tr><td>Put back: target</td><td>The pile: the paper block, the space of one print above it and 12 px at each side (about 140 &times; 125 px). The hit test uses the pointer, not the print</td><td>People drop a print on the pile, so the pile is the target. It is large, but it leaves the top of the desk free for loose prints at 200 px desk height</td><td class="rejected">The whole 176 px pile zone (almost all the desk; every drop near the pile would go back)</td></tr>
+<tr><td>Put back: feedback</td><td>Over the target the pile fans open, as on hover, and the caption says "Let go to put it back on the pile"</td><td>The fan is the pile's own "loosen to take a print" gesture. The words say what the release does before it happens</td><td class="rejected">A highlight ring or a drop zone outline (a new mark that the piece does not have)</td></tr>
+<tr><td>Put back: place</td><td>The print goes to its own place in album order, not to the top</td><td>The pile is in album order. The same print in a new place would look like a new delivery</td><td class="rejected">Always on top</td></tr>
+<tr><td>Put back: keyboard</td><td>Home on a loose print puts it back; focus goes to that print in the pile (or to the top print if it is under the 5 shown). The print's name says "Home puts it back on the pile"</td><td>Arrow keys already move a print out, so back must work from the keyboard too. Home is the key for "go to the start"</td><td class="rejected">Delete or Backspace (they sound like remove the album)</td></tr>
+<tr><td>Back print slide</td><td>The outer print slides at most as far as stays inside the sidebar (0 to 22 px), toward the outside</td><td>The capture showed the leftmost print cut by the sidebar edge after the fan (20 px) and the slide (22 px)</td><td class="rejected">A fixed 22 px slide</td></tr>
+<tr><td>Drop anywhere else</td><td>No change: the print stays where it is let go, with a small random tilt</td><td>The request keeps it</td><td>Kept</td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th><th>Reduced motion</th></tr>
+<tr><td>A dragged print comes over the pile</td><td>micro</td><td>The pile fans open (the hover fan, 500 ms spring); it folds when the print leaves</td><td>No fan movement (global rule); the caption still changes</td></tr>
+<tr><td>A print is let go on the pile, or Home</td><td>micro</td><td>FLIP: the paper starts where it was let go (with the drag lift: &plusmn;5&deg;, scale 1.07) and settles into its place, 380 ms, <code>cubic-bezier(.3, 1.25, .5, 1)</code>, a small overshoot. The paper block squashes once (scaleY .82, 220 ms) as it lands. Transform only</td><td>At once in its place; "Back on the pile: name" is announced</td></tr>
+<tr><td>Put back of a print that is under the 5 shown</td><td>micro</td><td>Only the paper block squash; there is no print of its own to move</td><td>Nothing moves</td></tr>
+</table>
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>What the print stack does</th></tr>
+<tr><td>First launch, no photos</td><td>No change: the dashed blank print and "Your first print"</td></tr>
+<tr><td>Signed out</td><td>Not shown (the sidebar is not shown)</td></tr>
+<tr><td>Offline</td><td>No change: covers are on disk; put back is local</td></tr>
+<tr><td>Not found, no access, crash</td><td>Not in this component</td></tr>
+<tr><td>Storage blocked</td><td>Put back works for this session; the desk is not kept (as before)</td></tr>
+<tr><td>Reduced motion</td><td>Put back is at once; measured 0 running animations after Home</td></tr>
+<tr><td>Keyboard only</td><td>Arrow keys move a print out; Home puts it back; focus stays on the print</td></tr>
+</table>
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Paper block</td><td>components/PrintStack.vue (<code>h</code>)</td><td>this session</td><td>The block height grows with the photo count, 24 px at most</td><td>Same rule above 1,600 photos (the measured height at 3,032 photos is 22 px before and after). Below that, 18 px in place of 2 to 16 px</td></tr>
+<tr><td>Drag out</td><td>components/PrintStack.vue (<code>move</code>, <code>up</code>)</td><td>this session</td><td>Press without a move finds the album; a drag places the print; a click on a loose print waits 260 ms; double-click turns it over</td><td>Same. Tested: a drop away from the pile leaves 1 loose print, and it is still there after a reload</td></tr>
+<tr><td>Put back</td><td>components/PrintStack.vue (<code>overPile</code>, <code>putBack</code>, <code>key</code>)</td><td>this session</td><td>New: a drop on the pile, or Home, removes the print from <code>lumo:desk</code></td><td>New behaviour. Tested at both sizes: drag back gives <code>{}</code> in storage and 0 loose prints; Home gives the same and focus on the print in the pile</td></tr>
+<tr><td>Hover fan and slide</td><td>components/PrintStack.vue (<code>pileStyle</code>)</td><td>this session</td><td>The pile opens on hover; a back print slides toward the pointer side</td><td>Same, except the outer print slides less outward, so it stays inside the sidebar</td></tr>
+<tr><td>Tidy the pile</td><td>components/PrintStack.vue (<code>tidy</code>)</td><td>not changed</td><td>All prints fly home</td><td>Same code</td></tr>
+<tr><td>Stack CSS</td><td>assets/main.css</td><td>not changed</td><td>&mdash;</td><td>No edit; the album card rules of the other session are not touched</td></tr>
+</table>
+<h3>Look notes</h3>
+<p>Rendered the real <code>PrintStack.vue</code> (built with Vite into a static sidebar copy with the real <code>main.css</code>, the Outfit font and 6 albums with drawn covers) in Chromium at 1280 &times; 720 and 960 &times; 600, with 120 and 3,032 photos. Not rendered: the running Electron app; real album covers.</p>
+<ul>
+<li>Before, 120 photos: a 4 px block under the prints, a line. After: an 18 px block, close to the mock's 22 px. At 3,032 photos before and after are the same.</li>
+<li>Mid drag back: the pile fans open and the caption reads "Let go to put it back on the pile". Settled: the print is back in its place, no "Tidy the pile" link.</li>
+<li>At 960 &times; 600 the sidebar scrolls (726 px of content in 568 px); the desk keeps its 200 px. Nothing of the fan is cut. The leftmost back print, when it slid out, was cut by the sidebar edge; fixed (now 12 px inside).</li>
+<li>After a put back the pointer is still on the pile, so the pile fans again and the caption shows the album name in place of "Back on the pile". Kept: it is the hover state, and the words are announced.</li>
+</ul>
+<h3>Checks</h3>
+<p><code>pnpm typecheck</code> passes. <code>check.py src/renderer/src</code>: 0 errors, 4 ASKs, all older and app-wide (middle dots; the line "name · 20 photos" in the caption is one phrase, kept as in session 6; reduced motion stops spinners; straight quotes). <code>check.py --inventory</code> run. <code>render_check.py --widths=960,1280</code> on the sidebar copy: no findings after <code>lang="en"</code> was added to the copy. Found, not changed: the app's own <code>src/renderer/index.html</code> has <code>&lt;html&gt;</code> with no <code>lang</code>. It is outside this component; it needs one attribute. Critique by a fresh reviewer: owed.</p>
+</article>
+
+<article id="session-2026-11-02-not-on-lumosnap">
+<h2>Session 2026-11-02 (4): an album that LumoSnap no longer has shows grey, and can upload again</h2>
+<p>Existing work, Minimal level, component scope: the album card, its menu, a new confirm dialog, and the status line and share button of the album view. The look is kept. No CSS was added: the card reuses <code>.cover.muted</code>, <code>.flag</code>, <code>.hint</code> and <code>.menu</code>. Screens: 960 px to 2560 px, desktop only (Electron). User request: when a folder is on this computer but not on LumoSnap (for example after the server database was reset), show it grey and give an optional upload.</p>
+<ul>
+<li><b>For:</b> the photographer, after LumoSnap lost an album on the server.</li>
+<li><b>Job:</b> see which albums the client link no longer reaches, and send them up again when they choose.</li>
+<li><b>Sibling:</b> "Folder missing", the opposite case (the server has it, this computer does not). This state copies its shape.</li>
+<li><b>Detection:</b> only a 404 with "Album not found" from an album route marks the album. A network error, a time-out, a 5xx or a 403 does not.</li>
+</ul>
+<h3>Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected</th></tr>
+<tr><td>Card</td><td>Grey cover (<code>.cover.muted</code>), flag "Not on LumoSnap" with the red dot, hint "The client link stopped working. Your photos here are safe."</td><td>Same shape as "Folder missing", so the two missing states read as one family. Red is the "missing" colour in the colour row. The hint says what the photographer must know: the client cannot see it, and nothing is lost</td><td class="rejected">A new grey style for the whole card; an amber dot</td></tr>
+<tr><td>Both missing</td><td>"Folder missing" wins the flag; "Upload again" is hidden</td><td>The upload needs the source folder, so only the folder fact can be acted on</td><td class="rejected">Two flags on one cover</td></tr>
+<tr><td>Action</td><td>"Upload again…" in the card menu, above the divider, same as "Review folder changes"</td><td>The menu is where an album's own actions live; the card itself opens the album</td><td class="rejected">A button on the cover, which would sit inside the card link</td></tr>
+<tr><td>Confirm</td><td>Title "Upload “name” again?"; one paragraph: new album, photo count, sets, people and tags go with it, a new client link, old picks are lost, nothing in the folder changes. Black "Upload again", ghost "Cancel". "Offline" when there is no connection</td><td>The photographer must know the client gets a new link and the old picks do not come back before they press</td><td class="rejected">No confirm; a type-the-name confirm as on delete (nothing here is destroyed)</td></tr>
+<tr><td>Album view</td><td>Status line "Not on LumoSnap" with the red dot; "Share with client" disabled, tooltip "Upload this album again from Albums to share it"</td><td>A share link for an album the server does not have cannot work. The upload runs from Albums, where the upload bar shows</td><td class="rejected">"Upload again" in the album view, which must then move to the new album id</td></tr>
+<tr><td>Server calls</td><td>Picks, share link, upload, sets, people, tags and vectors pushes are skipped for a marked album; deletes of photos or the album go on locally</td><td>No repeated errors in the log; the photographer can still delete</td><td class="rejected">Let each call fail and log</td></tr>
+</table>
+<h3>States</h3>
+<p>Album on LumoSnap: as before. Not on LumoSnap: grey cover, flag, hint, menu action. Not on LumoSnap and folder missing: "Folder missing" only. Confirm open: idle, starting (spinner, "Starting…", buttons off), failed (red line with the error, dialog stays), offline ("Offline", button off). After the upload starts: the card has a new id and shows the usual upload bar.</p>
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>Here</th></tr>
+<tr><td>Server lost the album (not found)</td><td>Marked on the first 404 "Album not found" from any album call; grey card, quiet skips, user-started upload again</td></tr>
+<tr><td>Offline</td><td>Never marks an album. The confirm button says "Offline" and is off</td></tr>
+<tr><td>Signed out, no access (401, 403)</td><td>Never marks an album</td></tr>
+<tr><td>Server error, time-out</td><td>Never marks an album; the upload-again error shows in the dialog</td></tr>
+<tr><td>Crash during upload again</td><td>The re-key is one transaction: the album is either on the old id (still marked) or on the new id with all photos pending</td></tr>
+<tr><td>First launch</td><td>Not applicable</td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th></tr>
+<tr><td>Album becomes marked</td><td>none</td><td>The card changes in place when the event arrives</td></tr>
+<tr><td>Confirm opens and closes</td><td>transition</td><td>The existing dialog pop</td></tr>
+</table>
+<h3>Copy, in reading order</h3>
+<p>"Not on LumoSnap" · "The client link stopped working. Your photos here are safe." · "Upload again…" · "Upload “name” again?" · the confirm paragraph · "Cancel" / "Upload again" / "Starting…" / "Offline" · "Upload this album again from Albums to share it".</p>
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Detection</td><td>src/main/api-client.ts, src/main/ipc/albums.ts, src/main/database.ts (migration 14)</td><td>this session</td><td>API errors carry their status and reject as before</td><td>Same errors reach callers; a 404 "Album not found" also marks the album once</td></tr>
+<tr><td>Quiet skips</td><td>album-analysis.ts, people.ts, pipeline.ts, ipc/api.ts</td><td>this session</td><td>Pushes, uploads, picks and share link call the server</td><td>Same for every album not marked; marked albums skip, and their push flags stay set</td></tr>
+<tr><td>Deletes</td><td>api-client.ts (<code>delete</code>, <code>deleteImages</code>)</td><td>this session</td><td>Delete on the server, then locally</td><td>Same; a 404 "Album not found" now counts as already deleted, so the local delete goes on</td></tr>
+<tr><td>Upload again</td><td>ipc/albums.ts, database.ts, preload</td><td>this session</td><td>New</td><td>Uses the album create call and the existing upload pipeline</td></tr>
+<tr><td>Album card and confirm</td><td>AlbumView.vue, stores/album.ts</td><td>this session</td><td>Card shows cover, flags and menu</td><td>Same for every album not marked</td></tr>
+<tr><td>Album view</td><td>ImagesView.vue</td><td>this session</td><td>Status line and share button</td><td>Same for every album not marked</td></tr>
+</table>
+<h3>Mechanics</h3>
+<p>Unchanged: global rules in <code>main.css</code>, unlayered. This session adds no CSS.</p>
+<h3>Look notes</h3>
+<p>Looked at captures of a static copy of three cards (normal, "Not on LumoSnap", "Folder missing"), the menu and the confirm, with the real <code>main.css</code>, in Chromium at 1280 &times; 800. The new card matches the "Folder missing" card; the confirm fits on 4 lines. Owed: the running Electron app with a real marked album, and the album view status line.</p>
+<h3>Checks</h3>
+<p><code>pnpm typecheck</code> passes. Main-process tests pass. Migration 14, the re-key and the detection rule were run against a copy of the local database. <code>check.py</code>: 0 errors; the 4 ASKs are app-wide and older than this session (one new straight apostrophe was fixed). <code>check.py --inventory</code> run. <code>render_check.py --widths=960,1440</code> on the static copy: no findings. On the running app: owed.</p>
+<h3>Critique caught</h3>
+<p>Owed: no fresh reviewer ran on this session.</p>
+</article>
+
 <article id="session-2026-11-02-auth-frame">
 <h2>Session 2026-11-02 (3): sign-in and setup show the job in one drawing (first tried: one frame of a wedding day)</h2>
 <p>Existing work, Revamp level, component scope: the left panel of the sign-in screen (<code>LoginView.vue</code>) and the 3-step setup (<code>SetupWizard.vue</code>). The look is kept. The form side stays, with one fit change for short windows. Screens: 960 &times; 600 (the new window minimum) to 2560 px, desktop only. User request: replace the wall of frames with real photos that make a first impression, but keep it simple, because the print stack in the sidebar is already the delight piece.</p>
