@@ -4,7 +4,7 @@ import { updateAlbum, getAllAlbums, getAlbum } from './database'
 import { detectAlbumChanges, executeAlbumSync } from './ipc/sync'
 import { BrowserWindow } from 'electron'
 import { existsSync } from 'fs'
-import { debounceByKey } from './utils'
+import { debounceByKey, isIgnoredPath } from './utils'
 import { createLogger } from './logger'
 
 const logger = createLogger('Watcher')
@@ -45,7 +45,7 @@ class WatcherService {
     // Initialize watcher
     // ignoreInitial: true prevents firing 'add' events for existing files on startup
     const watcher = chokidar.watch(folderPath, {
-      ignored: [/(^|[\/\\])\.\./, /\.lumosnap$/], // ignore dotfiles and metadata
+      ignored: (path: string) => isIgnoredPath(folderPath, path),
       persistent: true,
       ignoreInitial: true,
       depth: 0 // Only watch the immediate directory

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fileUrl } from '../utils/fileUrl'
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
@@ -743,14 +744,14 @@ const photoAspect = (id: number): number => {
 }
 const pickPhoto = (id: number): { src: string; aspect: number } | null => {
   const img = imageById.value.get(id)
-  return img ? { src: `file://${img.localFilePath}`, aspect: photoAspect(id) || 1.5 } : null
+  return img ? { src: fileUrl(img.localFilePath), aspect: photoAspect(id) || 1.5 } : null
 }
 
 /** Inline style that turns a .avatar into the person's face, cut from the cover thumbnail */
 function faceStyle(p: Person | undefined | null): Record<string, string> | undefined {
   if (!p) return undefined
   return {
-    backgroundImage: `url(${JSON.stringify(`file://${p.cover.path}`)})`,
+    backgroundImage: `url(${JSON.stringify(fileUrl(p.cover.path))})`,
     ...faceCrop(p.cover.box as Box, photoAspect(p.cover.imageId))
   }
 }
@@ -1189,7 +1190,7 @@ const formattedEventDate = computed(() => {
 
 // Thumbnail lives in the .thumbnail subfolder the compressor writes; falls back to the original on error
 function getThumbnailPath(localFilePath: string): string {
-  const lastSlash = localFilePath.lastIndexOf('/')
+  const lastSlash = Math.max(localFilePath.lastIndexOf('/'), localFilePath.lastIndexOf('\\'))
   if (lastSlash === -1) return localFilePath
   const dir = localFilePath.substring(0, lastSlash)
   const filename = localFilePath.substring(lastSlash + 1)
@@ -1571,11 +1572,11 @@ function closeNotesSidebar(): void {
 
 function toSlide(image: Image): SlideData {
   return {
-    src: `file://${image.localFilePath}`,
+    src: fileUrl(image.localFilePath),
     msrc:
       getDisplayStatus(image.uploadStatus) === 'Failed'
         ? undefined
-        : `file://${getThumbnailPath(image.localFilePath)}`,
+        : fileUrl(getThumbnailPath(image.localFilePath)),
     width: image.width || 1920,
     height: image.height || 1280,
     alt: image.originalFilename
@@ -2544,7 +2545,7 @@ onUnmounted(() => {
                       :burst="tile.burst"
                       :index="tile.index"
                       :status="getDisplayStatus(tile.image.uploadStatus)"
-                      :thumb="`file://${getThumbnailPath(tile.image.localFilePath)}`"
+                      :thumb="fileUrl(getThumbnailPath(tile.image.localFilePath))"
                       :selected="isTileSelected(tile)"
                       :my-note="privateNotes[tile.image.id]"
                       :note-state="stateOf(tile.image)"

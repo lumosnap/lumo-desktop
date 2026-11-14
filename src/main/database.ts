@@ -306,9 +306,18 @@ const migrations: Array<(database: Database.Database) => void> = [
   }
 ]
 
+/** The data was written by a newer build (more migrations than this one knows) */
+export class DatabaseTooNewError extends Error {
+  constructor(version: number) {
+    super(`Database schema ${version} is newer than this app (${migrations.length})`)
+  }
+}
+
 /** `upTo` is for tests that need data at an older schema. */
 export function runMigrations(database: Database.Database, upTo = migrations.length): void {
   const current = database.pragma('user_version', { simple: true }) as number
+  // An older build must not run on newer data: its queries miss columns, its writes drop them
+  if (current > migrations.length) throw new DatabaseTooNewError(current)
   for (let version = current + 1; version <= upTo; version++) {
     try {
       database.transaction(() => {

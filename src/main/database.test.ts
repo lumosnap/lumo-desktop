@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import Database from 'better-sqlite3'
 import {
   runMigrations,
+  DatabaseTooNewError,
   resetInterruptedImages,
   getAlbumsWithUnfinishedUploads,
   updateImage,
@@ -592,5 +593,14 @@ describe.skipIf(!loadable)('startup resume', () => {
     expect(getImage(comp)?.uploadStatus).toBe('pending')
     expect(getImage(done)?.uploadStatus).toBe('complete')
     closeDatabase()
+  })
+})
+
+describe.skipIf(!loadable)('downgrade guard', () => {
+  it('refuses data from a newer build instead of running on it', () => {
+    const d = new Database(':memory:')
+    d.pragma('user_version = 99')
+    expect(() => runMigrations(d)).toThrow(DatabaseTooNewError)
+    d.close()
   })
 })

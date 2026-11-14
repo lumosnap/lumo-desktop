@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fileUrl } from '../utils/fileUrl'
 // "Is this Anjali?": faces the app is not sure about. Tap the ones that are her; the rest are a no.
 // Picking yeses (not rejecting noes) is safer: most of these are not her, and an unread Save
 // can't turn strangers into reference faces.
@@ -124,7 +125,7 @@ function onKey(e: KeyboardEvent, i: number): void {
 
 function crop(f: ReviewFace): Record<string, string> {
   return {
-    backgroundImage: `url(${JSON.stringify(`file://${f.path}`)})`,
+    backgroundImage: `url(${JSON.stringify(fileUrl(f.path))})`,
     ...faceCrop(f.box, props.aspect(f.imageId), 1.6)
   }
 }

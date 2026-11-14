@@ -3,7 +3,12 @@ import { join } from 'path'
 import { rm } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { initDatabase, closeDatabase, resetInterruptedImages } from './database'
+import {
+  initDatabase,
+  closeDatabase,
+  resetInterruptedImages,
+  DatabaseTooNewError
+} from './database'
 import { resumeUploads } from './pipeline'
 import { initConfig, getConfig } from './config'
 import { registerIpcHandlers } from './ipc'
@@ -284,6 +289,16 @@ app.whenReady().then(() => {
   } catch (error) {
     const message = getErrorMessage(error)
     logger.error('✗ Failed to initialize database:', message)
+    if (error instanceof DatabaseTooNewError) {
+      dialog.showMessageBoxSync({
+        type: 'warning',
+        message: 'This LumoSnap data was created by a newer version.',
+        detail: 'Please update LumoSnap to open it.',
+        buttons: ['Quit']
+      })
+      app.exit(1)
+      return
+    }
     dialog.showErrorBox(
       'Failed to start',
       `The local database could not be initialized and the app cannot continue.\n\n${message}`

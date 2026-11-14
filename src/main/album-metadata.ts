@@ -74,7 +74,7 @@ export function readAlbumMetadata(folderPath: string): AlbumMetadata | null {
   }
 }
 
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 
 /**
  * Write album metadata to a folder
@@ -88,7 +88,8 @@ export function writeAlbumMetadata(folderPath: string, metadata: AlbumMetadata):
 
     // On Windows, hide the file using 'attrib +h'
     if (process.platform === 'win32') {
-      exec(`attrib +h "${metadataPath}"`, (error) => {
+      // execFile: the path is an argument, never parsed by a shell
+      execFile('attrib', ['+h', metadataPath], (error) => {
         if (error) {
           console.error(`[AlbumMetadata] Failed to hide metadata file on Windows:`, error)
         }
@@ -101,11 +102,7 @@ export function writeAlbumMetadata(folderPath: string, metadata: AlbumMetadata):
     // Surface the real failure through the app logger (electron-log). console.error
     // here is not captured to the log files, so a write failure would otherwise be
     // invisible. Callers still receive `false` and can react.
-    logger.error(
-      `Failed to write metadata to ${folderPath}:`,
-      getErrorMessage(error),
-      error
-    )
+    logger.error(`Failed to write metadata to ${folderPath}:`, getErrorMessage(error), error)
     return false
   }
 }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fileUrl } from '../utils/fileUrl'
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
@@ -547,7 +548,7 @@ onUnmounted(() => {
           @keydown.space.self.prevent="openAlbum(album)"
         >
           <div class="cover" :class="{ muted: album.isOrphaned || album.server_missing }">
-            <img v-if="album.thumbnail" :src="`file://${album.thumbnail}`" alt="" loading="lazy" />
+            <img v-if="album.thumbnail" :src="fileUrl(album.thumbnail)" alt="" loading="lazy" />
             <div v-else class="empty-cover"><ImagePlus /></div>
             <div v-if="album.isOrphaned" class="flag">
               <span class="tag"><span class="dot bad"></span>Folder missing</span>

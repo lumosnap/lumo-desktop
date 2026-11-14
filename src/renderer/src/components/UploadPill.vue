@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fileUrl } from '../utils/fileUrl'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { CircleCheck, X, Link } from 'lucide-vue-next'
 import type { Album } from '../stores/album'
@@ -29,7 +30,7 @@ const compressing = computed(
 const pSent = computed(() => (total.value ? sent.value / total.value : 0))
 const pPast = computed(() => (total.value ? (sent.value + uploading.value) / total.value : 0))
 const pct = computed(() => Math.round(pSent.value * 100))
-const thumb = computed(() => (props.album?.thumbnail ? `file://${props.album.thumbnail}` : ''))
+const thumb = computed(() => (props.album?.thumbnail ? fileUrl(props.album.thumbnail) : ''))
 
 function toggle(): void {
   open.value = !open.value

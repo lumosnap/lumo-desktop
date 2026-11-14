@@ -1,3 +1,4 @@
+import { basename, relative } from 'path'
 /**
  * Utility functions for debouncing
  */
@@ -28,4 +29,14 @@ export function debounceByKey<K, T extends (key: K, ...args: unknown[]) => void>
 
     timeouts.set(key, timeoutId)
   }
+}
+
+/**
+ * Dotfiles in the album folder: .lumosnap, .DS_Store, and AppleDouble ._IMG_1.jpg files that
+ * macOS writes on exFAT (each would fire a change). Only the name is checked, never the
+ * folder's own path, which may itself sit under a dot-folder.
+ */
+export function isIgnoredPath(root: string, path: string): boolean {
+  // relative(): chokidar hands paths over with / even on Windows, and with no trailing slash
+  return relative(root, path) !== '' && basename(path).startsWith('.')
 }

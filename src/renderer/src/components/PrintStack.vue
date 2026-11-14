@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fileUrl } from '../utils/fileUrl'
 // The delight piece: every delivered photo as a 6x4 print, piled on a desk in the sidebar.
 // Drag a print out, click it to find its album, double-click a loose one to turn it over,
 // drop it back on the pile (or press Home) to put it back.
@@ -615,7 +616,7 @@ onBeforeUnmount(() => {
             <span class="paper"
               ><span class="flip">
                 <span class="face front"
-                  ><img :src="`file://${a.thumbnail}`" alt="" draggable="false"
+                  ><img :src="fileUrl(a.thumbnail)" alt="" draggable="false"
                 /></span>
                 <span
                   class="face back"
@@ -648,7 +649,7 @@ onBeforeUnmount(() => {
           <span class="paper"
             ><span class="flip">
               <span class="face front"
-                ><img :src="`file://${a.thumbnail}`" alt="" draggable="false"
+                ><img :src="fileUrl(a.thumbnail)" alt="" draggable="false"
               /></span>
               <span
                 class="face back"
