@@ -44,8 +44,10 @@ vi.mock('../album-metadata', () => ({
   getFolderStats: () => ({ totalSize: 0 })
 }))
 
-import { detectAlbumChanges, executeAlbumSync } from './sync'
-import { clearScanCache } from '../storage'
+import { detectAlbumChanges, executeAlbumSync, diffFolder } from './sync'
+import { hashFile } from '../hash'
+import { renameSync } from 'fs'
+import { clearScanCache, scanImagesInFolder } from '../storage'
 
 let root: string
 const src = (): string => join(root, 'src')
@@ -164,6 +166,44 @@ describe('mass-delete gate', () => {
     expect(r.success).toBe(true)
     expect(api.deleteImages).toHaveBeenCalledWith('a', [103])
     expect(db.images.map((i) => i.id)).toEqual([1, 2, 3])
+  })
+})
+
+describe('diffFolder (relink preview)', () => {
+  it('matches renamed files by content: 2 of 10 renamed, none missing', async () => {
+    seed(10, 10)
+    for (const row of db.images) {
+      writeFileSync(join(src(), row.originalFilename), `photo ${row.id}`)
+      row.sourceFileHash = await hashFile(join(src(), row.originalFilename))
+    }
+    renameSync(join(src(), 'IMG_0.jpg'), join(src(), 'Ceremony 1.jpg'))
+    renameSync(join(src(), 'IMG_1.jpg'), join(src(), 'Ceremony 2.jpg'))
+    const changes = await diffFolder(
+      db.album as never,
+      src(),
+      scanImagesInFolder(src(), false),
+      db.images as never
+    )
+    expect(changes.renamed).toHaveLength(2)
+    expect(changes.deleted).toHaveLength(0)
+    expect(changes.new).toHaveLength(0)
+  })
+})
+
+describe('diffFolder duplicates', () => {
+  it('skips a copy of a photo still in the folder', async () => {
+    seed(1, 1)
+    writeFileSync(join(src(), 'IMG_0.jpg'), 'same')
+    db.images[0].sourceFileHash = await hashFile(join(src(), 'IMG_0.jpg'))
+    writeFileSync(join(src(), 'IMG_0 copy.jpg'), 'same')
+    const changes = await diffFolder(
+      db.album as never,
+      src(),
+      scanImagesInFolder(src(), false),
+      db.images as never
+    )
+    expect(changes.skipped.map((f) => f.filename)).toEqual(['IMG_0 copy.jpg'])
+    expect(changes.new).toHaveLength(0)
   })
 })
 

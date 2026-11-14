@@ -6,7 +6,7 @@ import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/syn
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { Booking, ApiFavoriteImage } from '../main/api-client'
-import type { TagConfig } from '../main/ipc/albums'
+import type { TagConfig, RelinkPreview } from '../main/ipc/albums'
 import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
 
 type NotesResult =
@@ -111,6 +111,19 @@ const api = {
     // The server lost this album: make a new one and upload the photos again
     reupload: (albumId: string): Promise<{ success: boolean; albumId?: string; error?: string }> =>
       ipcRenderer.invoke('album:reupload', albumId),
+    // Point an album at its folder again. Errors: 'IN_USE', 'BUSY' (uploading), 'CONFIRM_MISSING'
+    // (most photos missing: retry with acceptMissing = the preview's missing count)
+    relinkPreview: (
+      albumId: string,
+      folder: string
+    ): Promise<{ success: boolean; preview?: RelinkPreview; error?: string }> =>
+      ipcRenderer.invoke('album:relinkPreview', albumId, folder),
+    relink: (
+      albumId: string,
+      folder: string,
+      acceptMissing?: number
+    ): Promise<{ success: boolean; preview?: RelinkPreview; error?: string }> =>
+      ipcRenderer.invoke('album:relink', albumId, folder, acceptMissing),
     getImages: (
       albumId: string
     ): Promise<{ success: boolean; images: AlbumImageWithFavorites[]; error?: string }> =>

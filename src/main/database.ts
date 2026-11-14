@@ -637,6 +637,30 @@ export function deleteImages(ids: number[]): void {
   stmt.run(...ids)
 }
 
+/**
+ * Startup only: nothing is in flight yet, so rows a quit or crash left compressing or uploading
+ * start over. Safe to re-confirm: the server returns the existing row for a repeated photo.
+ */
+export function resetInterruptedImages(): void {
+  conn()
+    .prepare(
+      "UPDATE images SET uploadStatus = 'pending' WHERE uploadStatus IN ('compressing', 'uploading')"
+    )
+    .run()
+}
+
+/** Albums with photos still to upload, minus missing folders and albums the server lost */
+export function getAlbumsWithUnfinishedUploads(): string[] {
+  const rows = conn()
+    .prepare(
+      `SELECT DISTINCT i.albumId FROM images i JOIN albums a ON a.id = i.albumId
+       WHERE i.uploadStatus IN ('pending', 'failed', 'failed_compression', 'failed_upload')
+         AND COALESCE(a.isOrphaned, 0) = 0 AND COALESCE(a.server_missing, 0) = 0`
+    )
+    .all() as { albumId: string }[]
+  return rows.map((r) => r.albumId)
+}
+
 export function getImagesByStatus(albumId: string, status: Image['uploadStatus']): Image[] {
   if (!db) throw new Error('Database not initialized')
 

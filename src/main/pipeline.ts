@@ -9,6 +9,8 @@ import {
   getImageStats,
   updateImage,
   updateAlbum,
+  deleteImages,
+  getAlbumsWithUnfinishedUploads,
   Image,
   isServerMissing
 } from './database'
@@ -80,6 +82,11 @@ class UploadPipeline {
 
   // Track failed images for end-of-queue retry
   private failedImages: Set<number> = new Set()
+
+  /** This album is uploading or waiting its turn (it reads files from its folder meanwhile) */
+  isActive(albumId: string): boolean {
+    return this.currentAlbumId === albumId || this.queuedAlbums.has(albumId)
+  }
 
   /** True while any album is uploading or queued; background ML waits for this to clear. */
   isBusy(): boolean {
@@ -464,7 +471,13 @@ class UploadPipeline {
    */
   private async uploadSingleImage(
     img: CompressedImage,
-    signedUrl: { uploadUrl: string; thumbnailUploadUrl: string; key: string; thumbnailKey: string; filename: string },
+    signedUrl: {
+      uploadUrl: string
+      thumbnailUploadUrl: string
+      key: string
+      thumbnailKey: string
+      filename: string
+    },
     uploadedImages: UploadedImage[],
     mainWindow: BrowserWindow | null
   ): Promise<void> {
@@ -479,8 +492,12 @@ class UploadPipeline {
 
       // Upload thumbnail if available
       let thumbnailResult = { success: true }
-      if (result.success && img.thumbnailPath && signedUrl.thumbnailUploadUrl) {
-        thumbnailResult = await uploadToPresignedUrl(signedUrl.thumbnailUploadUrl, img.thumbnailPath)
+      const withThumbnail = !!(img.thumbnailPath && signedUrl.thumbnailUploadUrl)
+      if (result.success && withThumbnail) {
+        thumbnailResult = await uploadToPresignedUrl(
+          signedUrl.thumbnailUploadUrl,
+          img.thumbnailPath
+        )
       }
 
       if (result.success && thumbnailResult.success) {
@@ -490,7 +507,8 @@ class UploadPipeline {
           filename: signedUrl.filename,
           sourceImageHash: img.sourceFileHash,
           key: signedUrl.key,
-          thumbnailKey: signedUrl.thumbnailKey || null,
+          // Keys are unique per upload: name a thumbnail only if one went up
+          thumbnailKey: withThumbnail ? signedUrl.thumbnailKey || null : null,
           fileSize: img.fileSize,
           width: img.width,
           height: img.height,
@@ -546,8 +564,31 @@ class UploadPipeline {
 
         // Match confirmed results back to local images
         for (const conf of confirmed) {
-          const uploaded = newImages.find((u) => u.filename === conf.originalFilename)
-          if (uploaded) {
+          // key is unique per upload (IMG_1.jpg and IMG_1.png both compress to IMG_1.webp);
+          // servers before worker 0009 don't echo it
+          const uploaded = newImages.find((u) =>
+            conf.key ? u.key === conf.key : u.filename === conf.originalFilename
+          )
+          // Same content as a photo another row already holds (two identical files at import):
+          // drop this row rather than let two rows share one server photo. Its file stays in the
+          // folder and the next sync skips it as a duplicate.
+          const twin =
+            uploaded && conf.duplicate
+              ? getAlbumImages(albumId).find(
+                  (r) => r.serverId === conf.id && r.id !== uploaded.localId
+                )
+              : undefined
+          if (uploaded && twin) {
+            log.info(
+              `[Pipeline] ${uploaded.filename} is a copy of server image ${conf.id}, dropping it`
+            )
+            // Rows from the first import have no hash: give the twin this one so the skip holds
+            if (!twin.sourceFileHash && uploaded.sourceImageHash) {
+              updateImage(twin.id, { sourceFileHash: uploaded.sourceImageHash })
+            }
+            deleteImages([uploaded.localId])
+            this.failedImages.delete(uploaded.localId)
+          } else if (uploaded) {
             updateImage(uploaded.localId, {
               uploadStatus: 'complete',
               serverId: conf.id
@@ -577,6 +618,7 @@ class UploadPipeline {
           imageId: u.serverId!,
           sourceImageHash: u.sourceImageHash,
           b2FileName: u.key,
+          ...(u.thumbnailKey ? { thumbnailB2FileName: u.thumbnailKey } : {}),
           fileSize: u.fileSize,
           width: u.width,
           height: u.height,
@@ -764,3 +806,18 @@ class UploadPipeline {
 
 // Export singleton instance
 export const uploadPipeline = new UploadPipeline()
+
+/** Queue every album with photos left to upload; the pipeline runs one album at a time */
+export function resumeUploads(mainWindow: BrowserWindow | null): void {
+  try {
+    const albumIds = getAlbumsWithUnfinishedUploads()
+    if (albumIds.length > 0) log.info(`[Pipeline] Resuming uploads for ${albumIds.length} albums`)
+    for (const albumId of albumIds) {
+      uploadPipeline.startPipeline(albumId, mainWindow).catch((error) => {
+        log.error(`[Pipeline] Resume failed for album ${albumId}:`, error)
+      })
+    }
+  } catch (error) {
+    log.error('[Pipeline] Failed to check for unfinished uploads:', error)
+  }
+}

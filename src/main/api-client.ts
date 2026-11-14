@@ -149,6 +149,16 @@ async function apiFetch<T>(
 
 // Types
 
+/** A confirm result. key/duplicate come from servers with idempotent confirm (worker 0009) */
+export interface ConfirmedImage {
+  id: number
+  originalFilename: string
+  b2FileName: string
+  /** Echo of the request's key, unique per upload */
+  key?: string
+  duplicate?: boolean
+}
+
 export interface ApiAlbum {
   id: string
   userId: number | null
@@ -506,15 +516,16 @@ export const albumsApi = {
         uploadOrder: number
       } & ApiBrowseFields
     >
-  ): Promise<Array<{ id: number; originalFilename: string; b2FileName: string }>> {
+  ): Promise<ConfirmedImage[]> {
     console.log(`[API] Confirming upload of ${images.length} images in album ${albumId}`)
-    const response = await apiFetch<
-      ApiResponse<Array<{ id: number; originalFilename: string; b2FileName: string }>>
-    >(`/albums/${albumId}/confirm-upload`, {
-      method: 'POST',
-      body: { images },
-      timeoutMs: SLOW_API_TIMEOUT_MS
-    })
+    const response = await apiFetch<ApiResponse<ConfirmedImage[]>>(
+      `/albums/${albumId}/confirm-upload`,
+      {
+        method: 'POST',
+        body: { images },
+        timeoutMs: SLOW_API_TIMEOUT_MS
+      }
+    )
     console.log('[API] Upload confirmed')
     return response.data || []
   },
@@ -682,6 +693,8 @@ export const albumsApi = {
         imageId: number
         sourceImageHash?: string | null // omitted = unchanged
         b2FileName: string
+        /** Only when a new thumbnail was uploaded; omitted keeps (or lets the server find) it */
+        thumbnailB2FileName?: string
         fileSize: number
         width: number
         height: number

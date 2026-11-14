@@ -4,7 +4,7 @@
 
 import { BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { existsSync, rmSync } from 'fs'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { getStorageLocation } from '../config'
 import { createAlbumFolder, scanImagesInFolder } from '../storage'
 import {
@@ -62,7 +62,7 @@ import {
 import { MAX_IMAGE_TAGS, TAG_SLUG } from '../tags/select'
 import { imagePeople, peoplePhotosChanged } from '../people'
 import { watcherService } from '../watcher'
-import { checkSourceFolder } from './sync'
+import { checkSourceFolder, diffFolder } from './sync'
 import { createLogger, getErrorMessage } from '../logger'
 import { handleIpc } from './types'
 
@@ -74,6 +74,16 @@ export interface TagConfig {
   enabled: string[] | null // null = the event type's pack
   vocabulary: Array<{ slug: string; label: string; category: TagCategory }> // every event type's tags
   pack: string[] // default tags of the current event type
+}
+
+export interface RelinkPreview {
+  folder: string
+  /** Title of another album that already uses this folder */
+  usedBy?: string
+  matched: number
+  missing: number
+  extra: number
+  renamed: number
 }
 
 export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
@@ -539,6 +549,82 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       return { success: false, error: getErrorMessage(error) }
     }
   })
+
+  // Relink: point an album at its folder again (moved, renamed, new drive letter)
+  // Folder names are case-insensitive on macOS and Windows (by default)
+  const samePath = (a: string, b: string): boolean =>
+    process.platform === 'linux'
+      ? resolve(a) === resolve(b)
+      : resolve(a).toLowerCase() === resolve(b).toLowerCase()
+
+  async function relinkPreview(albumId: string, picked: string): Promise<RelinkPreview> {
+    const album = getAlbum(albumId)
+    if (!album) throw new Error('Album not found')
+    const folder = resolve(picked)
+    const other = getAllAlbums().find(
+      (a) => a.id !== albumId && samePath(a.sourceFolderPath, folder)
+    )
+    if (other) return { folder, usedBy: other.title, matched: 0, missing: 0, extra: 0, renamed: 0 }
+    const dbImages = getAlbumImages(albumId)
+    const changes = await diffFolder(
+      album,
+      folder,
+      scanImagesInFolder(folder, { useCache: false, skipDimensions: true }),
+      dbImages
+    )
+    const missing = changes.deleted.length
+    const renamed = changes.renamed.length
+    return {
+      folder,
+      matched: dbImages.length - missing - renamed,
+      missing,
+      extra: changes.new.length,
+      renamed
+    }
+  }
+
+  ipcMain.handle('album:relinkPreview', async (_event, albumId: string, folder: string) => {
+    try {
+      return { success: true, preview: await relinkPreview(albumId, folder) }
+    } catch (error: unknown) {
+      logger.error('Relink preview failed:', getErrorMessage(error))
+      return { success: false, error: getErrorMessage(error) }
+    }
+  })
+
+  // acceptMissing: how many missing photos the person saw and accepted in the preview
+  ipcMain.handle(
+    'album:relink',
+    async (_event, albumId: string, picked: string, acceptMissing?: number) => {
+      try {
+        // The pipeline reads this album's files from its folder as it goes
+        if (uploadPipeline.isActive(albumId)) return { success: false, error: 'BUSY' }
+        // Recomputed here: the folder may have changed since the preview
+        const p = await relinkPreview(albumId, picked)
+        if (p.usedBy) return { success: false, error: 'IN_USE', preview: p }
+        const mostlyMissing = p.missing * 2 > p.matched + p.missing + p.renamed
+        if (mostlyMissing && p.missing > (acceptMissing ?? -1)) {
+          return { success: false, error: 'CONFIRM_MISSING', preview: p }
+        }
+        // Again: an upload may have started while the preview hashed the folder
+        if (uploadPipeline.isActive(albumId)) return { success: false, error: 'BUSY' }
+        watcherService.unwatch(albumId)
+        updateAlbum(albumId, { sourceFolderPath: p.folder, isOrphaned: 0 })
+        const album = getAlbum(albumId)!
+        // Re-watches, then flags changes ("Folder changed") or applies pure renames silently
+        if (checkSourceFolder(album)) await watcherService.checkSyncStatus(albumId)
+        // Uploads that waited while the folder was missing (exits at once if there are none)
+        uploadPipeline.startPipeline(albumId, mainWindow).catch((err) => {
+          logger.error(`Pipeline after relink failed for ${albumId}:`, getErrorMessage(err))
+        })
+        logger.info(`Relinked ${albumId} to ${p.folder}`)
+        return { success: true, preview: p }
+      } catch (error: unknown) {
+        logger.error('Relink failed:', getErrorMessage(error))
+        return { success: false, error: getErrorMessage(error) }
+      }
+    }
+  )
 
   ipcMain.handle('album:retryFailed', async (_event, albumId: string) => {
     try {

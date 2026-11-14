@@ -174,6 +174,59 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-11-14-folder-safety">
+<h2>Session 2026-11-14: a missing folder deletes nothing online, and the folder can be chosen again</h2>
+<p>Existing work, Minimal level, component scope: the sync review dialog (<code>SyncModal.vue</code>), the "Folder missing" album card and its menu, a new "Choose folder" dialog (<code>AlbumView.vue</code>), and the sign-in page text (<code>LoginView.vue</code>). The look is kept: every new part uses the modal, <code>.btn.danger</code>, <code>.btn.ghost</code>, <code>.err</code>, <code>.wait</code> and <code>.mono</code> that the app has. No new colour, size or radius. Screens: 960 px to 2560 px, desktop only (Electron). Plan: <code>plans/multi-computer-and-hotfixes.md</code>, ships 0 and 2.</p>
+<ul>
+<li><b>Who and when:</b> a photographer whose drive is unplugged, or whose folder moved. They are worried that the online gallery lost photos. The words tell them first that nothing online changed.</li>
+<li><b>Signature moment and delight piece:</b> unchanged. This work is a guard, not a feature to enjoy.</li>
+</ul>
+<h3 id="decisions-2026-11-14">Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected or kept</th></tr>
+<tr><td>Mass delete: where</td><td>A second step in the same sync dialog, not a new dialog</td><td>The person already reads the list there. A second window on top of it hides what they confirm</td><td class="rejected">A native confirm box (blocks the app and has no product voice)</td></tr>
+<tr><td>Mass delete: when</td><td>At least 10 photos and at least half the album, or the folder reads as empty</td><td>"Delete 1 of 2 photos" is a normal edit and must not ask twice. An empty folder is the unplugged-drive case at any size</td><td class="rejected">Half the album only (asks on every small album)</td></tr>
+<tr><td>Mass delete: buttons</td><td>Cancel has the focus. "Delete N photos" uses <code>.btn.danger</code> and names the count</td><td>The likely cause is a drive that is not ready, so the safe answer is the default. The count on the button says what the click does</td><td>Kept: the delete pattern of "Delete set" and "Delete album"</td></tr>
+<tr><td>Mass delete: title and words</td><td>"Remove N photos?" and "This would remove N of T photos from the online gallery. Usually this means the folder was moved or the drive isn’t fully connected."</td><td>Gives the size of the loss and the likely cause in one sentence</td><td class="rejected">"Are you sure?" (no information)</td></tr>
+<tr><td>Folder missing during sync</td><td>The dialog closes and a toast says "The folder for “A” is not available, so nothing was synced."</td><td>There is nothing to review; the toast says the one fact that matters: nothing changed</td><td class="rejected">An error line in the dialog (the dialog has nothing left to do)</td></tr>
+<tr><td>Card hint</td><td>"Plug in the drive or choose the folder again. Nothing online was changed."</td><td>Names the two fixes, then calms the fear</td><td class="rejected">"Client link still works. The folder was moved or deleted on this computer." (the old line; it did not say what to do)</td></tr>
+<tr><td>Choose folder: entry</td><td>A menu item "Choose folder…" on a "Folder missing" album only, then the system folder picker</td><td>The card menu is where the album's other actions are. The native picker is what people know</td><td class="rejected">A button on the card (one more control on every missing album)</td></tr>
+<tr><td>Choose folder: summary</td><td>The path in mono, then "N photos found, M missing, K new." Parts that are 0 are left out</td><td>The person checks the path and the counts before they agree. "0 missing" is noise</td><td>Kept: the plan's sentence, shortened</td></tr>
+<tr><td>Choose folder: most missing</td><td>An extra line, "Most of this album’s photos aren’t in this folder. Check that it’s the right one.", and the button says "Use folder anyway"</td><td>A wrong folder is the likely error; the word "anyway" makes the person read once more</td><td class="rejected">Refuse the folder (a real move can lose many photos on purpose)</td></tr>
+<tr><td>Choose folder: missing photos</td><td>"Missing photos stay online until you remove them."</td><td>Tells the person that choosing the folder deletes nothing</td><td>Kept: plan copy</td></tr>
+<tr><td>Folder of another album</td><td>"That folder is already used by B." and the button "Choose another folder…"</td><td>Two albums on one folder would sync against each other</td><td class="rejected">Allow it with a warning</td></tr>
+<tr><td>Sign-in expired</td><td>The sign-in page opening line becomes "Your sign-in expired. Sign in again to keep syncing." The rest of the page is the same</td><td>The page already says "You were signed out". One sentence changes; a banner above it would say the same thing twice</td><td class="rejected">A separate banner</td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>Tier</th><th>Rule</th><th>Reduced motion</th></tr>
+<tr><td>Sync list to "Remove N photos?"</td><td>none</td><td>The dialog body and title change in place</td><td>Same</td></tr>
+<tr><td>Choose folder: comparing</td><td>micro</td><td>The app's <code>.spin</code> with "Comparing the folder with the album…"</td><td>As the app-wide rule (see ASK below)</td></tr>
+<tr><td>Toasts</td><td>micro</td><td>The app's toast, no change</td><td>Same</td></tr>
+</table>
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>What happens</th></tr>
+<tr><td>Offline</td><td>"Delete N photos" is disabled with the title "Removing photos needs a connection", as "Sync" is</td></tr>
+<tr><td>Signed out (401)</td><td>Auth is cleared once, uploads pause, the app goes to sign-in with the new line. Sign-in resumes the uploads</td></tr>
+<tr><td>Drive unplugged at launch</td><td>The card shows "Folder missing" at once; the folder is not watched until it is back</td></tr>
+<tr><td>Album uploading</td><td>Choose folder says "This album is uploading. Choose the folder again when it finishes."</td></tr>
+<tr><td>Keyboard only</td><td>The menu item and the dialog buttons are buttons; Cancel has the focus in the delete step</td></tr>
+</table>
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Sync review dialog</td><td>components/SyncModal.vue</td><td>this session</td><td>List, Sync, Syncing, In sync; Run in background keeps the sync going</td><td>Same for every sync that deletes fewer than 10 photos or under half the album. New: the "Remove N photos?" step, and a close with a toast when the folder is gone. A result that comes back after the dialog closed or moved to another album shows as a toast, not in that album's dialog</td></tr>
+<tr><td>Album card and menu</td><td>views/AlbumView.vue (card, menu)</td><td>this session</td><td>"Folder missing" muted card; menu: Show in Finder, Review folder changes, Upload again, Delete album</td><td>Same items and order. New: "Choose folder…" on a missing album. The hint text changed. The badge now shows straight after launch (before, only after a sync check)</td></tr>
+<tr><td>Choose folder dialog</td><td>views/AlbumView.vue (relink modal)</td><td>this session</td><td>New</td><td>New behaviour; the Modal, buttons and error line are the app's own</td></tr>
+<tr><td>Sign-in page</td><td>views/LoginView.vue</td><td>this session</td><td>Sign-in with the device code or browser</td><td>Same. Only the opening line changes when the sign-in expired</td></tr>
+</table>
+<h3>Look notes</h3>
+<p>Owed. I did not render the running app, so no capture exists of the "Remove N photos?" step, the "Choose folder" dialog or the sign-in line. To check: the delete step at 960 px with a 4-digit count on the button; the folder path in mono with a long Windows path; the dialog while comparing.</p>
+<h3>Checks</h3>
+<p><code>npm run typecheck</code> passes; 154 unit tests pass. <code>check.py src/renderer</code>: 0 errors, 4 ASKs, all older and app-wide. One straight apostrophe in this session's text ("isn't") was found and changed to ’. The middle dot at <code>AlbumView.vue</code> ("120 photos · 12 Oct") is one phrase and is kept. The reduced-motion and straight-quote ASKs are in older files, not changed at this level. <code>check.py --inventory</code>: run; this work adds no new values. Two reviewer agents checked the logic of each ship (bugs and races, fixed). Owed: the visual review. I did not render the dialogs in the running app, so no capture exists, and a critique by a fresh reviewer is also owed.</p>
+</article>
+
 <article id="session-2026-11-02-print-stack-holder">
 <h2>Session 2026-11-02 (5): the pile has its paper block again, and a print can go back on the pile</h2>
 <p>Existing work, Minimal level, component scope: the print stack in the sidebar (<code>PrintStack.vue</code>). The look is kept. Screens: 960 px to 2560 px, desktop only (Electron); checked at 1280 &times; 720 and 960 &times; 600. User request: "the stack holder is better detailed in the web, here it feels like just a line", and "let the user place images back in the stack".</p>

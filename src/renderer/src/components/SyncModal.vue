@@ -140,7 +140,7 @@ watch(
     <template v-else-if="phase === 'confirm'">
       <p>
         This would remove {{ massDelete.count }} of {{ massDelete.total }} photos from the online
-        gallery. Usually this means the folder was moved or the drive isn't fully connected.
+        gallery. Usually this means the folder was moved or the drive isn’t fully connected.
       </p>
     </template>
 

@@ -15,11 +15,13 @@ import {
   FolderOpen,
   ImagePlus,
   RotateCw,
-  Upload
+  Upload,
+  FolderInput
 } from 'lucide-vue-next'
 import type { Album } from '../stores/album'
 import type { IpcRendererEvent } from 'electron'
 import type { SyncChanges } from '../../../main/ipc/sync'
+import type { RelinkPreview } from '../../../main/ipc/albums'
 import type { UploadProgress } from '../../../main/pipeline'
 import { useAlbumStore } from '../stores/album'
 import { useProfileStore } from '../stores/profile'
@@ -84,6 +86,17 @@ const shareAlbum = ref<Album | null>(null)
 const reuploadAlbum = ref<Album | null>(null)
 const isReuploading = ref(false)
 const reuploadError = ref('')
+
+// Choose folder: point a "Folder missing" album at where its photos are now
+const relinkAlbum = ref<Album | null>(null)
+const relinkPreview = ref<RelinkPreview | null>(null)
+const relinkError = ref('')
+const isRelinking = ref(false)
+// Most photos aren't in the picked folder: the confirm button says "anyway"
+const relinkMostlyMissing = computed(() => {
+  const p = relinkPreview.value
+  return !!p && p.missing * 2 > p.matched + p.missing + p.renamed
+})
 
 const isRefreshing = ref(false)
 
@@ -279,6 +292,72 @@ async function handleReupload(): Promise<void> {
 function closeReupload(): void {
   if (!isReuploading.value) reuploadAlbum.value = null
 }
+
+// Choose folder
+// Each preview request wins only if it is still the latest (Cancel, then reopen, can overlap)
+let relinkReq = 0
+async function openRelink(album: Album): Promise<void> {
+  closeMenu()
+  const folder = await window.api.dialog.openDirectory()
+  if (!folder) return
+  const req = ++relinkReq
+  relinkAlbum.value = album
+  relinkPreview.value = null
+  relinkError.value = ''
+  isRelinking.value = true
+  try {
+    const res = await window.api.albums.relinkPreview(album.id, folder)
+    if (req !== relinkReq) return
+    if (!res.success || !res.preview) throw new Error(res.error || 'Could not read the folder')
+    relinkPreview.value = res.preview
+  } catch (error) {
+    if (req === relinkReq)
+      relinkError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    if (req === relinkReq) isRelinking.value = false
+  }
+}
+
+async function handleRelink(): Promise<void> {
+  const album = relinkAlbum.value
+  const p = relinkPreview.value
+  if (!album || !p) return
+  isRelinking.value = true
+  relinkError.value = ''
+  try {
+    // Accept exactly the missing photos the person saw; more missing by now means ask again
+    const res = await window.api.albums.relink(
+      album.id,
+      p.folder,
+      relinkMostlyMissing.value ? p.missing : undefined
+    )
+    // The folder changed since the preview: show the fresh counts and ask again
+    if (res.preview) relinkPreview.value = res.preview
+    if (!res.success) {
+      if (res.error === 'BUSY')
+        relinkError.value = 'This album is uploading. Choose the folder again when it finishes.'
+      else if (res.error !== 'CONFIRM_MISSING' && res.error !== 'IN_USE')
+        relinkError.value = res.error || 'Could not use this folder'
+      return
+    }
+    relinkAlbum.value = null
+    loadAlbums()
+    toast(`“${album.title}” uses this folder now.`)
+  } catch (error) {
+    relinkError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    isRelinking.value = false
+  }
+}
+
+// Cancel works while the preview loads; only the relink itself can't be left mid-way
+function closeRelink(): void {
+  if (isRelinking.value && relinkPreview.value) return
+  relinkReq++ // a preview still loading is dropped
+  relinkAlbum.value = null
+}
+
+const photoCount = (n: number): string => `${nf(n)} photo${n === 1 ? '' : 's'}`
 
 // Upload pill
 function dismissUpload(): void {
@@ -511,7 +590,7 @@ onUnmounted(() => {
                 }}{{ albumDate(album) ? ` · ${albumDate(album)}` : '' }}
               </div>
               <div v-if="album.isOrphaned" class="hint">
-                Plug in the drive or put the folder back. Nothing online was changed.
+                Plug in the drive or choose the folder again. Nothing online was changed.
               </div>
               <div v-else-if="album.server_missing" class="hint">
                 The client link stopped working. Your photos here are safe.
@@ -544,6 +623,9 @@ onUnmounted(() => {
         >
           <FolderOpen />Show in Finder
         </button>
+        <button v-if="menuFor.isOrphaned" role="menuitem" @click="openRelink(menuFor)">
+          <FolderInput />Choose folder…
+        </button>
         <button v-if="menuFor.needsSync" role="menuitem" @click="openSyncModal(menuFor)">
           <RefreshCw />Review folder changes
         </button>
@@ -554,13 +636,7 @@ onUnmounted(() => {
         >
           <Upload />Upload again…
         </button>
-        <hr
-          v-if="
-            (!menuFor.isOrphaned && menuFor.sourceFolderPath) ||
-            menuFor.needsSync ||
-            menuFor.server_missing
-          "
-        />
+        <hr v-if="menuFor.sourceFolderPath || menuFor.needsSync || menuFor.server_missing" />
         <button role="menuitem" class="bad" @click="openDeleteModal(menuFor)">
           <Trash2 />Delete album…
         </button>
@@ -613,6 +689,56 @@ onUnmounted(() => {
         >
           <span v-if="isReuploading" class="spin"></span
           >{{ !networkStore.isOnline ? 'Offline' : isReuploading ? 'Starting…' : 'Upload again' }}
+        </button>
+      </template>
+    </Modal>
+
+    <Modal
+      :show="!!relinkAlbum"
+      :title="`Use this folder for “${relinkAlbum?.title || ''}”?`"
+      @close="closeRelink"
+    >
+      <div v-if="!relinkPreview && isRelinking" class="wait">
+        <span class="spin"></span>Comparing the folder with the album…
+      </div>
+      <template v-else-if="relinkPreview">
+        <p class="mono" style="overflow-wrap: anywhere">{{ relinkPreview.folder }}</p>
+        <p v-if="relinkPreview.usedBy">
+          That folder is already used by {{ relinkPreview.usedBy }}.
+        </p>
+        <template v-else>
+          <p>
+            {{ photoCount(relinkPreview.matched + relinkPreview.renamed) }} found<template
+              v-if="relinkPreview.missing"
+              >, {{ nf(relinkPreview.missing) }} missing</template
+            ><template v-if="relinkPreview.extra">, {{ nf(relinkPreview.extra) }} new</template>.
+          </p>
+          <p v-if="relinkMostlyMissing">
+            Most of this album’s photos aren’t in this folder. Check that it’s the right one.
+          </p>
+          <p v-if="relinkPreview.missing">Missing photos stay online until you remove them.</p>
+        </template>
+      </template>
+      <p v-if="relinkError" class="err"><span class="dot bad"></span>{{ relinkError }}</p>
+      <template #footer>
+        <button class="btn ghost" :disabled="isRelinking && !!relinkPreview" @click="closeRelink">
+          Cancel
+        </button>
+        <button
+          v-if="relinkAlbum && relinkPreview?.usedBy"
+          class="btn primary"
+          @click="openRelink(relinkAlbum)"
+        >
+          Choose another folder…
+        </button>
+        <button
+          v-else-if="relinkPreview"
+          class="btn primary"
+          :disabled="isRelinking"
+          @click="handleRelink"
+        >
+          <span v-if="isRelinking" class="spin"></span
+          >{{ relinkMostlyMissing ? 'Use folder anyway' : 'Use folder' }}
         </button>
       </template>
     </Modal>

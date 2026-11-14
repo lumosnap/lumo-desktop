@@ -6,9 +6,16 @@ import { ipcMain } from 'electron'
 import { startAuth, requestDeviceCode, pollDeviceToken } from '../oauth-handler'
 import { getAuth, clearAuth } from '../auth-storage'
 import { createLogger } from '../logger'
-import { uploadPipeline } from '../pipeline'
+import { uploadPipeline, resumeUploads } from '../pipeline'
+import { BrowserWindow } from 'electron'
 
 const logger = createLogger('IPC:Auth')
+
+// A paused run continues; albums that waited while signed out (e.g. since launch) are queued
+function signedIn(): void {
+  uploadPipeline.resumePipeline()
+  resumeUploads(BrowserWindow.getAllWindows()[0] ?? null)
+}
 
 export function registerAuthHandlers(): void {
   ipcMain.handle('auth:getStoredAuth', () => {
@@ -23,7 +30,7 @@ export function registerAuthHandlers(): void {
   ipcMain.handle('auth:startAuth', async () => {
     logger.info('Starting auth flow')
     const result = await startAuth()
-    if (result.success) uploadPipeline.resumePipeline() // paused by an expired sign-in
+    if (result.success) signedIn()
     return result
   })
 
@@ -36,7 +43,7 @@ export function registerAuthHandlers(): void {
 
   ipcMain.handle('auth:pollDeviceToken', async (_event, deviceCode: string) => {
     const result = await pollDeviceToken(deviceCode)
-    if (result.success) uploadPipeline.resumePipeline()
+    if (result.success) signedIn()
     if (!result.success && !result.pending) logger.warn(`Device token poll failed: ${result.error}`)
     return result
   })

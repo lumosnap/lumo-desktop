@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest'
 import Database from 'better-sqlite3'
 import {
   runMigrations,
+  resetInterruptedImages,
+  getAlbumsWithUnfinishedUploads,
+  updateImage,
+  updateAlbum,
   initDatabase,
   closeDatabase,
   createAlbum,
@@ -563,6 +567,30 @@ describe.skipIf(!loadable)('done marks', () => {
     setImageDone('b', [j1], true)
     deleteAlbum('b')
     expect(getImageDone('b')).toEqual({})
+    closeDatabase()
+  })
+})
+
+describe.skipIf(!loadable)('startup resume', () => {
+  it('restarts interrupted rows and lists albums to resume, minus missing folders', () => {
+    initDatabase(':memory:')
+    album('a')
+    album('b')
+    album('gone')
+    const [up, comp, done] = mk('a', 3)
+    updateImage(up, { uploadStatus: 'uploading' })
+    updateImage(comp, { uploadStatus: 'compressing' })
+    updateImage(done, { uploadStatus: 'complete' })
+    const [failed] = mk('b', 1)
+    updateImage(failed, { uploadStatus: 'failed_upload' })
+    mk('gone', 1)
+    updateAlbum('gone', { isOrphaned: 1 })
+
+    resetInterruptedImages()
+    expect(getAlbumsWithUnfinishedUploads().sort()).toEqual(['a', 'b'])
+    expect(getImage(up)?.uploadStatus).toBe('pending')
+    expect(getImage(comp)?.uploadStatus).toBe('pending')
+    expect(getImage(done)?.uploadStatus).toBe('complete')
     closeDatabase()
   })
 })

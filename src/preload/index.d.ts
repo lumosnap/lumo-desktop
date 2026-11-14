@@ -12,7 +12,7 @@ import type { AppConfig } from '../main/config'
 import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/sync'
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
-import type { TagConfig } from '../main/ipc/albums'
+import type { TagConfig, RelinkPreview } from '../main/ipc/albums'
 import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
 
 type NotesResult =
@@ -121,6 +121,15 @@ declare global {
         reupload: (
           albumId: string
         ) => Promise<{ success: boolean; albumId?: string; error?: string }>
+        relinkPreview: (
+          albumId: string,
+          folder: string
+        ) => Promise<{ success: boolean; preview?: RelinkPreview; error?: string }>
+        relink: (
+          albumId: string,
+          folder: string,
+          acceptMissing?: number
+        ) => Promise<{ success: boolean; preview?: RelinkPreview; error?: string }>
         getImages: (
           albumId: string
         ) => Promise<{ success: boolean; images: AlbumImageWithFavorites[]; error?: string }>

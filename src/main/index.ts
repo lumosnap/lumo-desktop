@@ -3,7 +3,8 @@ import { join } from 'path'
 import { rm } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { initDatabase, closeDatabase, getAllAlbums, getImagesByStatus } from './database'
+import { initDatabase, closeDatabase, resetInterruptedImages } from './database'
+import { resumeUploads } from './pipeline'
 import { initConfig, getConfig } from './config'
 import { registerIpcHandlers } from './ipc'
 import { protocol } from 'electron'
@@ -248,9 +249,7 @@ app.whenReady().then(() => {
   if (process.defaultApp) {
     // Development mode: running via 'electron .' or 'electron-vite dev'
     if (process.argv.length >= 2) {
-      const success = app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
-        process.argv[1]
-      ])
+      const success = app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [process.argv[1]])
       if (success) {
         logger.info(`✓ Registered as default protocol client for ${PROTOCOL}:// (dev mode)`)
       } else {
@@ -277,6 +276,8 @@ app.whenReady().then(() => {
   logger.info('Initializing database...')
   try {
     initDatabase()
+    // Before any IPC can start the pipeline
+    resetInterruptedImages()
     logger.info('✓ Database initialized successfully')
     // Vectors files a crash or quit left mid-upload; each push writes a fresh one
     rm(join(app.getPath('userData'), 'tmp'), { recursive: true, force: true }).catch(() => {})
@@ -399,7 +400,7 @@ app.whenReady().then(() => {
     // Initialize Network Service
     try {
       networkService.initialize(mainWindow)
-      
+
       // Wire up network status changes to pause/resume pipeline
       // An expired sign-in: hold uploads instead of failing every batch; sign-in resumes them
       onUnauthorized(() => uploadPipeline.pausePipeline())
@@ -415,7 +416,7 @@ app.whenReady().then(() => {
           uploadPipeline.pausePipeline()
         }
       })
-      
+
       logger.info('✓ Network service initialized')
     } catch (error) {
       logger.error('✗ Failed to initialize network service:', getErrorMessage(error))
@@ -429,37 +430,8 @@ app.whenReady().then(() => {
       logger.error('✗ Failed to initialize watcher service:', getErrorMessage(error))
     }
 
-    // Auto-retry failed uploads on startup
-    try {
-      const albums = getAllAlbums()
-      let totalFailed = 0
-      const albumsWithFailed: string[] = []
-
-      for (const album of albums) {
-        const failedImages = getImagesByStatus(album.id, 'failed')
-        if (failedImages.length > 0) {
-          totalFailed += failedImages.length
-          albumsWithFailed.push(album.id)
-        }
-      }
-
-      if (albumsWithFailed.length > 0) {
-        logger.info(
-          `Found ${totalFailed} failed images in ${albumsWithFailed.length} albums, auto-retrying...`
-        )
-        // Queue all albums with failed images - the pipeline queue system will handle them sequentially
-        for (const albumId of albumsWithFailed) {
-          uploadPipeline.startPipeline(albumId, mainWindow).catch((error) => {
-            logger.error(`Auto-retry failed for album ${albumId}:`, getErrorMessage(error))
-          })
-        }
-        logger.info('✓ Auto-retry queued for failed uploads')
-      } else {
-        logger.debug('No failed uploads to retry')
-      }
-    } catch (error) {
-      logger.error('✗ Failed to check for failed uploads:', getErrorMessage(error))
-    }
+    // Resume unfinished uploads: interrupted, pending or failed. Signed out: sign-in does it.
+    if (getToken()) resumeUploads(mainWindow)
   } else {
     logger.error('✗ Cannot register IPC handlers: mainWindow is null')
   }
