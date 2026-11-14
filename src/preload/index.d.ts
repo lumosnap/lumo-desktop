@@ -83,6 +83,8 @@ declare global {
           user?: { id: string; email: string; name: string; image?: string }
         }>
         logout: () => Promise<{ success: boolean }>
+        /** The stored sign-in was rejected (401) and cleared; returns the unsubscribe */
+        onExpired: (callback: () => void) => () => void
       }
       config: {
         isConfigured: () => Promise<boolean>
@@ -255,7 +257,11 @@ declare global {
       }
       sync: {
         detectChanges: (albumId: string) => Promise<SyncResult>
-        execute: (albumId: string, changes: Partial<SyncChanges>) => Promise<ExecuteSyncResult>
+        execute: (
+          albumId: string,
+          changes: Partial<SyncChanges>,
+          confirmMassDelete?: boolean
+        ) => Promise<ExecuteSyncResult>
       }
       dialog: {
         openDirectory: () => Promise<string | null>

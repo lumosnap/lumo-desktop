@@ -81,8 +81,15 @@ export const useAuthStore = defineStore('auth', () => {
     console.log('[Auth] Logged out')
   }
 
+  /** Main already cleared the stored sign-in (it got a 401) */
+  function expire(): void {
+    user.value = null
+    isAuthenticated.value = false
+  }
+
   return {
     user,
+    expire,
     isAuthenticated,
     loading,
     error,

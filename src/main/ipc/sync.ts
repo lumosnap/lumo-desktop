@@ -5,7 +5,7 @@
  */
 
 import { BrowserWindow, ipcMain } from 'electron'
-import { copyFileSync, rmSync } from 'fs'
+import { copyFileSync, existsSync, rmSync } from 'fs'
 import { basename, extname, join } from 'path'
 import {
   getAlbum,
@@ -29,6 +29,8 @@ import {
   getFolderStats
 } from '../album-metadata'
 import { notificationService } from '../notifications'
+import { watcherService } from '../watcher'
+import type { Album } from '../database'
 
 const logger = createLogger('IPC:Sync')
 
@@ -77,17 +79,48 @@ export type SyncResult = {
     skipped: number
   }
   error?: string
+  /** The source folder is not there (drive unplugged, moved): nothing was compared */
+  orphaned?: boolean
 }
 
 export type ExecuteSyncResult = {
   success: boolean
   limitWarning?: string | null
+  /** 'FOLDER_MISSING', or 'CONFIRM_MASS_DELETE' with count/total: retry with confirmMassDelete */
   error?: string
+  count?: number
+  total?: number
 }
 
+const EMPTY_CHANGES = (): SyncChanges => ({
+  new: [],
+  modified: [],
+  deleted: [],
+  renamed: [],
+  skipped: []
+})
+
 /**
- * Detect changes for an album
+ * Whether the album's source folder is there, keeping isOrphaned and the watcher in step.
+ * A missing folder must never read as "every photo was deleted".
  */
+export function checkSourceFolder(album: Album): boolean {
+  const present = !!album.sourceFolderPath && existsSync(album.sourceFolderPath)
+  if (!present && !album.isOrphaned) {
+    logger.warn(`Source folder missing for ${album.id}: ${album.sourceFolderPath}`)
+    updateAlbum(album.id, { isOrphaned: 1, needsSync: 0 })
+    watcherService.unwatch(album.id)
+  } else if (present) {
+    if (album.isOrphaned) {
+      logger.info(`Source folder is back for ${album.id}`)
+      updateAlbum(album.id, { isOrphaned: 0 })
+    }
+    // No-op when already watched; covers a drive that mounted after watcher.initialize skipped it
+    watcherService.watch(album.id, album.sourceFolderPath)
+  }
+  return present
+}
+
 /**
  * Detect changes for an album
  */
@@ -97,6 +130,15 @@ export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
     const album = getAlbum(albumId)
     if (!album) {
       return { success: false, error: 'Album not found' }
+    }
+
+    if (!checkSourceFolder(album)) {
+      return {
+        success: true,
+        orphaned: true,
+        changes: EMPTY_CHANGES(),
+        summary: { new: 0, modified: 0, deleted: 0, renamed: 0, skipped: 0 }
+      }
     }
 
     // Quick dirty-check using .lumosnap metadata
@@ -317,7 +359,8 @@ export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
 export async function executeAlbumSync(
   albumId: string,
   changes: Partial<SyncChanges>,
-  mainWindow?: BrowserWindow | null
+  mainWindow?: BrowserWindow | null,
+  confirmMassDelete = false
 ): Promise<ExecuteSyncResult> {
   logger.info(`Executing sync for album: ${albumId}`)
 
@@ -325,6 +368,37 @@ export async function executeAlbumSync(
     const album = getAlbum(albumId)
     if (!album) {
       return { success: false, error: 'Album not found' }
+    }
+
+    // The list may be minutes old (the review dialog): re-check the disk now
+    if (!checkSourceFolder(album)) return { success: false, error: 'FOLDER_MISSING' }
+    const dbImages = getAlbumImages(albumId)
+    const dbById = new Map(dbImages.map((img) => [img.id, img]))
+    // Only this album's rows whose file is still gone; serverId from the DB, not the caller.
+    // ponytail: a file renamed between review and Sync still reads as deleted (it comes back
+    // as new on the next sync, minus its favourites); re-detect here if that is reported.
+    const deleted = (changes.deleted ?? []).flatMap((d) => {
+      const row = dbById.get(d.id)
+      if (!row || existsSync(join(album.sourceFolderPath, row.originalFilename))) return []
+      return [{ ...d, serverId: row.serverId, originalFilename: row.originalFilename }]
+    })
+    changes = { ...changes, deleted }
+    if (deleted.length > 0 && !confirmMassDelete) {
+      const many = deleted.length >= 10 && deleted.length >= 0.5 * dbImages.length
+      // Bypass the scan cache: a drive still mounting can list an empty folder
+      if (
+        many ||
+        scanImagesInFolder(album.sourceFolderPath, { useCache: false, skipDimensions: true })
+          .length === 0
+      ) {
+        logger.warn(`Holding back ${deleted.length}/${dbImages.length} deletions for confirmation`)
+        return {
+          success: false,
+          error: 'CONFIRM_MASS_DELETE',
+          count: deleted.length,
+          total: dbImages.length
+        }
+      }
     }
 
     // Import API clients
@@ -518,7 +592,10 @@ export function registerSyncHandlers(mainWindow: BrowserWindow): void {
     return detectAlbumChanges(albumId)
   })
 
-  ipcMain.handle('sync:execute', async (_event, albumId: string, changes: Partial<SyncChanges>) => {
-    return executeAlbumSync(albumId, changes, mainWindow)
-  })
+  ipcMain.handle(
+    'sync:execute',
+    async (_event, albumId: string, changes: Partial<SyncChanges>, confirmMassDelete?: boolean) => {
+      return executeAlbumSync(albumId, changes, mainWindow, confirmMassDelete === true)
+    }
+  )
 }

@@ -5,10 +5,10 @@
  * Uses Bearer token authentication stored in auth-storage.
  */
 
-import { net } from 'electron'
+import { BrowserWindow, net } from 'electron'
 import { createReadStream } from 'fs'
 import { stat } from 'fs/promises'
-import { getToken } from './auth-storage'
+import { clearAuth, getToken } from './auth-storage'
 
 // Get API URL from environment (set in electron.vite.config.ts)
 const API_URL = process.env.API_URL || 'http://localhost:8787/api/v1'
@@ -31,6 +31,25 @@ export function isAlbumGone(error: unknown): boolean {
 let albumGoneHandler: ((albumId: string) => void) | null = null
 export function onAlbumGone(handler: (albumId: string) => void): void {
   albumGoneHandler = handler
+}
+
+/**
+ * A 401 for the token we still hold: it expired or was revoked. Clear it once and send the
+ * renderer to sign-in. Comparing tokens makes parallel 401s clear once, keeps a late 401 from
+ * wiping a fresh sign-in, and does nothing while signed out. /auth routes report their own.
+ */
+export function handleUnauthorized(endpoint: string, sentToken: string | null): void {
+  if (endpoint.startsWith('/auth') || !sentToken || sentToken !== getToken()) return
+  console.warn('[API] Sign-in expired, clearing stored auth')
+  clearAuth()
+  unauthorizedHandler?.()
+  BrowserWindow.getAllWindows()[0]?.webContents.send('auth:expired')
+}
+
+// index.ts pauses uploads here (a direct import would loop: the pipeline imports this file)
+let unauthorizedHandler: (() => void) | null = null
+export function onUnauthorized(handler: () => void): void {
+  unauthorizedHandler = handler
 }
 
 // Generic fetch wrapper
@@ -82,6 +101,7 @@ async function apiFetch<T>(
       })
 
       response.on('end', () => {
+        if (response.statusCode === 401) handleUnauthorized(endpoint, token)
         try {
           const parsed = JSON.parse(responseData)
           if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {

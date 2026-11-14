@@ -14,6 +14,8 @@ import { trayManager } from './tray'
 import { compressionPool } from './compression-pool'
 import { copyWatcherRegistry } from './copy-watcher'
 import { networkService } from './network'
+import { getToken } from './auth-storage'
+import { onUnauthorized } from './api-client'
 import { AppUpdater } from './AppUpdater'
 import { stopAnalysis } from './album-analysis'
 
@@ -399,10 +401,15 @@ app.whenReady().then(() => {
       networkService.initialize(mainWindow)
       
       // Wire up network status changes to pause/resume pipeline
+      // An expired sign-in: hold uploads instead of failing every batch; sign-in resumes them
+      onUnauthorized(() => uploadPipeline.pausePipeline())
+
       networkService.onStatusChange((online) => {
-        if (online) {
+        if (online && getToken()) {
           logger.info('Network online - resuming pipeline')
           uploadPipeline.resumePipeline()
+        } else if (online) {
+          logger.info('Network online, but signed out - pipeline stays paused')
         } else {
           logger.info('Network offline - pausing pipeline')
           uploadPipeline.pausePipeline()

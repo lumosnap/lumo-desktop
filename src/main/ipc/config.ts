@@ -4,6 +4,7 @@
 
 import { ipcMain, shell, app } from 'electron'
 import { existsSync, rmSync, unlinkSync } from 'fs'
+import { join } from 'path'
 import {
   isConfigured,
   getStorageLocation,
@@ -163,12 +164,13 @@ export function registerConfigHandlers(): void {
       deleteDatabase()
       logger.info('Database deleted')
 
-      // 5. Delete compressed images in storage location
+      // 5. Delete compressed images: only our own folder, the user may have picked e.g. ~/Pictures
       const storageLocation = getStorageLocation()
-      if (storageLocation && existsSync(storageLocation)) {
+      const ownFolder = storageLocation && join(storageLocation, 'Lumosnap')
+      if (ownFolder && existsSync(ownFolder)) {
         try {
-          rmSync(storageLocation, { recursive: true, force: true })
-          logger.info('Storage folder deleted:', storageLocation)
+          rmSync(ownFolder, { recursive: true, force: true })
+          logger.info('Storage folder deleted:', ownFolder)
         } catch (e) {
           logger.warn('Failed to delete storage folder:', getErrorMessage(e))
         }

@@ -6,6 +6,7 @@ import { ipcMain } from 'electron'
 import { startAuth, requestDeviceCode, pollDeviceToken } from '../oauth-handler'
 import { getAuth, clearAuth } from '../auth-storage'
 import { createLogger } from '../logger'
+import { uploadPipeline } from '../pipeline'
 
 const logger = createLogger('IPC:Auth')
 
@@ -22,6 +23,7 @@ export function registerAuthHandlers(): void {
   ipcMain.handle('auth:startAuth', async () => {
     logger.info('Starting auth flow')
     const result = await startAuth()
+    if (result.success) uploadPipeline.resumePipeline() // paused by an expired sign-in
     return result
   })
 
@@ -34,6 +36,7 @@ export function registerAuthHandlers(): void {
 
   ipcMain.handle('auth:pollDeviceToken', async (_event, deviceCode: string) => {
     const result = await pollDeviceToken(deviceCode)
+    if (result.success) uploadPipeline.resumePipeline()
     if (!result.success && !result.pending) logger.warn(`Device token poll failed: ${result.error}`)
     return result
   })
@@ -41,6 +44,7 @@ export function registerAuthHandlers(): void {
   ipcMain.handle('auth:logout', () => {
     logger.info('Logging out')
     clearAuth()
+    uploadPipeline.pausePipeline() // unsigned uploads would only fail; sign-in resumes
     return { success: true }
   })
 }

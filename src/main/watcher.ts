@@ -3,6 +3,7 @@ import type { FSWatcher } from 'chokidar'
 import { updateAlbum, getAllAlbums, getAlbum } from './database'
 import { detectAlbumChanges, executeAlbumSync } from './ipc/sync'
 import { BrowserWindow } from 'electron'
+import { existsSync } from 'fs'
 import { debounceByKey } from './utils'
 import { createLogger } from './logger'
 
@@ -26,7 +27,8 @@ class WatcherService {
     logger.info(`Initializing watchers for ${albums.length} albums`)
 
     albums.forEach((album) => {
-      if (album.sourceFolderPath) {
+      // A missing folder is watched again once album:list or a sync check finds it back
+      if (album.sourceFolderPath && existsSync(album.sourceFolderPath)) {
         this.watch(album.id, album.sourceFolderPath)
       }
     })

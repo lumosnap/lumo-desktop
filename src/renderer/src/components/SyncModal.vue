@@ -28,11 +28,14 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
   sync: []
+  /** The folder went away (drive unplugged): nothing was synced */
+  missing: []
 }>()
 
-// list -> syncing -> done (mock: syncDlg check / list / flight)
-const phase = ref<'list' | 'syncing' | 'done'>('list')
+// list -> (confirm, when most photos would leave) -> syncing -> done
+const phase = ref<'list' | 'confirm' | 'syncing' | 'done'>('list')
 const syncError = ref('')
+const massDelete = ref({ count: 0, total: 0 })
 
 const totalChanges = computed(() => {
   if (!props.changes) return 0
@@ -51,7 +54,9 @@ const title = computed(() =>
     ? 'Syncing'
     : phase.value === 'done'
       ? 'In sync'
-      : 'Review folder changes'
+      : phase.value === 'confirm'
+        ? `Remove ${massDelete.value.count} photos?`
+        : 'Review folder changes'
 )
 
 function formatBytes(bytes: number): string {
@@ -62,27 +67,43 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-async function handleSync(): Promise<void> {
+async function handleSync(confirmMassDelete = false): Promise<void> {
   if (!props.changes) return
 
   phase.value = 'syncing'
   syncError.value = ''
   const title = props.albumTitle
+  const started = props.changes
+  // The dialog may have been closed, or reopened on another album, while this ran
+  const stillHere = (): boolean => props.show && props.changes === started
 
   try {
     // Deep clone to strip Vue reactivity - IPC can't clone reactive objects
     const plainChanges = JSON.parse(JSON.stringify(props.changes))
-    const result = await window.api.sync.execute(props.albumId, plainChanges)
+    const result = await window.api.sync.execute(props.albumId, plainChanges, confirmMassDelete)
+    if (result.error === 'FOLDER_MISSING') {
+      phase.value = 'list'
+      if (stillHere()) emit('missing')
+      toast(`The folder for “${title}” is not available, so nothing was synced.`)
+      return
+    }
+    if (result.error === 'CONFIRM_MASS_DELETE') {
+      massDelete.value = { count: result.count ?? 0, total: result.total ?? 0 }
+      // Closed meanwhile: don't leave a confirm step armed for the next album opened here
+      phase.value = stillHere() ? 'confirm' : 'list'
+      if (!stillHere()) toast(`Nothing synced for “${title}”: it would remove most of its photos.`)
+      return
+    }
     if (!result.success) throw new Error(result.error || 'Sync failed')
     if (result.limitWarning) {
       // Keep the dialog on the list so the warning is read; don't report a clean sync
       phase.value = 'list'
-      syncError.value = result.limitWarning
-      if (!props.show) toast(result.limitWarning)
+      if (stillHere()) syncError.value = result.limitWarning
+      else toast(result.limitWarning)
       return
     }
     emit('sync')
-    if (props.show) phase.value = 'done'
+    if (stillHere()) phase.value = 'done'
     else {
       phase.value = 'list'
       toast(`“${title}” is in sync`)
@@ -91,16 +112,18 @@ async function handleSync(): Promise<void> {
     const message = error instanceof Error ? error.message : 'An unexpected error occurred'
     console.error('[SyncModal] Sync error:', error)
     phase.value = 'list'
-    syncError.value = message
-    if (!props.show) toast(`Sync failed for “${title}”: ${message}`)
+    if (stillHere()) syncError.value = message
+    else toast(`Sync failed for “${title}”: ${message}`)
   }
 }
 
-// Reset state when the dialog closes (a running sync keeps going: "Run in background")
+// Reset state when the dialog closes or is reused for another album (a running sync keeps
+// going: "Run in background"). A confirm step must never carry over to other changes.
 watch(
-  () => props.show,
-  (show) => {
-    if (!show && phase.value !== 'syncing') {
+  () => [props.show, props.albumId, props.changes] as const,
+  ([show], [wasShown]) => {
+    if (phase.value === 'syncing') return
+    if (!show || !wasShown || phase.value === 'confirm') {
       phase.value = 'list'
       syncError.value = ''
     }
@@ -113,6 +136,13 @@ watch(
     <div v-if="isLoading" class="wait" style="margin: 24px 0">
       <span class="spin"></span>Comparing the folder with the album…
     </div>
+
+    <template v-else-if="phase === 'confirm'">
+      <p>
+        This would remove {{ massDelete.count }} of {{ massDelete.total }} photos from the online
+        gallery. Usually this means the folder was moved or the drive isn't fully connected.
+      </p>
+    </template>
 
     <div v-else-if="phase !== 'list'" class="flight">
       <div class="ends">
@@ -223,13 +253,24 @@ watch(
       <button v-else-if="phase === 'done'" class="btn primary" autofocus @click="emit('close')">
         Done
       </button>
+      <template v-else-if="phase === 'confirm'">
+        <button class="btn ghost" autofocus @click="emit('close')">Cancel</button>
+        <button
+          class="btn danger"
+          :disabled="!networkStore.isOnline"
+          :title="!networkStore.isOnline ? 'Removing photos needs a connection' : ''"
+          @click="handleSync(true)"
+        >
+          Delete {{ massDelete.count }} photos
+        </button>
+      </template>
       <template v-else-if="!isLoading && hasChanges">
         <button class="btn ghost" @click="emit('close')">Cancel</button>
         <button
           class="btn primary"
           :disabled="!networkStore.isOnline"
           :title="!networkStore.isOnline ? 'Syncing needs a connection' : ''"
-          @click="handleSync"
+          @click="handleSync()"
         >
           {{
             networkStore.isOnline

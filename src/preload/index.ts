@@ -64,7 +64,12 @@ const api = {
       interval?: number
       user?: AuthUser
     }> => ipcRenderer.invoke('auth:pollDeviceToken', deviceCode),
-    logout: (): Promise<{ success: boolean }> => ipcRenderer.invoke('auth:logout')
+    logout: (): Promise<{ success: boolean }> => ipcRenderer.invoke('auth:logout'),
+    onExpired: (callback: () => void): (() => void) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('auth:expired', handler)
+      return () => ipcRenderer.removeListener('auth:expired', handler)
+    }
   },
   config: {
     isConfigured: (): Promise<boolean> => ipcRenderer.invoke('config:isConfigured'),
@@ -260,8 +265,12 @@ const api = {
   sync: {
     detectChanges: (albumId: string): Promise<SyncResult> =>
       ipcRenderer.invoke('sync:detectChanges', albumId),
-    execute: (albumId: string, changes: Partial<SyncChanges>): Promise<ExecuteSyncResult> =>
-      ipcRenderer.invoke('sync:execute', albumId, changes)
+    execute: (
+      albumId: string,
+      changes: Partial<SyncChanges>,
+      confirmMassDelete?: boolean
+    ): Promise<ExecuteSyncResult> =>
+      ipcRenderer.invoke('sync:execute', albumId, changes, confirmMassDelete)
   },
   dialog: {
     openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory')

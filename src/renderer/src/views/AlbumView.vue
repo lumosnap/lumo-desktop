@@ -225,6 +225,12 @@ async function openSyncModal(album: Album): Promise<void> {
   try {
     const result = await window.api.sync.detectChanges(album.id)
     if (!result.success) throw new Error(result.error || 'Could not compare the folder')
+    if (result.orphaned) {
+      showSyncModal.value = false
+      loadAlbums()
+      toast(`The folder for “${album.title}” is not available, so nothing was synced.`)
+      return
+    }
     syncChanges.value = result.changes ?? null
   } catch (error) {
     console.error('Failed to detect sync changes:', error)
@@ -238,6 +244,11 @@ async function openSyncModal(album: Album): Promise<void> {
 }
 
 function handleSyncComplete(): void {
+  loadAlbums()
+}
+
+function handleSyncMissing(): void {
+  showSyncModal.value = false
   loadAlbums()
 }
 
@@ -500,7 +511,7 @@ onUnmounted(() => {
                 }}{{ albumDate(album) ? ` · ${albumDate(album)}` : '' }}
               </div>
               <div v-if="album.isOrphaned" class="hint">
-                Client link still works. The folder was moved or deleted on this computer.
+                Plug in the drive or put the folder back. Nothing online was changed.
               </div>
               <div v-else-if="album.server_missing" class="hint">
                 The client link stopped working. Your photos here are safe.
@@ -571,6 +582,7 @@ onUnmounted(() => {
       :is-loading="isSyncLoading"
       @close="showSyncModal = false"
       @sync="handleSyncComplete"
+      @missing="handleSyncMissing"
     />
 
     <ShareLinkModal

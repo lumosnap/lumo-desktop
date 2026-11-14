@@ -62,6 +62,7 @@ import {
 import { MAX_IMAGE_TAGS, TAG_SLUG } from '../tags/select'
 import { imagePeople, peoplePhotosChanged } from '../people'
 import { watcherService } from '../watcher'
+import { checkSourceFolder } from './sync'
 import { createLogger, getErrorMessage } from '../logger'
 import { handleIpc } from './types'
 
@@ -238,10 +239,10 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           if (existsSync(path)) thumbnail = path
         }
 
-        // Trigger background sync check
-        // This runs asynchronously and will notify frontend if status changes
-        // Don't await this!
-        if (album.sourceFolderPath && existsSync(album.sourceFolderPath)) {
+        // Background sync check (not awaited); it notifies the renderer if status changes.
+        // A missing folder is flagged here so "Folder missing" shows straight after launch.
+        const present = checkSourceFolder(album)
+        if (present) {
           watcherService.checkSyncStatus(album.id).catch((err) => {
             logger.error(`Background sync check failed for ${album.id}:`, getErrorMessage(err))
           })
@@ -250,7 +251,12 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         // vectors_ids is a JSON list of every embedded photo: main-process only
         const { vectors_ids, ...rest } = album
         void vectors_ids
-        return { ...rest, needsSync: album.needsSync, thumbnail }
+        return {
+          ...rest,
+          isOrphaned: present ? 0 : 1,
+          needsSync: present ? album.needsSync : 0,
+          thumbnail
+        }
       })
 
       return { success: true, albums: albumsWithThumbnails }
@@ -269,7 +275,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       }
 
       // Trigger background sync check
-      if (existsSync(album.sourceFolderPath)) {
+      const present = checkSourceFolder(album)
+      if (present) {
         watcherService.checkSyncStatus(albumId).catch((err) => {
           logger.error(`Background sync check failed for ${albumId}:`, getErrorMessage(err))
         })
@@ -280,7 +287,10 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
       const { vectors_ids, ...rest } = album
       void vectors_ids
-      return { success: true, album: { ...rest, needsSync: album.needsSync } }
+      return {
+        success: true,
+        album: { ...rest, isOrphaned: present ? 0 : 1, needsSync: present ? album.needsSync : 0 }
+      }
     } catch (error: unknown) {
       logger.error('Failed to get album:', getErrorMessage(error))
       return { success: false, error: getErrorMessage(error) }

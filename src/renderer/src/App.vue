@@ -23,6 +23,10 @@ async function reportBattery(): Promise<void> {
 
 onMounted(async () => {
   reportBattery()
+  window.api.auth.onExpired(() => {
+    authStore.expire()
+    router.replace({ path: '/login', query: { expired: '1' } })
+  })
   // Initialize network monitoring
   networkStore.setupListener()
   await networkStore.checkStatus()
