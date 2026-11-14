@@ -148,6 +148,22 @@ describe('mass-delete gate', () => {
     expect(api.deleteImages).toHaveBeenCalledWith('a', [102, 103])
   })
 
+  it('counts only this folder’s photos: online-only rows don’t dilute "most of it"', async () => {
+    seed(20, 5) // 15 of 20 local photos gone
+    const local = [...db.images]
+    for (let i = 0; i < 200; i++)
+      db.images.push({
+        ...local[0],
+        id: 1000 + i,
+        serverId: 5000 + i,
+        originalFilename: `r${i}.webp`,
+        uploadStatus: 'remote'
+      } as never)
+    const r = await executeAlbumSync('a', asDeleted(local.slice(5)))
+    expect(r).toMatchObject({ error: 'CONFIRM_MASS_DELETE', count: 15, total: 20 })
+    expect(api.deleteImages).not.toHaveBeenCalled()
+  })
+
   it('asks when the folder is empty, however few photos', async () => {
     seed(1, 0)
     const r = await executeAlbumSync('a', asDeleted(db.images))

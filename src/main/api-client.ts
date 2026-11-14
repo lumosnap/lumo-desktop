@@ -149,6 +149,21 @@ async function apiFetch<T>(
 
 // Types
 
+export interface ServerAlbum {
+  id: string
+  title: string
+  eventDate: string | null
+  images: Array<{
+    id: number
+    sourceImageHash: string | null
+    originalFilename: string
+    fileSize: number
+    width: number
+    height: number
+    uploadOrder: number
+  }>
+}
+
 /** A confirm result. key/duplicate come from servers with idempotent confirm (worker 0009) */
 export interface ConfirmedImage {
   id: number
@@ -641,9 +656,28 @@ export const albumsApi = {
     return apiFetch(`/albums/${albumId}/sets`)
   },
 
-  /** Only the version is used: people from another computer are not merged yet (Phase 5) */
-  async getPeopleVersion(albumId: string): Promise<number | undefined> {
-    return (await apiFetch<{ version?: number }>(`/albums/${albumId}/people`)).version
+  /** The album's people as the server has them. Image ids are server ids. */
+  async getPeople(albumId: string): Promise<{
+    people: Array<{
+      id: string
+      name: string
+      position: number
+      coverImageId: number | null
+      box: [number, number, number, number] | null
+      imageIds: number[]
+    }>
+    version?: number
+  }> {
+    return apiFetch(`/albums/${albumId}/people`)
+  },
+
+  /** The album and its uploaded photos (re-attach on another computer) */
+  async getAlbumWithImages(albumId: string): Promise<ServerAlbum> {
+    const response = await apiFetch<ApiResponse<ServerAlbum>>(`/albums/${albumId}/images`, {
+      timeoutMs: SLOW_API_TIMEOUT_MS
+    })
+    if (!response.data) throw new Error('The server sent no album')
+    return response.data
   },
 
   /**
@@ -656,8 +690,8 @@ export const albumsApi = {
       id: string
       name: string
       position: number
-      coverImageId: number
-      box: [number, number, number, number]
+      coverImageId: number | null // null: a person from another computer with no cover here
+      box: [number, number, number, number] | null
       imageIds: number[]
     }>,
     baseVersion: number

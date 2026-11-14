@@ -36,6 +36,8 @@ export interface Album {
   server_missing?: number // migration 14: 1 = the server answered "Album not found" (e.g. its database was reset)
   sets_version?: number // migration 15: the server's sets version this computer last saw (sent as baseVersion)
   people_version?: number // migration 15: same for people
+  adopting?: number // migration 16: 1 while re-attaching to an album from another computer; pushes wait
+  people_pushed?: string | null // migration 16: JSON person ids of the last people push (a deleted one stays deleted)
 }
 
 export interface AlbumSet {
@@ -66,6 +68,9 @@ export interface Image {
     | 'failed'
     | 'failed_compression'
     | 'failed_upload'
+    // migration 16: online only. Another computer uploaded it and its file isn't in this folder.
+    // Kept so pushes carry its server id; never uploaded, never "deleted" by a folder sync.
+    | 'remote'
   uploadOrder: number
   createdAt: string
   // Browse metadata (migrations 2-3), snake_case like their columns; null until analyzed
@@ -303,6 +308,24 @@ const migrations: Array<(database: Database.Database) => void> = [
       ALTER TABLE albums ADD COLUMN sets_version INTEGER DEFAULT 0;
       ALTER TABLE albums ADD COLUMN people_version INTEGER DEFAULT 0;
     `)
+  },
+  // 16: re-attach on a second computer. remote_people = people the other computer pushed that
+  // this one has no faces for; they ride along in people pushes unchanged. Image ids are server ids.
+  (database) => {
+    database.exec(`
+      ALTER TABLE albums ADD COLUMN adopting INTEGER DEFAULT 0;
+      ALTER TABLE albums ADD COLUMN people_pushed TEXT;
+      CREATE TABLE remote_people (
+        album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        cover_image_id INTEGER,
+        box TEXT,
+        image_ids TEXT NOT NULL,
+        PRIMARY KEY (album_id, id)
+      );
+    `)
   }
 ]
 
@@ -473,8 +496,8 @@ export function createAlbum(album: Omit<Album, 'createdAt'>): Album {
   const fullAlbum = { ...album, createdAt }
 
   const stmt = db.prepare(`
-    INSERT INTO albums (id, title, eventDate, startTime, endTime, localFolderPath, sourceFolderPath, albumType, totalImages, lastSyncedAt, needsSync, createdAt, event_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO albums (id, title, eventDate, startTime, endTime, localFolderPath, sourceFolderPath, albumType, totalImages, lastSyncedAt, needsSync, createdAt, event_type, adopting)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   stmt.run(
@@ -490,7 +513,8 @@ export function createAlbum(album: Omit<Album, 'createdAt'>): Album {
     fullAlbum.lastSyncedAt,
     fullAlbum.needsSync,
     fullAlbum.createdAt,
-    fullAlbum.event_type ?? null
+    fullAlbum.event_type ?? null,
+    fullAlbum.adopting ?? 0 // re-attach inserts the album held (1) until its rows are matched
   )
 
   return fullAlbum
@@ -553,6 +577,9 @@ export function rekeyAlbumForReupload(oldId: string, newId: string): void {
          people_need_push = COALESCE(people_need_push, 0) + COALESCE(people_enabled, 0)
        WHERE id = ?`
     ).run(newId, oldId)
+    // Online-only photos and people belonged to the lost server album: nothing to upload again
+    d.prepare("DELETE FROM images WHERE albumId = ? AND uploadStatus = 'remote'").run(oldId)
+    d.prepare('DELETE FROM remote_people WHERE album_id = ?').run(oldId)
     d.prepare(
       `UPDATE images SET albumId = ?, serverId = NULL, uploadStatus = 'pending', needs_push = 1,
          tags_need_push = COALESCE(tags_need_push, 0) + 1
@@ -718,7 +745,7 @@ export function getImageStats(albumId: string): {
       uploadStatus,
       COUNT(*) as count
     FROM images 
-    WHERE albumId = ?
+    WHERE albumId = ? AND uploadStatus != 'remote'
     GROUP BY uploadStatus
   `)
 
@@ -939,6 +966,129 @@ export function addPulledSets(
   return added.length
 }
 
+/**
+ * Add 'remote' rows for server photos this computer has no row for (uploaded by another
+ * computer). Their localFilePath names a file that doesn't exist, like a photo not yet
+ * compressed, so previews and ML skip them. Returns how many were added.
+ */
+export function addRemoteImages(
+  albumId: string,
+  localFolderPath: string,
+  serverImages: Array<{
+    id: number
+    sourceImageHash: string | null
+    originalFilename: string
+    fileSize: number
+    width: number
+    height: number
+    uploadOrder: number
+  }>
+): number {
+  const d = conn()
+  const have = new Set(
+    (
+      d
+        .prepare('SELECT serverId FROM images WHERE albumId = ? AND serverId IS NOT NULL')
+        .all(albumId) as {
+        serverId: number
+      }[]
+    ).map((r) => r.serverId)
+  )
+  const missing = serverImages.filter((s) => !have.has(s.id))
+  if (missing.length === 0) return 0
+  createImagesBatch(
+    missing.map((s) => ({
+      albumId,
+      serverId: s.id,
+      originalFilename: s.originalFilename,
+      // A path no photo uses: the server name could match another photo's compressed file
+      localFilePath: join(localFolderPath, '.remote', `${s.id}.webp`),
+      fileSize: s.fileSize,
+      width: s.width,
+      height: s.height,
+      mtime: '',
+      sourceFileHash: s.sourceImageHash,
+      uploadStatus: 'remote' as const,
+      uploadOrder: s.uploadOrder
+    }))
+  )
+  return missing.length
+}
+
+/**
+ * A local file turned out to be an online-only photo (same server id): the local row takes it
+ * over. Set links and covers move from the remote row first, so no set loses the photo.
+ */
+export function mergeRemoteInto(remoteId: number, localId: number, serverId: number): void {
+  const d = conn()
+  d.transaction(() => {
+    d.prepare('UPDATE OR IGNORE set_images SET image_id = ? WHERE image_id = ?').run(
+      localId,
+      remoteId
+    )
+    d.prepare('UPDATE album_sets SET cover_image_id = ? WHERE cover_image_id = ?').run(
+      localId,
+      remoteId
+    )
+    d.prepare("DELETE FROM images WHERE id = ? AND uploadStatus = 'remote'").run(remoteId)
+    d.prepare("UPDATE images SET serverId = ?, uploadStatus = 'complete' WHERE id = ?").run(
+      serverId,
+      localId
+    )
+  })()
+}
+
+export interface RemotePerson {
+  id: string
+  name: string
+  position: number
+  coverImageId: number | null // server id
+  box: [number, number, number, number] | null
+  imageIds: number[] // server ids
+}
+
+/** Replace the people this computer only knows from the server (none of them local ids) */
+export function setRemotePeople(albumId: string, people: RemotePerson[]): void {
+  const d = conn()
+  d.transaction(() => {
+    d.prepare('DELETE FROM remote_people WHERE album_id = ?').run(albumId)
+    const ins = d.prepare(
+      'INSERT INTO remote_people (album_id, id, name, position, cover_image_id, box, image_ids) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )
+    for (const p of people)
+      ins.run(
+        albumId,
+        p.id,
+        p.name,
+        p.position,
+        p.coverImageId,
+        p.box ? JSON.stringify(p.box) : null,
+        JSON.stringify(p.imageIds)
+      )
+  })()
+}
+
+export function getRemotePeople(albumId: string): RemotePerson[] {
+  const rows = conn()
+    .prepare('SELECT * FROM remote_people WHERE album_id = ? ORDER BY position')
+    .all(albumId) as Array<{
+    id: string
+    name: string
+    position: number
+    cover_image_id: number | null
+    box: string | null
+    image_ids: string
+  }>
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    position: r.position,
+    coverImageId: r.cover_image_id,
+    box: r.box ? JSON.parse(r.box) : null,
+    imageIds: JSON.parse(r.image_ids)
+  }))
+}
+
 /** Clears the dirty counter only if no mutation landed since `seen` was read. */
 export function clearSetsNeedPush(albumId: string, seen: number): void {
   conn()
@@ -953,7 +1103,8 @@ export function getImagesMissingEmbedding(albumId: string, model: string): Image
   return conn()
     .prepare(
       `SELECT i.* FROM images i LEFT JOIN image_embeddings e ON e.image_id = i.id AND e.model = ?
-       WHERE i.albumId = ? AND e.image_id IS NULL ORDER BY i.uploadOrder`
+       WHERE i.albumId = ? AND e.image_id IS NULL AND i.uploadStatus != 'remote'
+       ORDER BY i.uploadOrder`
     )
     .all(model, albumId) as Image[]
 }
@@ -1246,7 +1397,8 @@ export function getPeopleProgress(albumId: string): {
     | undefined
   const counts = d
     .prepare(
-      'SELECT COUNT(*) AS total, COALESCE(SUM(faces_scanned), 0) AS processed FROM images WHERE albumId = ?'
+      // Online-only photos have no pixels here, so they are not part of the scan
+      "SELECT COUNT(*) AS total, COALESCE(SUM(faces_scanned), 0) AS processed FROM images WHERE albumId = ? AND uploadStatus != 'remote'"
     )
     .get(albumId) as { total: number; processed: number }
   return { enabled: album?.people_enabled === 1, ...counts }
@@ -1272,7 +1424,7 @@ export function setPeopleEnabled(albumId: string, enabled: boolean): void {
 export function getImagesToScanForFaces(albumId: string): Image[] {
   return conn()
     .prepare(
-      'SELECT * FROM images WHERE albumId = ? AND COALESCE(faces_scanned, 0) = 0 ORDER BY uploadOrder'
+      "SELECT * FROM images WHERE albumId = ? AND COALESCE(faces_scanned, 0) = 0 AND uploadStatus != 'remote' ORDER BY uploadOrder"
     )
     .all(albumId) as Image[]
 }

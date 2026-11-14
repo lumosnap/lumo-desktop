@@ -11,6 +11,8 @@ import {
   clearPeopleNeedPush,
   getAlbum,
   updateAlbum,
+  getRemotePeople,
+  setRemotePeople,
   getAlbumFaces,
   getAlbumImages,
   getAlbumPeople,
@@ -349,8 +351,8 @@ export function peoplePayload(albumId: string): {
     id: string
     name: string
     position: number
-    coverImageId: number
-    box: Box
+    coverImageId: number | null // null only for a remote person (another computer's)
+    box: Box | null
     imageIds: number[]
   }>
   complete: boolean
@@ -387,8 +389,31 @@ export function peoplePayload(albumId: string): {
         }
       ]
     })
-    .map((p, position) => ({ ...p, position }))
-  return { people, complete }
+  // People another computer pushed that this one has no faces for ride along unchanged, so
+  // this push doesn't drop them (or their client links). A local person with the id wins.
+  const localIds = new Set(getAlbumPeople(albumId).map((p) => p.id))
+  const remote = getRemotePeople(albumId).filter((r) => !localIds.has(r.id))
+  return {
+    // ponytail: the server takes 300 people; past that the remote ones are left out (and so
+    // removed online). Raise the server cap if two computers together find more.
+    people: [...people, ...remote].slice(0, 300).map((p, position) => ({ ...p, position })),
+    complete
+  }
+}
+
+/** Take the server's people: the ones this computer doesn't have become remote people */
+async function pullPeople(albumId: string): Promise<void> {
+  const { people, version } = await albumsApi.getPeople(albumId)
+  const localIds = new Set(getAlbumPeople(albumId).map((p) => p.id))
+  // Pushed by us before and gone from our payload now = deleted here: it must not come back
+  const current = new Set(peoplePayload(albumId).people.map((p) => p.id))
+  const pushed: string[] = JSON.parse(getAlbum(albumId)?.people_pushed ?? '[]')
+  const deletedHere = new Set(pushed.filter((id) => !current.has(id)))
+  setRemotePeople(
+    albumId,
+    people.filter((p) => !localIds.has(p.id) && !deletedHere.has(p.id))
+  )
+  if (version != null) updateAlbum(albumId, { people_version: version })
 }
 
 /** PUT the album's people when dirty. Serialized, so two pushes never race. */
@@ -396,20 +421,24 @@ export function pushPeople(albumId: string): Promise<void> {
   const run = async (): Promise<void> => {
     const seen = getAlbum(albumId)?.people_need_push ?? 0
     if (!seen || isServerMissing(albumId)) return // stays dirty for the re-upload
-    const { people, complete } = peoplePayload(albumId)
-    const put = (base: number): Promise<{ version?: number }> =>
-      albumsApi.putPeople(albumId, people, base)
+    if (getAlbum(albumId)?.adopting) return // re-attach is still pulling; it pushes after
+    let { people, complete } = peoplePayload(albumId)
+    const put = (): Promise<{ version?: number }> =>
+      albumsApi.putPeople(albumId, people, getAlbum(albumId)?.people_version ?? 0)
     let res: { version?: number }
     try {
-      res = await put(getAlbum(albumId)?.people_version ?? 0)
+      res = await put()
     } catch (error) {
+      // Changed on another computer: keep its people we don't have, then retry once
       if ((error as { status?: number }).status !== 409) throw error
-      // ponytail: local wins. Until re-attach (Phase 5) no second computer can hold this album,
-      // so a 409 here only means our stored version is old (e.g. an older build pushed). Phase 5
-      // must merge people pulled from the other computer here instead of overwriting them.
-      res = await put((await albumsApi.getPeopleVersion(albumId)) ?? 0)
+      await pullPeople(albumId)
+      ;({ people, complete } = peoplePayload(albumId))
+      res = await put()
     }
-    if (res.version != null) updateAlbum(albumId, { people_version: res.version })
+    updateAlbum(albumId, {
+      ...(res.version != null ? { people_version: res.version } : {}),
+      people_pushed: JSON.stringify(people.map((p) => p.id))
+    })
     scheduleManifest(albumId)
     // A change during the PUT bumps the counter, so this no-ops and that change's push follows
     if (complete) clearPeopleNeedPush(albumId, seen)

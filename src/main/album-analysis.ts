@@ -18,6 +18,7 @@ import {
   listSets,
   clearSetsNeedPush,
   addPulledSets,
+  addRemoteImages,
   getImagesMissingEmbedding,
   getAlbumTags,
   getEmbeddedImageIds,
@@ -137,7 +138,7 @@ async function backfillNow(albumId: string): Promise<void> {
   if (!album) return
 
   // phash is always set once an image is analyzed (capturedAt may legitimately stay null)
-  const todo = getAlbumImages(albumId).filter((img) => !img.phash)
+  const todo = getAlbumImages(albumId).filter((img) => !img.phash && img.uploadStatus !== 'remote')
   if (todo.length === 0) return
   log.info(`Backfilling signals for ${todo.length} images in ${albumId}`)
 
@@ -246,7 +247,13 @@ export function forgetPushedVectors(albumId: string): void {
 
 async function pushVectors(albumId: string): Promise<void> {
   const album = getAlbum(albumId)
-  if (!album || album.server_missing) return
+  if (!album || album.server_missing || album.adopting) return
+  // The vectors file replaces the gallery's whole search index, and this computer has no
+  // embeddings for photos only online: pushing would drop them from search.
+  // ponytail: no search push from a computer with online-only photos, and remote rows are not
+  // pruned when the other computer deletes them, so this block can be permanent on it. Merge
+  // vector files (or prune remote rows on a pull) if both computers must refresh search.
+  if (getAlbumImages(albumId).some((i) => i.uploadStatus === 'remote')) return
   const sig = getAlbumEmbeddingsSignature(albumId, TAG_MODEL)
   if (album.vectors_hash && vectorsSigs.get(albumId) === sig) return
   // Only deletions since the last upload: the gallery drops ids missing from its manifest, so the
@@ -366,19 +373,27 @@ function setsPayload(albumId: string): {
  */
 async function pullSets(albumId: string): Promise<void> {
   const { sets, version } = await albumsApi.getSets(albumId)
-  const local = new Map(
-    getAlbumImages(albumId)
-      .filter((r) => r.serverId != null)
-      .map((r) => [r.serverId!, r.id])
-  )
+  const localMap = (): Map<number, number> =>
+    new Map(
+      getAlbumImages(albumId)
+        .filter((r) => r.serverId != null)
+        .map((r) => [r.serverId!, r.id])
+    )
+  let local = localMap()
+  // Photos the other computer uploaded since: add them as online-only rows so the merged sets
+  // keep them instead of dropping them from the set online
+  if (sets.some((s) => s.imageIds.some((id) => !local.has(id)))) {
+    const album = getAlbum(albumId)
+    const server = await albumsApi.getAlbumWithImages(albumId)
+    if (album && addRemoteImages(albumId, album.localFolderPath, server.images) > 0)
+      local = localMap()
+  }
   const added = addPulledSets(
     albumId,
     sets.map((s) => ({
       ...s,
       coverImageId: s.coverImageId == null ? null : (local.get(s.coverImageId) ?? null),
-      // ponytail: photos this computer doesn't have are dropped, and the retry then removes them
-      // from the set online. Harmless while one computer holds an album; Phase 5 (two computers,
-      // different photos) must carry unmapped server ids through to the push.
+      // Ids still unknown are photos deleted online meanwhile
       imageIds: s.imageIds.map((id) => local.get(id)).filter((id): id is number => id != null)
     }))
   )
@@ -398,6 +413,7 @@ async function pullSets(albumId: string): Promise<void> {
 export async function pushSets(albumId: string): Promise<void> {
   let seen = getAlbum(albumId)?.sets_need_push ?? 0
   if (!seen || isServerMissing(albumId)) return // stays dirty for the re-upload
+  if (getAlbum(albumId)?.adopting) return // re-attach pulls the sets first; it pushes after
   for (let attempt = 0; ; attempt++) {
     const { sets, complete } = setsPayload(albumId)
     try {
@@ -423,6 +439,7 @@ export async function pushSets(albumId: string): Promise<void> {
 /** PATCH rows marked needs_push. Failures stay marked and retry on the next run. */
 async function pushDirty(albumId: string): Promise<void> {
   if (isServerMissing(albumId)) return // rows stay marked for the re-upload
+  if (getAlbum(albumId)?.adopting) return // re-attach is still matching rows
   const dirty = getAlbumImages(albumId).filter(
     (r) => (r.needs_push || r.tags_need_push) && r.serverId != null
   )

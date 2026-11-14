@@ -10,6 +10,7 @@ import {
   updateImage,
   updateAlbum,
   deleteImages,
+  mergeRemoteInto,
   getAlbumsWithUnfinishedUploads,
   Image,
   isServerMissing
@@ -104,6 +105,8 @@ class UploadPipeline {
       log.info(`[Pipeline] Album ${albumId} is not on the server, skipping`)
       return
     }
+    // Re-attach is still matching this folder to the album online; it starts the pipeline after
+    if (getAlbum(albumId)?.adopting) return
 
     if (this.isRunning) {
       log.info(`[Pipeline] Pipeline already running, queuing album ${albumId}`)
@@ -574,7 +577,12 @@ class UploadPipeline {
                   (r) => r.serverId === conf.id && r.id !== uploaded.localId
                 )
               : undefined
-          if (uploaded && twin) {
+          if (uploaded && twin?.uploadStatus === 'remote') {
+            // The online-only photo (another computer's, or one a lost reply left unknown here)
+            // is this file: the file's row takes it over, with its set links
+            mergeRemoteInto(twin.id, uploaded.localId, conf.id)
+            this.failedImages.delete(uploaded.localId)
+          } else if (uploaded && twin) {
             log.info(
               `[Pipeline] ${uploaded.filename} is a copy of server image ${conf.id}, dropping it`
             )

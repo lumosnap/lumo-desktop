@@ -188,7 +188,8 @@ function writeDurable(dir: string, name: string, data: string): void {
 export function buildManifest(albumId: string): Manifest | null {
   const album = getAlbum(albumId)
   if (!album) return null
-  const images = getAlbumImages(albumId)
+  // Online-only photos aren't in this folder: a path for them would match a stranger's file
+  const images = getAlbumImages(albumId).filter((i) => i.uploadStatus !== 'remote')
   const tags = getAlbumTags(albumId)
   const hashOf = new Map(images.map((i) => [i.id, i.sourceFileHash]))
   const hashes = (ids: number[]): string[] =>

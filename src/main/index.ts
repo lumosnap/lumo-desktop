@@ -10,6 +10,7 @@ import {
   DatabaseTooNewError
 } from './database'
 import { resumeUploads } from './pipeline'
+import { resumeAdoptions } from './reattach'
 import { initConfig, getConfig } from './config'
 import { registerIpcHandlers } from './ipc'
 import { protocol } from 'electron'
@@ -446,7 +447,10 @@ app.whenReady().then(() => {
     }
 
     // Resume unfinished uploads: interrupted, pending or failed. Signed out: sign-in does it.
-    if (getToken()) resumeUploads(mainWindow)
+    if (getToken()) {
+      resumeAdoptions(mainWindow) // a re-attach cut short by a quit or crash
+      resumeUploads(mainWindow)
+    }
   } else {
     logger.error('✗ Cannot register IPC handlers: mainWindow is null')
   }

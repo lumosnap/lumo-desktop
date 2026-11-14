@@ -125,8 +125,11 @@ export async function diffFolder(
   album: Album,
   folder: string,
   sourceFiles: FileStats[],
-  dbImages: Image[]
+  allDbImages: Image[]
 ): Promise<SyncChanges> {
+  // Online-only photos (another computer's) were never in this folder: never deleted, renamed
+  // or edited by it, even when a local file has the same name
+  const dbImages = allDbImages.filter((img) => img.uploadStatus !== 'remote')
   // Detect changes
   const changes: SyncChanges = {
     new: [],
@@ -319,6 +322,13 @@ export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
       return { success: false, error: 'Album not found' }
     }
 
+    if (album.adopting) {
+      return {
+        success: true,
+        changes: EMPTY_CHANGES(),
+        summary: { new: 0, modified: 0, deleted: 0, renamed: 0, skipped: 0 }
+      }
+    }
     if (!checkSourceFolder(album)) {
       return {
         success: true,
@@ -373,11 +383,14 @@ export async function executeAlbumSync(
       return { success: false, error: 'Album not found' }
     }
 
+    // Re-attach is still matching this folder's rows; nothing changes until it finishes
+    if (album.adopting) return { success: false, error: 'ADOPTING' }
     // The list may be minutes old (the review dialog): re-check the disk now
     if (!checkSourceFolder(album)) return { success: false, error: 'FOLDER_MISSING' }
     // The app-storage copy can be gone (deleted by hand); new photos are copied into it
     mkdirSync(album.localFolderPath, { recursive: true })
-    const dbImages = getAlbumImages(albumId)
+    // Online-only photos are never this folder's to delete, and don't count toward "most of it"
+    const dbImages = getAlbumImages(albumId).filter((img) => img.uploadStatus !== 'remote')
     const dbById = new Map(dbImages.map((img) => [img.id, img]))
     // Only this album's rows whose file is still gone; serverId from the DB, not the caller.
     // ponytail: a file renamed between review and Sync still reads as deleted (it comes back

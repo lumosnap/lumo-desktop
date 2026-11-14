@@ -6,7 +6,7 @@ import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/syn
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { Booking, ApiFavoriteImage } from '../main/api-client'
-import type { TagConfig, RelinkPreview } from '../main/ipc/albums'
+import type { TagConfig, RelinkPreview, CreateAlbumResult } from '../main/ipc/albums'
 import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
 
 type NotesResult =
@@ -99,8 +99,8 @@ const api = {
       sourceFolderPath: string
       albumType?: 'watch_folder' | 'standalone'
       eventType?: string // an EventType id; default 'wedding'
-    }): Promise<{ success: true; album: Album } | { success: false; error: string }> =>
-      ipcRenderer.invoke('album:create', data),
+      asNewAlbum?: boolean
+    }): Promise<CreateAlbumResult> => ipcRenderer.invoke('album:create', data),
     list: (): Promise<any> => ipcRenderer.invoke('album:list'),
     get: (
       albumId: string

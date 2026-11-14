@@ -12,7 +12,7 @@ import type { AppConfig } from '../main/config'
 import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/sync'
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
-import type { TagConfig, RelinkPreview } from '../main/ipc/albums'
+import type { TagConfig, RelinkPreview, CreateAlbumResult } from '../main/ipc/albums'
 import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
 
 type NotesResult =
@@ -112,7 +112,8 @@ declare global {
           sourceFolderPath: string
           albumType?: 'watch_folder' | 'standalone'
           eventType?: string // an EventType id; default 'wedding'
-        }) => Promise<{ success: true; album: Album } | { success: false; error: string }>
+          asNewAlbum?: boolean
+        }) => Promise<CreateAlbumResult>
         list: () => Promise<any>
         get: (
           albumId: string

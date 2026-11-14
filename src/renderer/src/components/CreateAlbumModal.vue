@@ -15,7 +15,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  created: [album: { id: string; title: string; sourceFolderPath: string }]
+  /** note: what to tell the person instead of "Made …" (re-attached or relinked) */
+  created: [album: { id: string; title: string; sourceFolderPath: string; note?: string }]
 }>()
 
 const title = ref<string>('')
@@ -25,6 +26,10 @@ const error = ref<string | null>(null)
 
 // Source folder path - required
 const sourceFolderPath = ref<string>('')
+
+// The folder already belongs to an album: a copy of one here, or one whose folder went missing
+const found = ref<{ kind: 'COPY' | 'RELINK'; albumId: string; title: string } | null>(null)
+watch(sourceFolderPath, () => (found.value = null))
 
 // Reset form when the modal closes
 watch(
@@ -83,6 +88,7 @@ async function createAlbum(): Promise<void> {
     error.value = 'Give the album a name and choose a folder'
     return
   }
+  if (found.value?.kind === 'RELINK') return useForFoundAlbum()
 
   isCreating.value = true
   error.value = null
@@ -93,16 +99,25 @@ async function createAlbum(): Promise<void> {
       eventDate: null,
       sourceFolderPath: sourceFolderPath.value,
       albumType: 'standalone',
-      eventType: eventType.value
+      eventType: eventType.value,
+      asNewAlbum: found.value?.kind === 'COPY'
     })
 
     if (result.success) {
+      const a = result.adopted
       emit('created', {
         id: result.album.id,
-        title: title.value.trim(),
-        sourceFolderPath: sourceFolderPath.value
+        title: a ? a.title : title.value.trim(),
+        sourceFolderPath: sourceFolderPath.value,
+        note: a
+          ? a.remote
+            ? `“${a.title}” is ready. ${a.remote.toLocaleString('en-IN')} photo${a.remote === 1 ? ' is' : 's are'} only online.`
+            : `“${a.title}” is ready, with its photos from your other computer.`
+          : undefined
       })
       resetForm()
+    } else if ((result.error === 'COPY' || result.error === 'RELINK') && result.albumId) {
+      found.value = { kind: result.error, albumId: result.albumId, title: result.title ?? '' }
     } else {
       error.value = result.error || 'Failed to create album'
     }
@@ -113,7 +128,37 @@ async function createAlbum(): Promise<void> {
   }
 }
 
+// The folder is this computer's album whose folder went missing: point that album at it
+async function useForFoundAlbum(): Promise<void> {
+  const f = found.value
+  if (!f) return
+  isCreating.value = true
+  error.value = null
+  try {
+    const res = await window.api.albums.relink(f.albumId, sourceFolderPath.value)
+    if (!res.success) {
+      error.value =
+        res.error === 'CONFIRM_MISSING'
+          ? `Most of “${f.title}”’s photos aren’t in this folder. Use Choose folder on the album to check it.`
+          : res.error === 'BUSY'
+            ? `“${f.title}” is uploading. Try again when it finishes.`
+            : res.error || 'Could not use this folder'
+      return
+    }
+    emit('created', {
+      id: f.albumId,
+      title: f.title,
+      sourceFolderPath: sourceFolderPath.value,
+      note: `“${f.title}” uses this folder now.`
+    })
+    resetForm()
+  } finally {
+    isCreating.value = false
+  }
+}
+
 function resetForm(): void {
+  found.value = null
   title.value = ''
   eventType.value = 'wedding'
   error.value = null
@@ -195,6 +240,13 @@ function handleClose(): void {
         }}</span>
       </div>
 
+      <p v-if="found?.kind === 'COPY'">
+        This folder looks like a copy of “{{ found.title }}”. Create a separate album for it?
+      </p>
+      <p v-else-if="found?.kind === 'RELINK'">
+        This folder belongs to “{{ found.title }}”, whose folder is missing on this computer. Use it
+        for “{{ found.title }}” instead?
+      </p>
       <p v-if="error" class="err"><span class="dot bad"></span>{{ error }}</p>
     </form>
 
@@ -209,6 +261,8 @@ function handleClose(): void {
       >
         <template v-if="!networkStore.isOnline">Offline</template>
         <template v-else-if="isCreating"><span class="spin"></span>Creating…</template>
+        <template v-else-if="found?.kind === 'COPY'">Create separate album</template>
+        <template v-else-if="found?.kind === 'RELINK'">Use for “{{ found.title }}”</template>
         <template v-else>Create album</template>
       </button>
     </template>

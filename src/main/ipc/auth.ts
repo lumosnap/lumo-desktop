@@ -8,13 +8,16 @@ import { getAuth, clearAuth } from '../auth-storage'
 import { createLogger } from '../logger'
 import { uploadPipeline, resumeUploads } from '../pipeline'
 import { BrowserWindow } from 'electron'
+import { resumeAdoptions } from '../reattach'
 
 const logger = createLogger('IPC:Auth')
 
 // A paused run continues; albums that waited while signed out (e.g. since launch) are queued
 function signedIn(): void {
   uploadPipeline.resumePipeline()
-  resumeUploads(BrowserWindow.getAllWindows()[0] ?? null)
+  const win = BrowserWindow.getAllWindows()[0] ?? null
+  resumeAdoptions(win)
+  resumeUploads(win)
 }
 
 export function registerAuthHandlers(): void {

@@ -150,10 +150,15 @@ async function handleForceRefresh(): Promise<void> {
   }
 }
 
-function handleAlbumCreated(a: { id: string; title: string; sourceFolderPath: string }): void {
+function handleAlbumCreated(a: {
+  id: string
+  title: string
+  sourceFolderPath: string
+  note?: string
+}): void {
   showCreateModal.value = false
   loadAlbums()
-  toast(`Made “${a.title}”.`, {
+  toast(a.note ?? `Made “${a.title}”.`, {
     label: 'Show in Finder',
     run: () => window.api.shell.openFolder(a.sourceFolderPath)
   })

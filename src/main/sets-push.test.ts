@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import Database from 'better-sqlite3'
 
-const api = vi.hoisted(() => ({ putSets: vi.fn(), getSets: vi.fn() }))
+const api = vi.hoisted(() => ({ putSets: vi.fn(), getSets: vi.fn(), getAlbumWithImages: vi.fn() }))
 vi.mock('./api-client', () => ({ albumsApi: api }))
 vi.mock('./ml/embedder', () => ({ embedBatch: vi.fn(), stopEmbedder: vi.fn(), BATCH_SIZE: 8 }))
 vi.mock('./pipeline', () => ({ uploadPipeline: { isBusy: () => false } }))
@@ -68,6 +68,24 @@ describe.skipIf(!loadable)('pushSets version conflict', () => {
     api.getSets.mockResolvedValueOnce({
       sets: [{ id: 'other', name: 'Theirs', position: 1, coverImageId: 500, imageIds: [500, 999] }],
       version: 7
+    })
+
+    // 999 isn't in the album online any more (deleted meanwhile)
+    api.getAlbumWithImages.mockResolvedValueOnce({
+      id: 'a',
+      title: 'a',
+      eventDate: null,
+      images: [
+        {
+          id: 500,
+          sourceImageHash: null,
+          originalFilename: '0.webp',
+          fileSize: 1,
+          width: 1,
+          height: 1,
+          uploadOrder: 0
+        }
+      ]
     })
 
     await pushSets('a')

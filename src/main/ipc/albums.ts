@@ -3,9 +3,11 @@
  */
 
 import { BrowserWindow, ipcMain, shell, dialog } from 'electron'
-import { existsSync, rmSync } from 'fs'
+import { existsSync, realpathSync, rmSync } from 'fs'
 import { join, resolve } from 'path'
-import { getStorageLocation } from '../config'
+import { getConfig, getStorageLocation } from '../config'
+import { adopt, AdoptionGoneError, finishAdoption, matchFolder } from '../reattach'
+import { writeManifest } from '../portable'
 import { createAlbumFolder, scanImagesInFolder } from '../storage'
 import {
   createAlbum,
@@ -37,7 +39,8 @@ import {
   setAlbumNote,
   getImageDone,
   setImageDone,
-  rekeyAlbumForReupload
+  rekeyAlbumForReupload,
+  type Album
 } from '../database'
 import { albumsApi, onAlbumGone } from '../api-client'
 import { uploadPipeline } from '../pipeline'
@@ -89,10 +92,29 @@ export function folderAbsence(folder: string): { unplugged: boolean; volumeName?
 }
 
 // Folder names are case-insensitive on macOS and Windows (by default)
+// realpath: a symlink or macOS firmlink (/System/Volumes/Data/...) names the same folder
+const real = (p: string): string => {
+  try {
+    return realpathSync.native(p)
+  } catch {
+    return resolve(p) // missing (unplugged): compare as written
+  }
+}
 export const samePath = (a: string, b: string): boolean =>
   process.platform === 'linux'
-    ? resolve(a) === resolve(b)
-    : resolve(a).toLowerCase() === resolve(b).toLowerCase()
+    ? real(a) === real(b)
+    : real(a).toLowerCase() === real(b).toLowerCase()
+
+export type CreateAlbumResult =
+  | {
+      success: true
+      album: Album
+      /** Re-attached to an album from another computer */
+      adopted?: { albumId: string; title: string; matched: number; remote: number; total: number }
+    }
+  // RELINK: the folder is this computer's album whose folder went missing; COPY: a copy of an
+  // album that still has its own folder here. Both carry that album.
+  | { success: false; error: string; albumId?: string; title?: string }
 
 export interface RelinkPreview {
   folder: string
@@ -130,6 +152,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         sourceFolderPath: string
         albumType?: 'watch_folder' | 'standalone'
         eventType?: unknown
+        /** The folder is a copy of another album's: make a separate album anyway */
+        asNewAlbum?: boolean
       }
     ) => {
       try {
@@ -144,7 +168,37 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         const owner = getAllAlbums().find((a) =>
           samePath(a.sourceFolderPath, data.sourceFolderPath)
         )
-        if (owner) throw new Error(`That folder is already used by ${owner.title}.`)
+        if (owner?.adopting) {
+          // A re-attach that failed part way (offline): picking the folder again finishes it.
+          // Gone online meanwhile: it was dropped, and this goes on as a new album.
+          try {
+            const r = await finishAdoption(owner.id, mainWindow)
+            return {
+              success: true,
+              album: getAlbum(owner.id)!,
+              adopted: { albumId: owner.id, title: owner.title, ...r }
+            }
+          } catch (error) {
+            if (!(error instanceof AdoptionGoneError)) throw error
+          }
+        } else if (owner) throw new Error(`That folder is already used by ${owner.title}.`)
+
+        // Re-attach (flag): the folder's snapshot may name an album already online
+        if (!data.asNewAlbum) {
+          const match = await matchFolder(data.sourceFolderPath) // offline: throws, never a new album
+          if (match.kind === 'relink' || match.kind === 'copy') {
+            return {
+              success: false,
+              error: match.kind === 'relink' ? 'RELINK' : 'COPY',
+              albumId: match.albumId,
+              title: match.title
+            }
+          }
+          if (match.kind === 'adopt') {
+            const adopted = await adopt(data.sourceFolderPath, match.server, albumType, mainWindow)
+            return { success: true, album: getAlbum(adopted.albumId), adopted }
+          }
+        }
 
         // Create album on server
         const apiAlbum = await albumsApi.create({
@@ -202,6 +256,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
         // Start watching the folder
         watcherService.watch(album.id, data.sourceFolderPath)
+        // A copied folder still names the album it was copied from: it names this one now
+        if (data.asNewAlbum && getConfig().portableSnapshot) writeManifest(album.id, true)
 
         return { success: true, album: { ...album, totalImages: imageFiles.length } }
       } catch (error: unknown) {
@@ -250,38 +306,41 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
       }
 
       // Every album is listed, even when its app-storage copy is gone: the server still has it
-      const albumsWithThumbnails = albums.map((album) => {
-        // Performance: we don't scan folders here - just fetch minimal data from DB
-        const images = getAlbumImages(album.id)
-        // Until a photo is compressed its localFilePath names a file that isn't written yet,
-        // so walk on from a random start to the first one that is on disk
-        const start = Math.floor(Math.random() * images.length)
-        let thumbnail: string | null = null
-        for (let i = 0; i < images.length && !thumbnail; i++) {
-          const path = images[(start + i) % images.length].localFilePath
-          if (existsSync(path)) thumbnail = path
-        }
+      // An album still re-attaching is not shown until its rows are matched (it can't be edited)
+      const albumsWithThumbnails = albums
+        .filter((a) => !a.adopting)
+        .map((album) => {
+          // Performance: we don't scan folders here - just fetch minimal data from DB
+          const images = getAlbumImages(album.id)
+          // Until a photo is compressed its localFilePath names a file that isn't written yet,
+          // so walk on from a random start to the first one that is on disk
+          const start = Math.floor(Math.random() * images.length)
+          let thumbnail: string | null = null
+          for (let i = 0; i < images.length && !thumbnail; i++) {
+            const path = images[(start + i) % images.length].localFilePath
+            if (existsSync(path)) thumbnail = path
+          }
 
-        // Background sync check (not awaited); it notifies the renderer if status changes.
-        // A missing folder is flagged here so "Folder missing" shows straight after launch.
-        const present = checkSourceFolder(album)
-        if (present) {
-          watcherService.checkSyncStatus(album.id).catch((err) => {
-            logger.error(`Background sync check failed for ${album.id}:`, getErrorMessage(err))
-          })
-        }
+          // Background sync check (not awaited); it notifies the renderer if status changes.
+          // A missing folder is flagged here so "Folder missing" shows straight after launch.
+          const present = checkSourceFolder(album)
+          if (present) {
+            watcherService.checkSyncStatus(album.id).catch((err) => {
+              logger.error(`Background sync check failed for ${album.id}:`, getErrorMessage(err))
+            })
+          }
 
-        // vectors_ids is a JSON list of every embedded photo: main-process only
-        const { vectors_ids, ...rest } = album
-        void vectors_ids
-        return {
-          ...rest,
-          isOrphaned: present ? 0 : 1,
-          needsSync: present ? album.needsSync : 0,
-          ...(present ? {} : folderAbsence(album.sourceFolderPath)),
-          thumbnail
-        }
-      })
+          // vectors_ids is a JSON list of every embedded photo: main-process only
+          const { vectors_ids, ...rest } = album
+          void vectors_ids
+          return {
+            ...rest,
+            isOrphaned: present ? 0 : 1,
+            needsSync: present ? album.needsSync : 0,
+            ...(present ? {} : folderAbsence(album.sourceFolderPath)),
+            thumbnail
+          }
+        })
 
       return { success: true, albums: albumsWithThumbnails }
     } catch (error: unknown) {
@@ -355,7 +414,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('album:getImages', async (_event, albumId: string) => {
     logger.debug(`Getting images for album: ${albumId}`)
     try {
-      const images = getAlbumImages(albumId)
+      // Online-only photos have no file on this computer to show
+      const images = getAlbumImages(albumId).filter((img) => img.uploadStatus !== 'remote')
       const tags = getAlbumTags(albumId)
       const people = imagePeople(albumId)
 
@@ -404,6 +464,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('album:deleteImage', async (_event, albumId: string, imageId: number) => {
     try {
+      if (getAlbum(albumId)?.adopting)
+        return { success: false, error: 'This album is still being matched' }
       const images = getAlbumImages(albumId)
       const image = images.find((img) => img.id === imageId)
 
@@ -436,6 +498,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('album:deleteImages', async (_event, albumId: string, imageIds: number[]) => {
     try {
+      if (getAlbum(albumId)?.adopting)
+        return { success: false, error: 'This album is still being matched' }
       const images = getAlbumImages(albumId)
       const imagesToDelete = images.filter((img) => imageIds.includes(img.id))
 

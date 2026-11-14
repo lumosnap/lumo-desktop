@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest'
 import Database from 'better-sqlite3'
 import {
   runMigrations,
+  getAlbumImages,
   DatabaseTooNewError,
   resetInterruptedImages,
+  mergeRemoteInto,
+  addRemoteImages,
   getAlbumsWithUnfinishedUploads,
   updateImage,
   updateAlbum,
@@ -78,7 +81,7 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(15)
+    expect(db.pragma('user_version', { simple: true })).toBe(16)
     expect(cols('albums')).toContain('private_note')
     expect(cols('albums')).toContain('vectors_hash')
     expect(cols('albums')).toContain('vectors_ids')
@@ -602,5 +605,33 @@ describe.skipIf(!loadable)('downgrade guard', () => {
     d.pragma('user_version = 99')
     expect(() => runMigrations(d)).toThrow(DatabaseTooNewError)
     d.close()
+  })
+})
+
+describe.skipIf(!loadable)('online-only photos', () => {
+  it('a local file taking over a remote row keeps its set links', () => {
+    initDatabase(':memory:')
+    album('a')
+    addRemoteImages('a', '/x', [
+      {
+        id: 77,
+        sourceImageHash: 'h',
+        originalFilename: 'r.webp',
+        fileSize: 1,
+        width: 1,
+        height: 1,
+        uploadOrder: 0
+      }
+    ])
+    const remote = getAlbumImages('a')[0]
+    const set = createSet('a', 'S', [remote.id])
+    setSetCover(set, remote.id)
+    const [localId] = mk('a', 1)
+    mergeRemoteInto(remote.id, localId, 77)
+    const rows = getAlbumImages('a')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ id: localId, serverId: 77, uploadStatus: 'complete' })
+    expect(listSets('a')[0]).toMatchObject({ imageIds: [localId], coverImageId: localId })
+    closeDatabase()
   })
 })
