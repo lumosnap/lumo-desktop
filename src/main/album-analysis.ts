@@ -45,6 +45,7 @@ import { encodeVectorsFile, vectorsFileHash } from './vectors-file'
 import { groupImages } from './grouping'
 import { readExifSignals, thumbnailSignals, ImageSignals } from './image-signals'
 import { scanFacesNow } from './people'
+import { scheduleManifest } from './portable'
 import { createLogger, getErrorMessage } from './logger'
 
 const log = createLogger('Analysis')
@@ -405,6 +406,7 @@ export async function pushSets(albumId: string): Promise<void> {
       if (version != null) updateAlbum(albumId, { sets_version: version })
       // A mutation during the PUT bumps the counter, so this no-ops and that one's push follows
       if (complete) clearSetsNeedPush(albumId, seen)
+      scheduleManifest(albumId)
       log.info(
         `Pushed ${sets.length} sets for ${albumId}${complete ? '' : ' (some photos not uploaded yet)'}`
       )

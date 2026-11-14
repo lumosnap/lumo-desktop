@@ -29,6 +29,8 @@ export interface Album {
   needsSync?: number // 0 or 1 (SQLite boolean) - indicates if album needs sync with source folder
   isOrphaned?: number // 0 or 1 (SQLite boolean) - indicates if source folder was deleted
   server_missing?: number // 1 = the server answered "Album not found" (e.g. its database was reset)
+  unplugged?: boolean // folder missing because its whole drive is gone (album:list's guess)
+  volumeName?: string // that drive: the /Volumes name on macOS, "D:" on Windows
   albumType?: 'watch_folder' | 'standalone' // watch_folder = in master folder, standalone = custom path
   // For backward compatibility with frontend
   photoCount?: number

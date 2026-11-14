@@ -5,7 +5,7 @@
  */
 
 import { BrowserWindow, ipcMain } from 'electron'
-import { copyFileSync, existsSync, rmSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
 import { basename, extname, join } from 'path'
 import {
   getAlbum,
@@ -22,7 +22,7 @@ import { forgetPushedVectors, regroupAlbum } from '../album-analysis'
 import { peoplePhotosChanged } from '../people'
 import { createLogger, getErrorMessage } from '../logger'
 
-import { updateMetadataAfterSync, getFolderStats } from '../album-metadata'
+import { scheduleManifest } from '../portable'
 import { notificationService } from '../notifications'
 import { watcherService } from '../watcher'
 import type { Album, Image } from '../database'
@@ -375,6 +375,8 @@ export async function executeAlbumSync(
 
     // The list may be minutes old (the review dialog): re-check the disk now
     if (!checkSourceFolder(album)) return { success: false, error: 'FOLDER_MISSING' }
+    // The app-storage copy can be gone (deleted by hand); new photos are copied into it
+    mkdirSync(album.localFolderPath, { recursive: true })
     const dbImages = getAlbumImages(albumId)
     const dbById = new Map(dbImages.map((img) => [img.id, img]))
     // Only this album's rows whose file is still gone; serverId from the DB, not the caller.
@@ -559,9 +561,8 @@ export async function executeAlbumSync(
     // Clear scan cache
     clearScanCache(album.sourceFolderPath)
 
-    // Update .lumosnap metadata file in source folder
-    const folderStats = getFolderStats(album.sourceFolderPath)
-    updateMetadataAfterSync(album.sourceFolderPath, totalImages, folderStats.totalSize)
+    // Portable snapshot in the folder (flag portableSnapshot)
+    scheduleManifest(albumId)
 
     // Start upload for pending images
     const hasPendingImages =

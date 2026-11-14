@@ -18,7 +18,7 @@ import { albumsApi, uploadToPresignedUrl } from './api-client'
 import { compressionPool } from './compression-pool'
 import { notificationService } from './notifications'
 import { createLogger } from './logger'
-import { updateMetadataAfterSync, getFolderStats } from './album-metadata'
+import { scheduleManifest } from './portable'
 import { networkService } from './network'
 import { AsyncQueue } from './utils/async-queue'
 import { hashFile } from './hash'
@@ -166,11 +166,7 @@ class UploadPipeline {
         const now = new Date().toISOString()
         updateAlbum(albumId, { lastSyncedAt: now, needsSync: 0 })
 
-        // Update .lumosnap metadata file in source folder
-        const totalImages = getAlbumImages(albumId).length
-        const folderStats = getFolderStats(completedAlbum.sourceFolderPath)
-        updateMetadataAfterSync(completedAlbum.sourceFolderPath, totalImages, folderStats.totalSize)
-        log.info(`[Pipeline] Updated album metadata for ${albumId}`)
+        scheduleManifest(albumId) // the snapshot now names the new server ids
       }
 
       if (mainWindow) {

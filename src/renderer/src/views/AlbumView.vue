@@ -551,7 +551,10 @@ onUnmounted(() => {
             <img v-if="album.thumbnail" :src="fileUrl(album.thumbnail)" alt="" loading="lazy" />
             <div v-else class="empty-cover"><ImagePlus /></div>
             <div v-if="album.isOrphaned" class="flag">
-              <span class="tag"><span class="dot bad"></span>Folder missing</span>
+              <span class="tag"
+                ><span class="dot bad"></span
+                >{{ album.unplugged ? 'Drive unplugged' : 'Folder missing' }}</span
+              >
             </div>
             <div v-else-if="album.server_missing" class="flag">
               <span class="tag"><span class="dot bad"></span>Not on LumoSnap</span>
@@ -591,7 +594,13 @@ onUnmounted(() => {
                 }}{{ albumDate(album) ? ` · ${albumDate(album)}` : '' }}
               </div>
               <div v-if="album.isOrphaned" class="hint">
-                Plug in the drive or choose the folder again. Nothing online was changed.
+                {{
+                  album.unplugged
+                    ? `Plug in ${album.volumeName} to sync. Nothing online was changed.`
+                    : album.volumeName
+                      ? 'The folder was moved or renamed. Choose it again; nothing online was changed.'
+                      : 'Plug in the drive or choose the folder again. Nothing online was changed.'
+                }}
               </div>
               <div v-else-if="album.server_missing" class="hint">
                 The client link stopped working. Your photos here are safe.

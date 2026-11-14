@@ -38,11 +38,7 @@ vi.mock('../pipeline', () => ({ uploadPipeline: { startPipeline: vi.fn() } }))
 vi.mock('../album-analysis', () => ({ forgetPushedVectors: vi.fn(), regroupAlbum: vi.fn() }))
 vi.mock('../people', () => ({ peoplePhotosChanged: vi.fn() }))
 vi.mock('../notifications', () => ({ notificationService: { syncComplete: vi.fn() } }))
-vi.mock('../album-metadata', () => ({
-  needsSync: () => true,
-  updateMetadataAfterSync: vi.fn(),
-  getFolderStats: () => ({ totalSize: 0 })
-}))
+vi.mock('../portable', () => ({ scheduleManifest: vi.fn() }))
 
 import { detectAlbumChanges, executeAlbumSync, diffFolder } from './sync'
 import { hashFile } from '../hash'

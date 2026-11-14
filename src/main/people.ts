@@ -29,6 +29,7 @@ import { ensureFaceModels } from './ml/model'
 import { frontalness } from './ml/faces'
 import { uploadPipeline } from './pipeline'
 import { albumsApi } from './api-client'
+import { scheduleManifest } from './portable'
 import { createLogger, getErrorMessage } from './logger'
 
 const log = createLogger('People')
@@ -409,6 +410,7 @@ export function pushPeople(albumId: string): Promise<void> {
       res = await put((await albumsApi.getPeopleVersion(albumId)) ?? 0)
     }
     if (res.version != null) updateAlbum(albumId, { people_version: res.version })
+    scheduleManifest(albumId)
     // A change during the PUT bumps the counter, so this no-ops and that change's push follows
     if (complete) clearPeopleNeedPush(albumId, seen)
     log.info(`Pushed ${people.length} people for ${albumId}${complete ? '' : ' (incomplete)'}`)

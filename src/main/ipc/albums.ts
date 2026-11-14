@@ -76,6 +76,24 @@ export interface TagConfig {
   pack: string[] // default tags of the current event type
 }
 
+/**
+ * Why a source folder is missing: its drive is unplugged (the volume itself is gone), or the
+ * folder moved on a drive that is there. A guess from the path; both block sync alike.
+ */
+export function folderAbsence(folder: string): { unplugged: boolean; volumeName?: string } {
+  const mac = folder.match(/^\/Volumes\/([^/]+)/)
+  if (mac) return { unplugged: !existsSync(`/Volumes/${mac[1]}`), volumeName: mac[1] }
+  const win = folder.match(/^([A-Za-z]):[\\/]/)
+  if (win) return { unplugged: !existsSync(`${win[1]}:\\`), volumeName: `${win[1].toUpperCase()}:` }
+  return { unplugged: false }
+}
+
+// Folder names are case-insensitive on macOS and Windows (by default)
+export const samePath = (a: string, b: string): boolean =>
+  process.platform === 'linux'
+    ? resolve(a) === resolve(b)
+    : resolve(a).toLowerCase() === resolve(b).toLowerCase()
+
 export interface RelinkPreview {
   folder: string
   /** Title of another album that already uses this folder */
@@ -123,6 +141,10 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         }
 
         const albumType = data.albumType || 'watch_folder'
+        const owner = getAllAlbums().find((a) =>
+          samePath(a.sourceFolderPath, data.sourceFolderPath)
+        )
+        if (owner) throw new Error(`That folder is already used by ${owner.title}.`)
 
         // Create album on server
         const apiAlbum = await albumsApi.create({
@@ -227,17 +249,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         return { success: true, albums: [] }
       }
 
-      // Verify each album's folder exists
-      const validAlbums = albums.filter((album) => {
-        const exists = existsSync(album.localFolderPath)
-        if (!exists) {
-          logger.warn(`Album folder does not exist: ${album.localFolderPath}`)
-        }
-        return exists
-      })
-
-      // Get thumbnail and check sync status
-      const albumsWithThumbnails = validAlbums.map((album) => {
+      // Every album is listed, even when its app-storage copy is gone: the server still has it
+      const albumsWithThumbnails = albums.map((album) => {
         // Performance: we don't scan folders here - just fetch minimal data from DB
         const images = getAlbumImages(album.id)
         // Until a photo is compressed its localFilePath names a file that isn't written yet,
@@ -265,6 +278,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           ...rest,
           isOrphaned: present ? 0 : 1,
           needsSync: present ? album.needsSync : 0,
+          ...(present ? {} : folderAbsence(album.sourceFolderPath)),
           thumbnail
         }
       })
@@ -551,11 +565,6 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
   })
 
   // Relink: point an album at its folder again (moved, renamed, new drive letter)
-  // Folder names are case-insensitive on macOS and Windows (by default)
-  const samePath = (a: string, b: string): boolean =>
-    process.platform === 'linux'
-      ? resolve(a) === resolve(b)
-      : resolve(a).toLowerCase() === resolve(b).toLowerCase()
 
   async function relinkPreview(albumId: string, picked: string): Promise<RelinkPreview> {
     const album = getAlbum(albumId)

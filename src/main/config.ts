@@ -7,13 +7,18 @@ export interface AppConfig {
   isFirstLaunch: boolean
   userId: string | null
   minimizeToTray: boolean // Whether to minimize to tray instead of closing
+  // Rollout flags (plan: multi-computer). Turn on in this order, at least one release apart.
+  portableSnapshot: boolean // write <album>/.lumosnap/ (manifest + previews) after syncs and pushes
+  reattach: boolean // a folder with a manifest re-attaches to its album instead of making a new one
 }
 
 const defaultConfig: AppConfig = {
   storageLocation: null,
   isFirstLaunch: true,
   userId: null,
-  minimizeToTray: true // Default to true for background operation
+  minimizeToTray: true, // Default to true for background operation
+  portableSnapshot: false,
+  reattach: false
 }
 
 let config: AppConfig = { ...defaultConfig }
