@@ -10,6 +10,7 @@ import { basename, extname, join } from 'path'
 import {
   clearPeopleNeedPush,
   getAlbum,
+  updateAlbum,
   getAlbumFaces,
   getAlbumImages,
   getAlbumPeople,
@@ -79,7 +80,10 @@ export function rematch(
   // The web also shows "Is this X?" candidates, so a changed queue is a change to push.
   // The first match of a session counts as changed: one push brings older uploads in line.
   const key = (q: typeof review): string =>
-    [...q].flatMap(([p, fs]) => fs.map((f) => `${p}:${f.faceId}`)).sort().join()
+    [...q]
+      .flatMap(([p, fs]) => fs.map((f) => `${p}:${f.faceId}`))
+      .sort()
+      .join()
   const before = reviews.get(albumId)
   const reviewChanged = !before || key(before) !== key(review)
   if (reviewChanged && getAlbum(albumId)?.people_enabled) markPeopleDirty(albumId)
@@ -392,7 +396,19 @@ export function pushPeople(albumId: string): Promise<void> {
     const seen = getAlbum(albumId)?.people_need_push ?? 0
     if (!seen || isServerMissing(albumId)) return // stays dirty for the re-upload
     const { people, complete } = peoplePayload(albumId)
-    await albumsApi.putPeople(albumId, people)
+    const put = (base: number): Promise<{ version?: number }> =>
+      albumsApi.putPeople(albumId, people, base)
+    let res: { version?: number }
+    try {
+      res = await put(getAlbum(albumId)?.people_version ?? 0)
+    } catch (error) {
+      if ((error as { status?: number }).status !== 409) throw error
+      // ponytail: local wins. Until re-attach (Phase 5) no second computer can hold this album,
+      // so a 409 here only means our stored version is old (e.g. an older build pushed). Phase 5
+      // must merge people pulled from the other computer here instead of overwriting them.
+      res = await put((await albumsApi.getPeopleVersion(albumId)) ?? 0)
+    }
+    if (res.version != null) updateAlbum(albumId, { people_version: res.version })
     // A change during the PUT bumps the counter, so this no-ops and that change's push follows
     if (complete) clearPeopleNeedPush(albumId, seen)
     log.info(`Pushed ${people.length} people for ${albumId}${complete ? '' : ' (incomplete)'}`)

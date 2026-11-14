@@ -17,6 +17,7 @@ import {
   updateImagesBatch,
   listSets,
   clearSetsNeedPush,
+  addPulledSets,
   getImagesMissingEmbedding,
   getAlbumTags,
   getEmbeddedImageIds,
@@ -329,13 +330,17 @@ export function scheduleSetsPush(albumId: string): void {
   )
 }
 
-/**
- * PUT all sets when the album's sets are dirty. Images without a serverId are left out and the
- * album stays dirty, so a later push (e.g. after uploads finish) includes them.
- */
-async function pushSets(albumId: string): Promise<void> {
-  const seen = getAlbum(albumId)?.sets_need_push ?? 0
-  if (!seen || isServerMissing(albumId)) return // stays dirty for the re-upload
+/** The album's sets in server ids; complete = false when some photos aren't uploaded yet. */
+function setsPayload(albumId: string): {
+  sets: Array<{
+    id: string
+    name: string
+    position: number
+    coverImageId: number | null
+    imageIds: number[]
+  }>
+  complete: boolean
+} {
   const serverIds = new Map(getAlbumImages(albumId).map((r) => [r.id, r.serverId]))
   let complete = true
   const toServer = (id: number): number | null => {
@@ -350,12 +355,67 @@ async function pushSets(albumId: string): Promise<void> {
     coverImageId: s.coverImageId == null ? null : toServer(s.coverImageId),
     imageIds: s.imageIds.map(toServer).filter((id): id is number => id != null)
   }))
-  await albumsApi.putSets(albumId, sets)
-  // A mutation during the PUT bumps the counter, so this no-ops and that one's push follows
-  if (complete) clearSetsNeedPush(albumId, seen)
-  log.info(
-    `Pushed ${sets.length} sets for ${albumId}${complete ? '' : ' (some photos not uploaded yet)'}`
+  return { sets, complete }
+}
+
+/**
+ * Another computer changed the sets since our version: add the sets it has that we don't (ours
+ * win for the same id), and take its version. // ponytail: no tombstones, so a set deleted here
+ * comes back if the other computer still has it; add a deleted-ids list if people report it.
+ */
+async function pullSets(albumId: string): Promise<void> {
+  const { sets, version } = await albumsApi.getSets(albumId)
+  const local = new Map(
+    getAlbumImages(albumId)
+      .filter((r) => r.serverId != null)
+      .map((r) => [r.serverId!, r.id])
   )
+  const added = addPulledSets(
+    albumId,
+    sets.map((s) => ({
+      ...s,
+      coverImageId: s.coverImageId == null ? null : (local.get(s.coverImageId) ?? null),
+      // ponytail: photos this computer doesn't have are dropped, and the retry then removes them
+      // from the set online. Harmless while one computer holds an album; Phase 5 (two computers,
+      // different photos) must carry unmapped server ids through to the push.
+      imageIds: s.imageIds.map((id) => local.get(id)).filter((id): id is number => id != null)
+    }))
+  )
+  if (version != null) updateAlbum(albumId, { sets_version: version })
+  if (added > 0) {
+    log.info(`Added ${added} sets from another computer to ${albumId}`)
+    for (const win of BrowserWindow.getAllWindows())
+      win.webContents.send('album:setsChanged', { albumId })
+  }
+}
+
+/**
+ * PUT all sets when the album's sets are dirty. Images without a serverId are left out and the
+ * album stays dirty, so a later push (e.g. after uploads finish) includes them. A 409 (changed on
+ * another computer) pulls and merges, then retries once; a second 409 leaves it dirty.
+ */
+export async function pushSets(albumId: string): Promise<void> {
+  let seen = getAlbum(albumId)?.sets_need_push ?? 0
+  if (!seen || isServerMissing(albumId)) return // stays dirty for the re-upload
+  for (let attempt = 0; ; attempt++) {
+    const { sets, complete } = setsPayload(albumId)
+    try {
+      const base = getAlbum(albumId)?.sets_version ?? 0
+      const { version } = await albumsApi.putSets(albumId, sets, base)
+      if (version != null) updateAlbum(albumId, { sets_version: version })
+      // A mutation during the PUT bumps the counter, so this no-ops and that one's push follows
+      if (complete) clearSetsNeedPush(albumId, seen)
+      log.info(
+        `Pushed ${sets.length} sets for ${albumId}${complete ? '' : ' (some photos not uploaded yet)'}`
+      )
+      return
+    } catch (error) {
+      if ((error as { status?: number }).status !== 409 || attempt > 0) throw error
+      await pullSets(albumId)
+      // The pull's own change counts as seen: the retry below sends it
+      seen = getAlbum(albumId)?.sets_need_push ?? 0
+    }
+  }
 }
 
 /** PATCH rows marked needs_push. Failures stay marked and retry on the next run. */

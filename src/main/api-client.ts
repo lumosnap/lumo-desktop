@@ -617,9 +617,33 @@ export const albumsApi = {
       position: number
       coverImageId: number | null
       imageIds: number[]
+    }>,
+    baseVersion: number
+  ): Promise<{ version?: number }> {
+    // 409 (status on the error) = sets changed since baseVersion: pull, merge, retry
+    return apiFetch<{ version?: number }>(`/albums/${albumId}/sets`, {
+      method: 'PUT',
+      body: { sets, baseVersion }
+    })
+  },
+
+  /** The album's sets as the server has them, with their version. Image ids are server ids. */
+  async getSets(albumId: string): Promise<{
+    sets: Array<{
+      id: string
+      name: string
+      position: number
+      coverImageId: number | null
+      imageIds: number[]
     }>
-  ): Promise<void> {
-    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/sets`, { method: 'PUT', body: { sets } })
+    version?: number
+  }> {
+    return apiFetch(`/albums/${albumId}/sets`)
+  },
+
+  /** Only the version is used: people from another computer are not merged yet (Phase 5) */
+  async getPeopleVersion(albumId: string): Promise<number | undefined> {
+    return (await apiFetch<{ version?: number }>(`/albums/${albumId}/people`)).version
   },
 
   /**
@@ -635,11 +659,12 @@ export const albumsApi = {
       coverImageId: number
       box: [number, number, number, number]
       imageIds: number[]
-    }>
-  ): Promise<void> {
-    await apiFetch<ApiResponse<void>>(`/albums/${albumId}/people`, {
+    }>,
+    baseVersion: number
+  ): Promise<{ version?: number }> {
+    return apiFetch<{ version?: number }>(`/albums/${albumId}/people`, {
       method: 'PUT',
-      body: { people }
+      body: { people, baseVersion }
     })
   },
 

@@ -34,6 +34,8 @@ export interface Album {
   vectors_hash?: string | null // migration 11: hash of the LSV1 search file last uploaded; null = none
   vectors_ids?: string | null // migration 12: JSON server ids in that file (deletes-only changes skip the upload)
   server_missing?: number // migration 14: 1 = the server answered "Album not found" (e.g. its database was reset)
+  sets_version?: number // migration 15: the server's sets version this computer last saw (sent as baseVersion)
+  people_version?: number // migration 15: same for people
 }
 
 export interface AlbumSet {
@@ -294,6 +296,13 @@ const migrations: Array<(database: Database.Database) => void> = [
   // 14: albums the server no longer has. Server calls skip them until the photographer uploads again.
   (database) => {
     database.exec('ALTER TABLE albums ADD COLUMN server_missing INTEGER DEFAULT 0')
+  },
+  // 15: server versions of sets and people; a push based on an older one gets 409 (pull, merge, retry)
+  (database) => {
+    database.exec(`
+      ALTER TABLE albums ADD COLUMN sets_version INTEGER DEFAULT 0;
+      ALTER TABLE albums ADD COLUMN people_version INTEGER DEFAULT 0;
+    `)
   }
 ]
 
@@ -530,6 +539,7 @@ export function rekeyAlbumForReupload(oldId: string, newId: string): void {
     d.pragma('defer_foreign_keys = ON') // resets itself at commit
     d.prepare(
       `UPDATE albums SET id = ?, server_missing = 0, lastSyncedAt = NULL, vectors_hash = NULL,
+         sets_version = 0, people_version = 0,
          vectors_ids = NULL, sets_need_push = COALESCE(sets_need_push, 0) + 1,
          people_need_push = COALESCE(people_need_push, 0) + COALESCE(people_enabled, 0)
        WHERE id = ?`
@@ -885,6 +895,39 @@ export function setSetCover(setId: string, imageId: number | null): string {
       .run(imageId, now, setId)
   )
   return albumId
+}
+
+/**
+ * Add sets another computer pushed that this one doesn't have (ids are client-generated UUIDs).
+ * Image ids are local. Sets this computer has keep its version: local wins. Returns how many.
+ */
+export function addPulledSets(
+  albumId: string,
+  sets: Array<{
+    id: string
+    name: string
+    position: number
+    coverImageId: number | null
+    imageIds: number[]
+  }>
+): number {
+  const d = conn()
+  // album_sets.id is unique across albums: an id another local album has is skipped, not a crash
+  const have = new Set(
+    (d.prepare('SELECT id FROM album_sets').all() as { id: string }[]).map((r) => r.id)
+  )
+  const added = sets.filter((s) => !have.has(s.id))
+  if (added.length === 0) return 0
+  mutateSets(albumId, (db, now) => {
+    for (const s of added) {
+      db.prepare(
+        `INSERT INTO album_sets (id, album_id, name, position, cover_image_id, created_at, updated_at)
+         SELECT ?, ?, ?, ?, (SELECT id FROM images WHERE id = ? AND albumId = ?), ?, ?`
+      ).run(s.id, albumId, s.name, s.position, s.coverImageId, albumId, now, now)
+      insertMembers(db, s.id, albumId, s.imageIds)
+    }
+  })
+  return added.length
 }
 
 /** Clears the dirty counter only if no mutation landed since `seen` was read. */
