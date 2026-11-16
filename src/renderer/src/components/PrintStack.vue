@@ -6,6 +6,7 @@ import { fileUrl } from '../utils/fileUrl'
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAlbumStore, type Album } from '../stores/album'
+import { localDay, nf } from '../utils/format'
 
 const STACK_KEY = 'lumo:hidePrintStack'
 const DESK_KEY = 'lumo:desk'
@@ -48,7 +49,6 @@ const saveDesk = (): void => {
   }
 }
 
-const nf = (n: number): string => n.toLocaleString('en-IN')
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 const reduced = (): boolean => matchMedia('(prefers-reduced-motion: reduce)').matches
 // album ids are strings; the mock's per-print jitter needs a small stable number
@@ -69,7 +69,7 @@ const standWords = (cm: number): string =>
           : 'Knee-high, so far.'
 const backDate = (a: Album): string =>
   a.eventDate
-    ? new Date(a.eventDate).toLocaleDateString('en-IN', {
+    ? localDay(a.eventDate).toLocaleDateString('en-IN', {
         weekday: 'short',
         day: 'numeric',
         month: 'short'

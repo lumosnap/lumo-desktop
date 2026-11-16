@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { fileUrl } from '../utils/fileUrl'
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import Modal from '../components/ui/Modal.vue'
@@ -8,6 +8,7 @@ import CreateAlbumModal from '../components/CreateAlbumModal.vue'
 import SyncModal from '../components/SyncModal.vue'
 import ShareLinkModal from '../components/ShareLinkModal.vue'
 import UploadPill from '../components/UploadPill.vue'
+import CloudAlbums from '../components/CloudAlbums.vue'
 import {
   RefreshCw,
   Plus,
@@ -28,6 +29,8 @@ import { useAlbumStore } from '../stores/album'
 import { useProfileStore } from '../stores/profile'
 import { useNetworkStore } from '../stores/network'
 import { toast } from '../composables/useToast'
+import { albumDay, fileManager, nf } from '../utils/format'
+import { relinkError as relinkWords } from '../utils/cloud'
 
 const albumStore = useAlbumStore()
 const profileStore = useProfileStore()
@@ -36,14 +39,8 @@ const router = useRouter()
 
 const albums = computed(() => albumStore.albums)
 const totalPhotos = computed(() => albums.value.reduce((n, a) => n + (a.totalImages || 0), 0))
-const nf = (n: number): string => n.toLocaleString('en-IN')
-
-function albumDate(a: Album): string {
-  const d = new Date(a.eventDate || a.createdAt)
-  if (isNaN(d.getTime())) return ''
-  if (d.toDateString() === new Date().toDateString()) return 'Today'
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
+const albumDate = (a: Album): string => albumDay(a.eventDate, a.createdAt)
+const showIn = `Show in ${fileManager()}`
 
 const showCreateModal = ref(false)
 
@@ -92,6 +89,8 @@ const reuploadError = ref('')
 const relinkAlbum = ref<Album | null>(null)
 const relinkPreview = ref<RelinkPreview | null>(null)
 const relinkError = ref('')
+// The folder can't be this album's (another album has it): the dialog offers another pick
+const relinkRepick = ref(false)
 const isRelinking = ref(false)
 // Most photos aren't in the picked folder: the confirm button says "anyway"
 const relinkMostlyMissing = computed(() => {
@@ -108,7 +107,50 @@ function isUploading(album: Album): boolean {
 function openAlbum(album: Album): void {
   // Don't allow opening albums while they are processing
   if (isUploading(album)) return
-  router.push(`/albums/${album.id}`)
+  if (album.isOrphaned) attachId.value = album.id
+  else router.push(`/albums/${album.id}`)
+}
+
+// The drive as the person knows it: its label ("NO NAME"), else the /Volumes name or "G:"
+// Only a real label is quoted; a bare "D:" or the fallback reads as words
+const driveName = (a: Album): string =>
+  a.volumeLabel ? `“${a.volumeLabel}”` : a.volumeName || 'the drive'
+
+// Attach panel: an unplugged or missing album, opened. It waits for the drive and goes on into
+// the album when the folder is back (album:reattached reloads the list, so does a refresh)
+const attachId = ref<string | null>(null)
+const attachAlbum = computed(() => albums.value.find((a) => a.id === attachId.value))
+watch(attachAlbum, (a) => {
+  if (!attachId.value || a?.isOrphaned) return
+  attachId.value = null
+  if (a) router.push(`/albums/${a.id}`)
+})
+// The visible "Waiting…" line comes in with the dialog, so a screen reader would not say it.
+// This live region is in the dialog from the start and gets its text after the dialog opens
+const attachSaid = ref('')
+let attachSayTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => (attachId.value && attachAlbum.value?.unplugged ? attachId.value : null),
+  (id) => {
+    clearTimeout(attachSayTimer)
+    attachSaid.value = ''
+    // ponytail: a fixed wait for Chromium to see the region; tune if a reader misses it
+    if (id) attachSayTimer = setTimeout(() => (attachSaid.value = 'Waiting for the drive…'), 300)
+  }
+)
+function attachOpenAnyway(): void {
+  const a = attachAlbum.value
+  attachId.value = null
+  if (a) router.push(`/albums/${a.id}`)
+}
+// The panel stays while the picker is up, so a cancelled pick leaves the person where they were
+async function attachChoose(): Promise<void> {
+  const a = attachAlbum.value
+  if (!a) return
+  const folder = await window.api.dialog.openDirectory()
+  if (!folder || attachId.value !== a.id) return
+  attachId.value = null
+  openRelink(a, folder)
 }
 
 function openFolderInExplorer(album: Album): void {
@@ -159,7 +201,7 @@ function handleAlbumCreated(a: {
   showCreateModal.value = false
   loadAlbums()
   toast(a.note ?? `Made “${a.title}”.`, {
-    label: 'Show in Finder',
+    label: showIn,
     run: () => window.api.shell.openFolder(a.sourceFolderPath)
   })
 }
@@ -302,26 +344,33 @@ function closeReupload(): void {
 // Choose folder
 // Each preview request wins only if it is still the latest (Cancel, then reopen, can overlap)
 let relinkReq = 0
-async function openRelink(album: Album): Promise<void> {
+async function openRelink(album: Album, picked?: string): Promise<void> {
   closeMenu()
-  const folder = await window.api.dialog.openDirectory()
+  const folder = picked ?? (await window.api.dialog.openDirectory())
   if (!folder) return
   const req = ++relinkReq
   relinkAlbum.value = album
   relinkPreview.value = null
   relinkError.value = ''
+  relinkRepick.value = false
   isRelinking.value = true
   try {
     const res = await window.api.albums.relinkPreview(album.id, folder)
     if (req !== relinkReq) return
-    if (!res.success || !res.preview) throw new Error(res.error || 'Could not read the folder')
-    relinkPreview.value = res.preview
+    if (res.success && res.preview) relinkPreview.value = res.preview
+    else showRelinkError(res.error)
   } catch (error) {
-    if (req === relinkReq)
-      relinkError.value = error instanceof Error ? error.message : String(error)
+    if (req === relinkReq) showRelinkError(error instanceof Error ? error.message : String(error))
   } finally {
     if (req === relinkReq) isRelinking.value = false
   }
+}
+
+// Every code gets a line; IN_USE with the other album's name shows that name instead.
+// ADOPTING is this album, still being matched with its account album: another folder won't help
+function showRelinkError(code: string | undefined): void {
+  relinkRepick.value = code === 'IN_USE'
+  if (!(code === 'IN_USE' && relinkPreview.value?.usedBy)) relinkError.value = relinkWords(code)
 }
 
 async function handleRelink(): Promise<void> {
@@ -330,6 +379,7 @@ async function handleRelink(): Promise<void> {
   if (!album || !p) return
   isRelinking.value = true
   relinkError.value = ''
+  relinkRepick.value = false
   try {
     // Accept exactly the missing photos the person saw; more missing by now means ask again
     const res = await window.api.albums.relink(
@@ -339,18 +389,12 @@ async function handleRelink(): Promise<void> {
     )
     // The folder changed since the preview: show the fresh counts and ask again
     if (res.preview) relinkPreview.value = res.preview
-    if (!res.success) {
-      if (res.error === 'BUSY')
-        relinkError.value = 'This album is uploading. Choose the folder again when it finishes.'
-      else if (res.error !== 'CONFIRM_MISSING' && res.error !== 'IN_USE')
-        relinkError.value = res.error || 'Could not use this folder'
-      return
-    }
+    if (!res.success) return showRelinkError(res.error)
     relinkAlbum.value = null
     loadAlbums()
     toast(`“${album.title}” uses this folder now.`)
   } catch (error) {
-    relinkError.value = error instanceof Error ? error.message : String(error)
+    showRelinkError(error instanceof Error ? error.message : String(error))
   } finally {
     isRelinking.value = false
   }
@@ -431,6 +475,7 @@ onMounted(() => {
   // On a first visit AppLayout is loading the list already
   if (albumStore.status === 'ready') loadAlbums()
   profileStore.fetchProfile()
+  if (networkStore.isOnline) albumStore.loadCloud()
 
   offIpc = [
     window.api.on('upload:batch-start', onBatchStart),
@@ -445,8 +490,22 @@ onMounted(() => {
   document.addEventListener('scroll', closeMenu, true)
 })
 
+// The skeleton shows while it asks again
+function retryCloud(): void {
+  albumStore.cloud = null
+  albumStore.loadCloud()
+}
+
+// Offline, the account list is not asked for; back online, it is, with the skeleton on an
+// empty library so "No albums yet" doesn't show before the list
+watch(
+  () => networkStore.isOnline,
+  (on) => on && retryCloud()
+)
+
 onUnmounted(() => {
   if (loadDebounceTimer) clearTimeout(loadDebounceTimer)
+  clearTimeout(attachSayTimer)
   offIpc.forEach((off) => off())
   document.removeEventListener('pointerdown', onDocPointer)
   document.removeEventListener('keydown', onDocKey)
@@ -498,7 +557,17 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <div v-if="albumStore.status === 'loading'" class="grid-albums" aria-busy="true">
+      <div
+        v-if="
+          albumStore.status === 'loading' ||
+          (albumStore.status === 'ready' &&
+            !albums.length &&
+            networkStore.isOnline &&
+            albumStore.cloud === null)
+        "
+        class="grid-albums"
+        aria-busy="true"
+      >
         <div v-for="i in 8" :key="i" class="album">
           <div class="cover skel"></div>
           <div style="padding: 16px 8px 8px">
@@ -519,10 +588,22 @@ onUnmounted(() => {
         <button class="btn primary" @click="retryAlbums"><RotateCw />Try again</button>
       </div>
 
+      <CloudAlbums
+        v-else-if="albums.length === 0 && networkStore.isOnline && albumStore.cloudShown.length"
+        alone
+      />
+
       <div v-else-if="albums.length === 0" class="card empty">
         <div class="art" aria-hidden="true"><span v-for="i in 9" :key="i"></span></div>
         <h2>No albums yet</h2>
-        <p>
+        <p v-if="!networkStore.isOnline">
+          You’re offline. Albums already on your account show here when you’re back online.
+        </p>
+        <p v-else-if="albumStore.cloudFailed">
+          LumoSnap couldn’t reach your account, so albums already on it don’t show yet.
+          <button class="link" @click="retryCloud">Try again</button>
+        </p>
+        <p v-else>
           An album is a folder of photos you share with one client. Make one from a folder you
           already have.
         </p>
@@ -598,7 +679,7 @@ onUnmounted(() => {
               <div v-if="album.isOrphaned" class="hint">
                 {{
                   album.unplugged
-                    ? `Plug in ${album.volumeName} to sync. Nothing online was changed.`
+                    ? `Plug in ${driveName(album)} to sync. Nothing online was changed.`
                     : album.volumeName
                       ? 'The folder was moved or renamed. Choose it again; nothing online was changed.'
                       : 'Plug in the drive or choose the folder again. Nothing online was changed.'
@@ -624,6 +705,8 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+
+      <CloudAlbums v-if="albumStore.status === 'ready' && albums.length && networkStore.isOnline" />
     </div>
 
     <Teleport to="body">
@@ -633,7 +716,7 @@ onUnmounted(() => {
           role="menuitem"
           @click="openFolderInExplorer(menuFor)"
         >
-          <FolderOpen />Show in Finder
+          <FolderOpen />{{ showIn }}
         </button>
         <button v-if="menuFor.isOrphaned" role="menuitem" @click="openRelink(menuFor)">
           <FolderInput />Choose folder…
@@ -706,6 +789,39 @@ onUnmounted(() => {
     </Modal>
 
     <Modal
+      :show="!!attachAlbum"
+      :title="
+        attachAlbum?.unplugged
+          ? `Plug in ${driveName(attachAlbum)}`
+          : `Find the folder for “${attachAlbum?.title || ''}”`
+      "
+      :sub="attachAlbum?.unplugged ? attachAlbum.title : undefined"
+      @close="attachId = null"
+    >
+      <template v-if="attachAlbum?.unplugged">
+        <div class="wait" aria-hidden="true">
+          <span class="spin now"></span>Waiting for the drive…
+        </div>
+        <p class="vh" role="status">{{ attachSaid }}</p>
+        <p>
+          The album opens when LumoSnap finds its folder on the drive, even under a new name or
+          drive letter.
+        </p>
+        <p>Photos on a different drive now? Choose the folder they’re in.</p>
+      </template>
+      <p v-else-if="attachAlbum?.volumeName">
+        The folder was moved or renamed. Choose it again; nothing online was changed.
+      </p>
+      <p v-else>Plug in the drive or choose the folder again. Nothing online was changed.</p>
+      <template #footer>
+        <button class="btn ghost" @click="attachOpenAnyway">Open album</button>
+        <button class="btn primary" autofocus @click="attachChoose">
+          <FolderInput />Choose folder…
+        </button>
+      </template>
+    </Modal>
+
+    <Modal
       :show="!!relinkAlbum"
       :title="`Use this folder for “${relinkAlbum?.title || ''}”?`"
       @close="closeRelink"
@@ -716,7 +832,7 @@ onUnmounted(() => {
       <template v-else-if="relinkPreview">
         <p class="mono" style="overflow-wrap: anywhere">{{ relinkPreview.folder }}</p>
         <p v-if="relinkPreview.usedBy">
-          That folder is already used by {{ relinkPreview.usedBy }}.
+          That folder is already used by “{{ relinkPreview.usedBy }}”. Choose a different one.
         </p>
         <template v-else>
           <p>
@@ -737,7 +853,7 @@ onUnmounted(() => {
           Cancel
         </button>
         <button
-          v-if="relinkAlbum && relinkPreview?.usedBy"
+          v-if="relinkAlbum && (relinkPreview?.usedBy || relinkRepick)"
           class="btn primary"
           @click="openRelink(relinkAlbum)"
         >

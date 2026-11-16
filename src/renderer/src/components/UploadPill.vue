@@ -4,6 +4,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { CircleCheck, X, Link } from 'lucide-vue-next'
 import type { Album } from '../stores/album'
 import type { UploadProgress } from '../../../main/pipeline'
+import { nf } from '../utils/format'
 
 // Header pill + popover for the running upload (mock: pillHtml / upPop).
 const props = defineProps<{
@@ -19,7 +20,6 @@ const open = ref(false)
 const pos = ref({ top: 92, right: 24 })
 const pill = ref<HTMLButtonElement>()
 
-const nf = (n: number): string => n.toLocaleString('en-IN')
 const total = computed(() => props.progress?.total || 0)
 const sent = computed(() => props.progress?.complete || 0)
 const uploading = computed(() => props.progress?.uploading || 0)

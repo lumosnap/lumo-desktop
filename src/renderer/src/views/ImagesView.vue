@@ -8,6 +8,7 @@ import NotesSidebar from '../components/NotesSidebar.vue'
 import PeoplePick from '../components/PeoplePick.vue'
 import PeopleReview from '../components/PeopleReview.vue'
 import { toast } from '../composables/useToast'
+import { albumDay, fileManager } from '../utils/format'
 import { useNetworkStore } from '../stores/network'
 import {
   ArrowLeft,
@@ -132,6 +133,7 @@ interface Album {
 
 const nf = (n: number): string => n.toLocaleString()
 const firstName = (s: string): string => s.split(' ')[0]
+const showIn = `Show in ${fileManager()}`
 const initials = (s: string): string =>
   s
     .split(/\s|&/)
@@ -238,7 +240,7 @@ async function copySelectedImages(): Promise<void> {
       const dir = result.destinationDir
       toast(
         `Copied ${nf(result.count || 0)} photos.${missing}`,
-        dir ? { label: 'Show in Finder', run: () => window.api.shell.openFolder(dir) } : undefined
+        dir ? { label: showIn, run: () => window.api.shell.openFolder(dir) } : undefined
       )
       clearSelection()
     } else if (result.error !== 'Operation canceled') {
@@ -1180,12 +1182,7 @@ const barTitle = computed(() => {
 })
 
 const formattedEventDate = computed(() => {
-  if (!album.value?.eventDate) return undefined
-  return new Date(album.value.eventDate).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric'
-  })
+  return albumDay(album.value?.eventDate ?? null) || undefined
 })
 
 // Thumbnail lives in the .thumbnail subfolder the compressor writes; falls back to the original on error
@@ -2462,7 +2459,7 @@ onUnmounted(() => {
             >. They upload on their own.
           </p>
           <button v-if="album?.sourceFolderPath" class="btn ghost" @click="showAlbumFolder">
-            <FolderOpen />Show in Finder
+            <FolderOpen />{{ showIn }}
           </button>
         </div>
 

@@ -31,6 +31,7 @@ export interface Album {
   server_missing?: number // 1 = the server answered "Album not found" (e.g. its database was reset)
   unplugged?: boolean // folder missing because its whole drive is gone (album:list's guess)
   volumeName?: string // that drive: the /Volumes name on macOS, "D:" on Windows
+  volumeLabel?: string | null // the drive's label ("NO NAME"), kept from when it was last seen
   albumType?: 'watch_folder' | 'standalone' // watch_folder = in master folder, standalone = custom path
   // For backward compatibility with frontend
   photoCount?: number
@@ -42,7 +43,9 @@ export interface Album {
 }
 
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import type { AttachCloudResult, CloudAlbum } from '../../../main/ipc/cloud'
+import type { RowCode } from '../utils/cloud'
 
 // Shared so the sidebar (counts, print stack) and the Albums view read one list.
 export const useAlbumStore = defineStore('album', () => {
@@ -61,5 +64,93 @@ export const useAlbumStore = defineStore('album', () => {
     }
   }
 
-  return { albums, status, load }
+  // Account albums not on this computer. null: not asked yet (or asking); [] also when the
+  // server can't be reached: this list is a convenience, never an error on the page
+  const cloud = ref<CloudAlbum[] | null>(null)
+  // The last ask failed (not signed out: that goes to sign-in): an empty library says so
+  const cloudFailed = ref(false)
+  let cloudReq = 0
+  async function loadCloud(): Promise<void> {
+    const req = ++cloudReq
+    const res = await window.api.albums
+      .listCloud()
+      .catch((e) => (console.error(e), { success: false as const, error: 'FAILED' as const }))
+    if (req !== cloudReq) return
+    if (!res.success && res.error !== 'OFFLINE')
+      console.error('Failed to list account albums:', res.error)
+    cloud.value = res.success ? res.albums : []
+    cloudFailed.value = !res.success && res.error !== 'AUTH'
+  }
+  // The one being matched with its folder, with its progress (album:attach-progress), and the
+  // last error per album. Kept here, not in the view, so leaving the page neither hides them
+  // (the album is in neither list while it matches) nor lets a second attach start
+  const attaching = ref<{
+    album: CloudAlbum
+    folder: string
+    done?: number
+    total?: number
+  } | null>(null)
+  const attachErrors = ref<Record<string, RowCode>>({})
+  let attachSeq = 0
+  /** null: the account changed while it matched, so the answer is not this person's */
+  async function attach(album: CloudAlbum, folder: string): Promise<AttachCloudResult | null> {
+    const seq = ++attachSeq
+    attaching.value = { album, folder }
+    delete attachErrors.value[album.id]
+    const off = window.api.on(
+      'album:attach-progress',
+      (_e, p: { albumId: string; done: number; total: number }) => {
+        if (seq === attachSeq && attaching.value?.album.id === p.albumId)
+          attaching.value = { ...attaching.value, done: p.done, total: p.total }
+      }
+    )
+    try {
+      const res = await window.api.albums
+        .attachCloud(album.id, folder)
+        .catch((e) => (console.error(e), { success: false as const, error: 'FAILED' as const }))
+      if (seq !== attachSeq) return null
+      if (res.success || res.error === 'NOT_FOUND') dropCloud(album.id)
+      if (res.success || res.error === 'LOCAL') await load()
+      // The row stays: an attach cut short is offered here again
+      else if (res.error !== 'NOT_FOUND') attachErrors.value[album.id] = res.error
+      return res
+    } finally {
+      off()
+      if (seq === attachSeq) attaching.value = null
+    }
+  }
+  // An album that came here another way (New album from its folder) leaves this list at once
+  const cloudShown = computed(() => {
+    const list = (cloud.value ?? []).filter((c) => !albums.value.some((a) => a.id === c.id))
+    const a = attaching.value?.album
+    const hidden = a && !list.some((c) => c.id === a.id) && !albums.value.some((x) => x.id === a.id)
+    return hidden ? [a, ...list] : list
+  })
+  function dropCloud(id: string): void {
+    cloud.value = cloud.value?.filter((c) => c.id !== id) ?? null
+  }
+  /** Signed out or expired: the next account must not see this one's albums or answers */
+  function resetCloud(): void {
+    cloudReq++
+    attachSeq++
+    cloud.value = null
+    cloudFailed.value = false
+    attaching.value = null
+    attachErrors.value = {}
+  }
+
+  return {
+    albums,
+    status,
+    load,
+    cloud,
+    cloudFailed,
+    cloudShown,
+    attaching,
+    attachErrors,
+    attach,
+    loadCloud,
+    dropCloud,
+    resetCloud
+  }
 })

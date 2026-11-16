@@ -3,6 +3,7 @@ import { fileUrl } from '../utils/fileUrl'
 import { ref, onMounted } from 'vue'
 import { thumbHashToDataURL } from 'thumbhash'
 import { tagLabel } from '../utils/tags'
+import { fileManager } from '../utils/format'
 import {
   Heart,
   Check,
@@ -40,6 +41,7 @@ const emit = defineEmits<{
   notes: [tab: 'client' | 'mine']
   reveal: []
 }>()
+const reveal = `Show original in ${fileManager()}`
 
 // Blurry ThumbHash preview behind the thumbnail while it loads
 const placeholder = ref<string>()
@@ -151,11 +153,7 @@ function onThumbError(e: Event): void {
           image.tags.slice(0, 4).map(tagLabel).join(' · ')
         }}</span>
       </span>
-      <button
-        aria-label="Show original in Finder"
-        title="Show original in Finder"
-        @click.stop="emit('reveal')"
-      >
+      <button :aria-label="reveal" :title="reveal" @click.stop="emit('reveal')">
         <FolderSearch />
       </button>
     </div>

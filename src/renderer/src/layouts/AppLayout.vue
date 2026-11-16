@@ -7,6 +7,7 @@ import { useNetworkStore } from '../stores/network'
 import { useProfileStore } from '../stores/profile'
 import { useAuthStore } from '../stores/auth'
 import { useAlbumStore } from '../stores/album'
+import { nf } from '../utils/format'
 
 const BANNER_DISMISSED_KEY = 'lumosnap:lowStorageBannerDismissed'
 const BANNER_DISMISSED_SPACE_KEY = 'lumosnap:lowStorageBannerDismissedAtSpace'
@@ -20,7 +21,6 @@ const albumStore = useAlbumStore()
 const lowStorage = ref<string | null>(null)
 const upcoming = ref<number | null>(null)
 
-const nf = (n: number): string => n.toLocaleString('en-IN')
 const section = computed(() =>
   route.path.startsWith('/bookings')
     ? 'bookings'

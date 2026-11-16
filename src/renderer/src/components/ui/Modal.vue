@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, nextTick, useId } from 'vue'
 import { X } from 'lucide-vue-next'
 
 // Native <dialog>: Esc, focus trap and top layer come free.
 const props = defineProps<{ show: boolean; title: string; sub?: string; wide?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const el = ref<HTMLDialogElement>()
+// The title names the dialog for screen readers
+const titleId = useId()
 
 async function sync(): Promise<void> {
   const d = el.value
@@ -27,6 +29,7 @@ function onClick(e: MouseEvent): void {
 <template>
   <dialog
     ref="el"
+    :aria-labelledby="titleId"
     :style="wide ? 'width:540px' : ''"
     @click="onClick"
     @cancel.prevent="emit('close')"
@@ -34,7 +37,7 @@ function onClick(e: MouseEvent): void {
     <template v-if="show">
       <div class="dlg-h">
         <div>
-          <h2>{{ title }}</h2>
+          <h2 :id="titleId">{{ title }}</h2>
           <small v-if="sub">{{ sub }}</small>
         </div>
         <button class="icon-btn sm plain" aria-label="Close" @click="emit('close')"><X /></button>

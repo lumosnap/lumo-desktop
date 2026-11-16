@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useNetworkStore } from './stores/network'
+import { useAlbumStore } from './stores/album'
 import AppToast from './components/ui/AppToast.vue'
+import { toast } from './composables/useToast'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const networkStore = useNetworkStore()
+const albumStore = useAlbumStore()
 
 // Main can't read the battery level; report it so ML work runs unplugged until it gets low
 type BatteryManager = EventTarget & { level: number }
@@ -21,12 +24,32 @@ async function reportBattery(): Promise<void> {
   battery.addEventListener('levelchange', send)
 }
 
+// Removed on unmount, so a hot reload doesn't stack a second copy of each listener
+let offIpc: Array<() => void> = []
+onUnmounted(() => offIpc.forEach((off) => off()))
+
 onMounted(async () => {
   reportBattery()
-  window.api.auth.onExpired(() => {
+  const offExpired = window.api.auth.onExpired(() => {
     authStore.expire()
     router.replace({ path: '/login', query: { expired: '1' } })
   })
+  // A drive came back, maybe under a new name or letter, and its album found its folder again.
+  // Said on any screen once signed in; on the sign-in screen the list still reloads, unsaid
+  const offReattached = window.api.on(
+    'album:reattached',
+    (_e, d: { albumId: string; title: string; volumeLabel: string | null }) => {
+      albumStore.load()
+      if (!authStore.isAuthenticated) return
+      toast(
+        d.volumeLabel
+          ? `Found “${d.title}” on “${d.volumeLabel}”.`
+          : `Found the folder for “${d.title}”.`,
+        { label: 'Open', run: () => router.push(`/albums/${d.albumId}`) }
+      )
+    }
+  )
+  offIpc = [offExpired, offReattached]
   // Initialize network monitoring
   networkStore.setupListener()
   await networkStore.checkStatus()
