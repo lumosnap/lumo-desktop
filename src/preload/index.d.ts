@@ -13,6 +13,7 @@ import type { SyncResult, ExecuteSyncResult, SyncChanges } from '../main/ipc/syn
 import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { TagConfig, RelinkPreview, CreateAlbumResult } from '../main/ipc/albums'
+import type { ListCloudResult, AttachCloudResult } from '../main/ipc/cloud'
 import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
 
 type NotesResult =
@@ -162,6 +163,10 @@ declare global {
         ) => Promise<{ success: boolean; progress?: UploadProgress; error?: string }>
         retryFailed: (albumId: string) => Promise<{ success: boolean; error?: string }>
         forceRefresh: () => Promise<{ success: boolean; error?: string }>
+        /** Account albums not on this computer */
+        listCloud: () => Promise<ListCloudResult>
+        /** Attach a folder to one of them (matches by content hash, no manifest needed) */
+        attachCloud: (albumId: string, folder: string) => Promise<AttachCloudResult>
       }
       sets: {
         list: (albumId: string) => Promise<SetsResult>

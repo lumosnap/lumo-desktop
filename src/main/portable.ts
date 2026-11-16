@@ -11,25 +11,34 @@
 import { createHash, randomBytes } from 'crypto'
 import {
   closeSync,
-  copyFileSync,
   existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
-  readdirSync,
+  readSync,
+  realpathSync,
   renameSync,
-  rmSync,
   statSync,
   statfsSync,
   unlinkSync,
   writeSync
 } from 'fs'
+import { copyFile, mkdir, readdir, rename, rm, stat, statfs } from 'fs/promises'
 import { execFile } from 'child_process'
-import { basename, extname, join } from 'path'
+import { basename, extname, join, resolve } from 'path'
 import { app } from 'electron'
 import { getConfig } from './config'
-import { getAlbum, getAlbumImages, getAlbumPeople, getAlbumTags, listSets } from './database'
+import {
+  getAlbum,
+  getAlbumImages,
+  getAlbumPeople,
+  getAlbumTags,
+  getAllAlbums,
+  listSets
+} from './database'
+import type { Album } from './database'
+import { drivesKnown, isNetworkDrive, isRemovableVolume } from './volumes'
 import { createLogger, getErrorMessage } from './logger'
 
 const log = createLogger('Portable')
@@ -37,6 +46,7 @@ const log = createLogger('Portable')
 export const SNAPSHOT_DIR = '.lumosnap'
 export const MANIFEST_SCHEMA = 1
 const MIN_FREE_FOR_PREVIEWS = 2 * 1024 ** 3
+const REMOVABLE_KEEP_FREE = 0.25 // and on a card, never fill past 75%: the camera needs room
 
 export interface Manifest {
   schema: number
@@ -88,18 +98,31 @@ export function ensureDir(folder: string): string {
   const dir = join(folder, SNAPSHOT_DIR)
   const moving = join(folder, LEGACY_MOVING)
   if (existsSync(dir) && statSync(dir).isFile()) renameSync(dir, moving)
-  mkdirSync(dir, { recursive: true })
+  const made = mkdirSync(dir, { recursive: true }) // the path when it created it
   if (existsSync(moving)) renameSync(moving, join(dir, '.lumosnap-legacy.json'))
-  if (process.platform === 'win32') execFile('attrib', ['+h', dir], () => {})
+  // Hide it once, when made; a console window per call would flash on every write
+  if (made && process.platform === 'win32') {
+    execFile('attrib', ['+h', dir], { windowsHide: true }, () => {})
+  }
   return dir
 }
 
 // Sync clients rewrite and conflict-copy files under them; a snapshot there does more harm
 const CLOUD_ROOT =
-  /[/\\](Library[/\\]CloudStorage|Mobile Documents|OneDrive|Dropbox|Google Drive)([/\\]|$)/i
+  /[/\\](OneDrive( - [^/\\]+)?|Dropbox( \([^)]*\))?|My Drive|Google Drive|iCloudDrive|com~apple~CloudDocs|Library[/\\]Mobile Documents|Library[/\\]CloudStorage)([/\\]|$)/i
 
+/**
+ * Under a sync client's folder (manifest only there, no previews). The real path too, for a link
+ * into one. ponytail: macOS "Desktop & Documents in iCloud" keeps ~/Documents at its own path, so
+ * it reads as local; check the com.apple.bird state if previews there cause conflict copies.
+ */
 export function isCloudSynced(folder: string): boolean {
-  return CLOUD_ROOT.test(folder)
+  if (CLOUD_ROOT.test(folder)) return true
+  try {
+    return CLOUD_ROOT.test(realpathSync.native(folder))
+  } catch {
+    return false
+  }
 }
 
 const writable = new Map<string, boolean>()
@@ -111,7 +134,7 @@ const loggedNo = new Set<string>()
  */
 export function probeWritable(folder: string): boolean {
   if (writable.get(folder)) return true
-  let ok = !folder.startsWith('\\\\') // UNC share
+  let ok = !folder.startsWith('\\\\') && !isNetworkDrive(folder) // UNC share, mapped drive, SMB mount
   if (ok) {
     try {
       // statfs type: smbfs / nfs / afpfs on macOS report as network (best effort)
@@ -132,8 +155,9 @@ export function probeWritable(folder: string): boolean {
       loggedNo.add(folder)
     }
   }
-  // Only a yes is kept: a drive still mounting, or another one at the same path later, gets asked again
-  if (ok) writable.set(folder, ok)
+  // Only a yes is kept: a drive still mounting, or another one at the same path later, gets asked
+  // again. Windows: not before the drive types are read (a mapped share reads as local till then)
+  if (ok && (process.platform !== 'win32' || drivesKnown())) writable.set(folder, ok)
   return ok
 }
 
@@ -147,21 +171,46 @@ function parseChecked(file: string): Manifest | null {
     return null // missing, torn or not JSON
   }
 }
-const validFile = (file: string): boolean => parseChecked(file) !== null
 
-/** Read and check a manifest: the current file, else the .bak. null when neither is valid. */
-export function readManifest(folder: string): { manifest: Manifest; readOnly: boolean } | null {
+/**
+ * Read and check a manifest: the current file, else the .bak. null when neither is valid.
+ * `current`: it came from manifest.json itself (so that file is whole).
+ */
+export function readManifest(
+  folder: string
+): { manifest: Manifest; readOnly: boolean; current: boolean } | null {
   const dir = join(folder, SNAPSHOT_DIR)
   for (const name of ['manifest.json', 'manifest.json.bak']) {
     const m = parseChecked(join(dir, name))
     // A newer app wrote it: use what we understand, never overwrite it
-    if (m) return { manifest: m, readOnly: m.schema > MANIFEST_SCHEMA }
+    if (m) {
+      return {
+        manifest: m,
+        readOnly: m.schema > MANIFEST_SCHEMA,
+        current: name === 'manifest.json'
+      }
+    }
   }
   return null
 }
 
-/** Write bytes so a power cut leaves either the old file or the new one, never half of each */
-function writeDurable(dir: string, name: string, data: string): void {
+/** Windows: antivirus or the indexer can hold a file just written; one short retry */
+function renameRetry(from: string, to: string): void {
+  try {
+    renameSync(from, to)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== 'EPERM' && code !== 'EBUSY') throw error
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200)
+    renameSync(from, to)
+  }
+}
+
+/**
+ * Write bytes so a power cut leaves either the old file or the new one, never half of each.
+ * `currentValid`: the file there now checked out (the caller already read it).
+ */
+function writeDurable(dir: string, name: string, data: string, currentValid: boolean): void {
   const target = join(dir, name)
   const tmp = `${target}.tmp`
   const fd = openSync(tmp, 'w')
@@ -173,8 +222,8 @@ function writeDurable(dir: string, name: string, data: string): void {
   }
   // The current file becomes the .bak by rename (never copied over it), and only if it is valid:
   // a torn current must not replace a good .bak. Between the two renames readers find the .bak.
-  if (validFile(target)) renameSync(target, `${target}.bak`)
-  renameSync(tmp, target)
+  if (currentValid) renameRetry(target, `${target}.bak`)
+  renameRetry(tmp, target)
   if (process.platform !== 'win32') {
     const dfd = openSync(dir, 'r')
     try {
@@ -224,26 +273,58 @@ export function buildManifest(albumId: string): Manifest | null {
   }
 }
 
-/** Copy each photo's compressed preview and thumbnail in by hash; drop ones no longer in it */
-function syncPreviews(albumId: string, dir: string): void {
+/**
+ * Copy each photo's compressed preview and thumbnail in by hash; drop ones no longer in it.
+ * One file at a time, yielding between them. Stops before the drive's free space drops below
+ * MIN_FREE_FOR_PREVIEWS, or on a removable card below a quarter of its size (the manifest is
+ * what matters). A file the OS won't let us write (EPERM/EBUSY/EACCES) is skipped; a full or
+ * failing drive (ENOSPC/EIO), or the folder going, stops the run.
+ * ponytail: previews/ is one flat folder; FAT32 caps a folder near 9k long names, so a huge
+ * album on a FAT32 card stops copying there. Shard by hash prefix if that shows up.
+ * ponytail: Windows "Safely remove" fails while a copy holds a file open on the card; the run is
+ * cancelled only on the device event after removal. Cancel on DBT_DEVICEQUERYREMOVE if it bites.
+ */
+async function syncPreviews(albumId: string, dir: string): Promise<void> {
+  const gen = cancelGen
   const prev = join(dir, 'previews')
   const thumbs = join(dir, 'thumbs')
-  mkdirSync(prev, { recursive: true })
-  mkdirSync(thumbs, { recursive: true })
+  await mkdir(prev, { recursive: true })
+  await mkdir(thumbs, { recursive: true })
   const keep = new Set<string>()
-  let room = true
-  try {
-    const s = statfsSync(dir)
-    room = s.bavail * s.bsize > MIN_FREE_FOR_PREVIEWS
-  } catch {
-    // unknown free space: copy
+  const removable = isRemovableVolume(dir)
+  let free = Infinity // unknown free space: copy
+  let floor = MIN_FREE_FOR_PREVIEWS
+  const readFree = async (): Promise<void> => {
+    try {
+      const s = await statfs(dir)
+      free = s.bavail * s.bsize
+      if (removable) floor = Math.max(floor, s.blocks * s.bsize * REMOVABLE_KEEP_FREE)
+    } catch {
+      // statfs not supported here
+    }
   }
+  const size = (p: string): Promise<number | null> =>
+    stat(p).then(
+      (s) => s.size,
+      () => null
+    )
   const album = getAlbum(albumId)
   if (!album) return
+  log.info(`Previews for ${albumId} started`)
+  let copied = 0
+  let skipped = 0
+  let copying = true
+  let stopped = ''
   for (const img of getAlbumImages(albumId)) {
     if (!img.sourceFileHash || img.uploadStatus !== 'complete') continue
     keep.add(img.sourceFileHash)
-    if (!room) continue
+    if (!copying) continue
+    await new Promise((r) => setImmediate(r)) // never hold the main process for a whole album
+    if (gen !== cancelGen) {
+      cancelled.add(albumId)
+      log.info(`Previews for ${albumId} cancelled: ${copied} copied, ${skipped} skipped`)
+      return // the keep list is partial: no clean-up
+    }
     // The pipeline's own output names (pipeline compressImageTask), not localFilePath: a renamed
     // photo's localFilePath can name the raw source copy
     const stem = basename(img.originalFilename, extname(img.originalFilename))
@@ -255,23 +336,186 @@ function syncPreviews(albumId: string, dir: string): void {
       ]
     ]
     for (const [from, to] of pairs) {
-      if (!existsSync(from)) continue
+      const need = await size(from)
+      if (need == null) continue
       // A copy torn by a power cut has the wrong size: copy it again
-      if (existsSync(to) && statSync(to).size === statSync(from).size) continue
+      if ((await size(to)) === need) continue
+      if ((copied + skipped) % 100 === 0) await readFree() // other writers use the drive too
+      if (free - need < floor) {
+        stopped = 'the drive is nearly full'
+        copying = false
+        break
+      }
       try {
-        copyFileSync(from, `${to}.tmp`)
-        renameSync(`${to}.tmp`, to)
+        await copyFile(from, `${to}.tmp`)
+        await rename(`${to}.tmp`, to)
+        free -= need
+        copied++
       } catch (error) {
-        log.warn(`Preview copy failed for ${from}: ${getErrorMessage(error)}`)
-        return // a full or failing drive: stop, the manifest is what matters
+        await rm(`${to}.tmp`, { force: true }).catch(() => {})
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'ENOSPC' || code === 'EIO' || !existsSync(dir)) {
+          log.warn(`Previews for ${albumId} stopped at ${from}: ${getErrorMessage(error)}`)
+          return // a full, failing or pulled drive: stop, the manifest is what matters
+        }
+        skipped++ // locked or refused (antivirus, permissions): the next one may go
+        log.warn(`Preview copy skipped for ${from}: ${getErrorMessage(error)}`)
       }
     }
   }
   for (const d of [prev, thumbs]) {
-    for (const f of readdirSync(d)) {
-      if (!keep.has(basename(f, extname(f)))) rmSync(join(d, f), { force: true })
+    for (const f of await readdir(d)) {
+      if (!keep.has(basename(f, extname(f)))) await rm(join(d, f), { force: true }).catch(() => {})
     }
   }
+  log.info(
+    `Previews for ${albumId} done: ${copied} copied, ${skipped} skipped${stopped && `, stopped: ${stopped}`}`
+  )
+}
+
+let cancelGen = 0
+const cancelled = new Set<string>() // albums whose run cancelPreviews cut short
+/** Stop the running preview run before its next file (a drive came or went). Queued runs still go. */
+export function cancelPreviews(): void {
+  cancelGen++
+}
+/** After the drives settle: a run cut short goes again if its album's folder is still here */
+export function resumePreviews(): void {
+  for (const id of cancelled) {
+    cancelled.delete(id)
+    const album = getAlbum(id)
+    if (album && getConfig().portableSnapshot && sourcePresent(album)) writeManifest(id)
+  }
+}
+
+// ponytail: one preview run app-wide (one disk at a time is gentler on cards and USB hubs);
+// per-drive queues if several drives' albums wait on each other too long
+let previewChain: Promise<void> = Promise.resolve()
+const previewRuns = new Map<string, Promise<void>>() // album id → its queued or running run
+const previewAgain = new Map<string, string>() // album id → snapshot dir, still to do
+/** Queue the album's preview run; asked again before it ends, it runs once more after */
+function kickPreviews(albumId: string, dir: string): void {
+  previewAgain.set(albumId, dir)
+  if (previewRuns.has(albumId)) return
+  const run = async (): Promise<void> => {
+    try {
+      for (let d = previewAgain.get(albumId); d; d = previewAgain.get(albumId)) {
+        previewAgain.delete(albumId)
+        await syncPreviews(albumId, d)
+      }
+    } catch (error) {
+      log.warn(`Previews failed for ${albumId}: ${getErrorMessage(error)}`)
+    } finally {
+      previewRuns.delete(albumId) // same tick as the last check above: no ask is lost
+    }
+  }
+  previewChain = previewChain.then(run) // run never rejects
+  previewRuns.set(albumId, previewChain)
+}
+
+/** Resolves once the album's preview copying (if any) has finished. Tests and callers that wait. */
+export function previewsSettled(albumId: string): Promise<void> {
+  return previewRuns.get(albumId) ?? Promise.resolve()
+}
+
+/**
+ * The album id a folder's manifest names, from its first bytes (writeDurable puts albumId
+ * second). No checksum: a torn file is cut at its tail, and this runs on every folder check.
+ */
+export function manifestAlbumId(folder: string): string | null {
+  let fd: number | undefined
+  try {
+    fd = openSync(join(folder, SNAPSHOT_DIR, 'manifest.json'), 'r')
+    const buf = Buffer.alloc(512)
+    const n = readSync(fd, buf, 0, buf.length, 0)
+    return buf.toString('utf-8', 0, n).match(/"albumId":"([^"]+)"/)?.[1] ?? null
+  } catch {
+    return null
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
+}
+
+// Same as ipc/albums samePath (not imported: albums.ts pulls in most of the app)
+const realOr = (p: string): string => {
+  try {
+    return realpathSync.native(p)
+  } catch {
+    return resolve(p)
+  }
+}
+const samePath = (a: string, b: string): boolean =>
+  process.platform === 'linux'
+    ? realOr(a) === realOr(b)
+    : realOr(a).toLowerCase() === realOr(b).toLowerCase()
+
+/**
+ * The id of another album that this folder belongs to, else null. The folder's manifest names
+ * album X:
+ * - X's own folder is gone: X's card is mounted where this album's was → X's.
+ * - X's folder is elsewhere and there: a copy whose new manifest couldn't be written → shared.
+ * - X stored this same path (two "NO NAME" cards; or one folder made into two albums before
+ *   manifests): this album's own photos decide. Half of a sample of them here → shared, else X's.
+ * - X is not on this computer (another computer's card): X's only when none of this album's
+ *   hashed photos is in the manifest, and it has some; else shared.
+ * - The folder can't be written (read-only card, network share): path only, as before manifests.
+ *   A manifest there may be stale, never rewritten for a copied album.
+ * ponytail: the sample is a heuristic; a card whose names happen to match (IMG_0001.jpg on both)
+ * reads as shared. The per-album sync review and the mass-delete gate still stand behind it.
+ * ponytail: the manifest on a mapped network root is read synchronously here, on every
+ * folder check; a slow share stalls the main process. Read it async if that shows up.
+ */
+export function folderOwner(folder: string, albumId: string): string | null {
+  const named = manifestAlbumId(folder)
+  if (!named || named === albumId) return null
+  // A network share can't be trusted to hold an up-to-date snapshot (another computer writes
+  // there): path only. A write-locked SD card's snapshot is real (written while unlocked): kept.
+  // ponytail: a copy made into a new album on a locked card keeps naming the original, so it
+  // reads missing while the original's drive is away; unlock and sync once to fix it
+  if (folder.startsWith('\\\\') || isNetworkDrive(folder)) return null
+  const other = getAlbum(named)
+  if (!other) {
+    const hashes = getAlbumImages(albumId)
+      .filter((i) => i.uploadStatus !== 'remote' && i.sourceFileHash)
+      .map((i) => i.sourceFileHash!)
+    if (!hashes.length) return null
+    const m = readManifest(folder)?.manifest // rare: the whole file only here
+    if (m?.albumId !== named) return null
+    const theirs = new Set(m.images.map((i) => i.hash))
+    return hashes.some((h) => theirs.has(h)) ? null : named
+  }
+  const own = other.sourceFolderPath
+  if (!own || !existsSync(own)) return named
+  if (!samePath(own, folder)) return null
+  const rows = getAlbumImages(albumId).filter((i) => i.uploadStatus !== 'remote')
+  // No photos of its own to check: the folder is X's (worst case an empty album reads missing)
+  if (!rows.length) return named
+  const n = Math.min(20, rows.length)
+  const sample = Array.from({ length: n }, (_, k) => rows[Math.floor((k * rows.length) / n)])
+  const here = sample.filter((i) => existsSync(join(folder, i.originalFilename))).length
+  return here * 2 >= n ? null : named
+}
+
+/**
+ * Another album that uses this folder: it stored this path, and the folder is not someone else's
+ * (its own card away, another card here: see folderOwner).
+ * ponytail: two cards both labelled "NO NAME" are told apart by manifest only; Windows'
+ * VolumeSerialNumber would tell empty-label cards apart too, if manifests aren't enough.
+ */
+export function folderUser(folder: string, albumId?: string): Album | undefined {
+  return getAllAlbums().find(
+    (a) =>
+      a.id !== albumId &&
+      !!a.sourceFolderPath &&
+      samePath(a.sourceFolderPath, folder) &&
+      folderOwner(folder, a.id) === null
+  )
+}
+
+/** The album's folder is there and no other album's (see folderOwner) */
+export function sourcePresent(album: Pick<Album, 'id' | 'sourceFolderPath'>): boolean {
+  if (!album.sourceFolderPath || !existsSync(album.sourceFolderPath)) return false
+  return folderOwner(album.sourceFolderPath, album.id) === null
 }
 
 /**
@@ -283,6 +527,9 @@ export function writeManifest(albumId: string, force = false): boolean {
   const album = getAlbum(albumId)
   const folder = album?.sourceFolderPath
   if (!album || !folder || !existsSync(folder) || !probeWritable(folder)) return false
+  // Another album's card at this album's path (its own card away): never write over it.
+  // force is an explicit "this folder is this album's now" (create, re-attach)
+  if (!force && !sourcePresent(album)) return false
   try {
     const dir = ensureDir(folder)
     const existing = readManifest(folder)
@@ -293,12 +540,15 @@ export function writeManifest(albumId: string, force = false): boolean {
     if (!force && other && existsSync(other.sourceFolderPath)) return false
     const body = buildManifest(albumId)
     if (!body) return false
+    // ponytail: built, hashed and written synchronously on the main process; ~2 MB and tens of
+    // ms at 10k photos. Move to a worker if albums reach 100k.
     writeDurable(
       dir,
       'manifest.json',
-      JSON.stringify({ ...body, checksum: sha256(JSON.stringify(body)) })
+      JSON.stringify({ ...body, checksum: sha256(JSON.stringify(body)) }),
+      !!existing?.current
     )
-    if (!isCloudSynced(folder)) syncPreviews(albumId, dir)
+    if (!isCloudSynced(folder)) kickPreviews(albumId, dir) // not awaited: the manifest is written
     return true
   } catch (error) {
     log.warn(`Snapshot write failed for ${albumId}: ${getErrorMessage(error)}`)

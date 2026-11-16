@@ -484,6 +484,12 @@ export const albumsApi = {
     return response.data
   },
 
+  /** The signed-in account's albums (the server returns only the newest 50, no paging) */
+  async list(): Promise<ApiAlbum[]> {
+    const response = await apiFetch<ApiResponse<ApiAlbum[]>>('/albums')
+    return response.data || []
+  },
+
   /**
    * Delete an album
    */
@@ -672,9 +678,9 @@ export const albumsApi = {
   },
 
   /** The album and its uploaded photos (re-attach on another computer) */
-  async getAlbumWithImages(albumId: string): Promise<ServerAlbum> {
+  async getAlbumWithImages(albumId: string, timeoutMs = SLOW_API_TIMEOUT_MS): Promise<ServerAlbum> {
     const response = await apiFetch<ApiResponse<ServerAlbum>>(`/albums/${albumId}/images`, {
-      timeoutMs: SLOW_API_TIMEOUT_MS
+      timeoutMs
     })
     if (!response.data) throw new Error('The server sent no album')
     return response.data

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import Database from 'better-sqlite3'
+import { userInfo } from 'os'
 import {
   runMigrations,
   getAlbumImages,
@@ -38,6 +39,7 @@ import {
   getImage,
   updateImagesBatch,
   setPeopleEnabled,
+  volumeOf,
   getPeopleProgress,
   saveImageFaces,
   rematchPeople,
@@ -81,10 +83,11 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(16)
+    expect(db.pragma('user_version', { simple: true })).toBe(17)
     expect(cols('albums')).toContain('private_note')
     expect(cols('albums')).toContain('vectors_hash')
     expect(cols('albums')).toContain('vectors_ids')
+    expect(cols('albums')).toEqual(expect.arrayContaining(['volume_label', 'volume_path']))
     expect(cols('image_notes')).toEqual(['image_id', 'body', 'updated_at'])
     expect(cols('image_done')).toEqual(['image_id', 'done_at'])
     expect(cols('albums')).toEqual(
@@ -633,5 +636,33 @@ describe.skipIf(!loadable)('online-only photos', () => {
     expect(rows[0]).toMatchObject({ id: localId, serverId: 77, uploadStatus: 'complete' })
     expect(listSets('a')[0]).toMatchObject({ imageIds: [localId], coverImageId: localId })
     closeDatabase()
+  })
+})
+
+describe('volumeOf', () => {
+  it('reads the label from /media/<user>/<LABEL> and Debian-style /media/<LABEL>', () => {
+    if (process.platform === 'win32') return
+    const me = userInfo().username
+    expect(volumeOf(`/media/${me}/CARD/Shoots/A`)).toEqual({ label: 'CARD', path: 'Shoots/A' })
+    expect(volumeOf('/run/media/someone/CARD/A')).toEqual({ label: 'CARD', path: 'A' })
+    expect(volumeOf('/media/NO NAME/Shoots/A')).toEqual({ label: 'NO NAME', path: 'Shoots/A' })
+    // Another user's folder of drives, not a drive called "root"
+    expect(volumeOf('/media/root/CARD/A')).toEqual({ label: 'CARD', path: 'A' })
+  })
+
+  it('Windows: a drive letter other than the system one; the system drive and shares are not drives', () => {
+    expect(volumeOf('E:\\Shoots\\A')).toEqual({ label: null, path: 'Shoots/A' })
+    expect(volumeOf('e:/Shoots')).toEqual({ label: null, path: 'Shoots' })
+    expect(volumeOf(`${process.env.SystemDrive ?? 'C:'}\\Users\\me\\Pictures`)).toBeNull()
+    expect(volumeOf('\\\\nas\\photos\\A')).toBeNull()
+  })
+
+  it('macOS: /Volumes/<LABEL>/...; the home folder is not a drive', () => {
+    expect(volumeOf('/Volumes/NO NAME 1/DCIM/100CANON')).toEqual({
+      label: 'NO NAME 1',
+      path: 'DCIM/100CANON'
+    })
+    expect(volumeOf('/Volumes/CARD')).toEqual({ label: 'CARD', path: '' })
+    expect(volumeOf('/Users/me/Pictures/A')).toBeNull()
   })
 })

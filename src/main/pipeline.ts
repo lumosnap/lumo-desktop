@@ -190,6 +190,9 @@ class UploadPipeline {
       this.currentAlbumId = null
       this.compressedQueue = null
       log.info(`[Pipeline] Pipeline isRunning flag reset`)
+      // An album whose drive came back while it uploaded was skipped as BUSY: look again.
+      // Lazy: watcher → ipc/sync → pipeline would be a cycle at load
+      void import('./watcher').then((m) => m.watcherService.uploadEnded())
 
       // Process next queued album
       if (this.queuedAlbums.size > 0) {

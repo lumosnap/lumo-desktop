@@ -7,7 +7,7 @@ import { existsSync, realpathSync, rmSync } from 'fs'
 import { join, resolve } from 'path'
 import { getConfig, getStorageLocation } from '../config'
 import { adopt, AdoptionGoneError, finishAdoption, matchFolder } from '../reattach'
-import { writeManifest } from '../portable'
+import { folderOwner, folderUser, manifestAlbumId, writeManifest } from '../portable'
 import { createAlbumFolder, scanImagesInFolder } from '../storage'
 import {
   createAlbum,
@@ -66,6 +66,7 @@ import { MAX_IMAGE_TAGS, TAG_SLUG } from '../tags/select'
 import { imagePeople, peoplePhotosChanged } from '../people'
 import { watcherService } from '../watcher'
 import { checkSourceFolder, diffFolder } from './sync'
+import { relinkAlbum } from '../drives'
 import { createLogger, getErrorMessage } from '../logger'
 import { handleIpc } from './types'
 
@@ -165,9 +166,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         }
 
         const albumType = data.albumType || 'watch_folder'
-        const owner = getAllAlbums().find((a) =>
-          samePath(a.sourceFolderPath, data.sourceFolderPath)
-        )
+        // Not an album stored here whose own card is away (another card at its path): folderUser
+        const owner = folderUser(data.sourceFolderPath)
         if (owner?.adopting) {
           // A re-attach that failed part way (offline): picking the folder again finishes it.
           // Gone online meanwhile: it was dropped, and this goes on as a new album.
@@ -194,6 +194,16 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
               title: match.title
             }
           }
+          // Created here meanwhile (the server wait; a second click): that album, not a UNIQUE error
+          const local = match.kind === 'adopt' ? getAlbum(match.server.id) : undefined
+          if (local) {
+            return {
+              success: false,
+              error: existsSync(local.sourceFolderPath) ? 'COPY' : 'RELINK',
+              albumId: local.id,
+              title: local.title
+            }
+          }
           if (match.kind === 'adopt') {
             const adopted = await adopt(data.sourceFolderPath, match.server, albumType, mainWindow)
             return { success: true, album: getAlbum(adopted.albumId), adopted }
@@ -205,6 +215,14 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
           title: data.title,
           eventDate: data.eventDate
         })
+
+        // Taken during the server wait (a relink, a re-attach, a second click): no second album
+        const taken = folderUser(data.sourceFolderPath)
+        if (taken) {
+          // The empty album just made online would otherwise sit on the account: best effort
+          albumsApi.delete(apiAlbum.id).catch(() => {})
+          throw new Error(`That folder is already used by ${taken.title}.`)
+        }
 
         // Create local album folder
         const localFolderPath = createAlbumFolder(storageLocation, apiAlbum.id)
@@ -256,8 +274,13 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
         // Start watching the folder
         watcherService.watch(album.id, data.sourceFolderPath)
-        // A copied folder still names the album it was copied from: it names this one now
-        if (data.asNewAlbum && getConfig().portableSnapshot) writeManifest(album.id, true)
+        // The folder names this album from now on: a copy's snapshot, or a stale one from an album
+        // deleted online, would otherwise make it read as another album's once its photos hash
+        // Never over a local album's own card (its drive away; reachable with reattach off)
+        const named = manifestAlbumId(data.sourceFolderPath)
+        const namedAlbum = named && named !== album.id ? getAlbum(named) : undefined
+        const theirs = !!namedAlbum && !existsSync(namedAlbum.sourceFolderPath)
+        if (getConfig().portableSnapshot && !theirs) writeManifest(album.id, true)
 
         return { success: true, album: { ...album, totalImages: imageFiles.length } }
       } catch (error: unknown) {
@@ -338,6 +361,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
             isOrphaned: present ? 0 : 1,
             needsSync: present ? album.needsSync : 0,
             ...(present ? {} : folderAbsence(album.sourceFolderPath)),
+            volumeLabel: album.volume_label ?? null,
             thumbnail
           }
         })
@@ -632,11 +656,12 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
 
   async function relinkPreview(albumId: string, picked: string): Promise<RelinkPreview> {
     const album = getAlbum(albumId)
-    if (!album) throw new Error('Album not found')
+    // Codes, not sentences: the renderer words them
+    if (!album) throw new Error('NOT_FOUND')
+    if (album.adopting) throw new Error('ADOPTING')
     const folder = resolve(picked)
-    const other = getAllAlbums().find(
-      (a) => a.id !== albumId && samePath(a.sourceFolderPath, folder)
-    )
+    const ownerId = folderOwner(folder, albumId)
+    const other = folderUser(folder, albumId) ?? (ownerId ? getAlbum(ownerId) : undefined)
     if (other) return { folder, usedBy: other.title, matched: 0, missing: 0, extra: 0, renamed: 0 }
     const dbImages = getAlbumImages(albumId)
     const changes = await diffFolder(
@@ -679,18 +704,9 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
         if (mostlyMissing && p.missing > (acceptMissing ?? -1)) {
           return { success: false, error: 'CONFIRM_MISSING', preview: p }
         }
-        // Again: an upload may have started while the preview hashed the folder
-        if (uploadPipeline.isActive(albumId)) return { success: false, error: 'BUSY' }
-        watcherService.unwatch(albumId)
-        updateAlbum(albumId, { sourceFolderPath: p.folder, isOrphaned: 0 })
-        const album = getAlbum(albumId)!
-        // Re-watches, then flags changes ("Folder changed") or applies pure renames silently
-        if (checkSourceFolder(album)) await watcherService.checkSyncStatus(albumId)
-        // Uploads that waited while the folder was missing (exits at once if there are none)
-        uploadPipeline.startPipeline(albumId, mainWindow).catch((err) => {
-          logger.error(`Pipeline after relink failed for ${albumId}:`, getErrorMessage(err))
-        })
-        logger.info(`Relinked ${albumId} to ${p.folder}`)
+        // Checked again in there: an upload may have started while the preview hashed the folder
+        const error = await relinkAlbum(albumId, p.folder, mainWindow)
+        if (error) return { success: false, error, preview: p }
         return { success: true, preview: p }
       } catch (error: unknown) {
         logger.error('Relink failed:', getErrorMessage(error))

@@ -12,7 +12,7 @@ export interface FileStats {
   mtime: string
 }
 
-const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp']
+export const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp']
 
 export async function getFreeSpace(path: string): Promise<number> {
   try {

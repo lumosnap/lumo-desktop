@@ -22,7 +22,7 @@ import { forgetPushedVectors, regroupAlbum } from '../album-analysis'
 import { peoplePhotosChanged } from '../people'
 import { createLogger, getErrorMessage } from '../logger'
 
-import { scheduleManifest } from '../portable'
+import { scheduleManifest, sourcePresent } from '../portable'
 import { notificationService } from '../notifications'
 import { watcherService } from '../watcher'
 import type { Album, Image } from '../database'
@@ -94,10 +94,11 @@ const EMPTY_CHANGES = (): SyncChanges => ({
 
 /**
  * Whether the album's source folder is there, keeping isOrphaned and the watcher in step.
- * A missing folder must never read as "every photo was deleted".
+ * A missing folder must never read as "every photo was deleted". Nor must another album's folder
+ * at the same path (its manifest names that album): it counts as missing.
  */
 export function checkSourceFolder(album: Album): boolean {
-  const present = !!album.sourceFolderPath && existsSync(album.sourceFolderPath)
+  const present = sourcePresent(album)
   if (!present && !album.isOrphaned) {
     logger.warn(`Source folder missing for ${album.id}: ${album.sourceFolderPath}`)
     updateAlbum(album.id, { isOrphaned: 1, needsSync: 0 })

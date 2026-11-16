@@ -10,6 +10,7 @@ export interface AppConfig {
   // Rollout flags (plan: multi-computer). Turn on in this order, at least one release apart.
   portableSnapshot: boolean // write <album>/.lumosnap/ (manifest + previews) after syncs and pushes
   reattach: boolean // a folder with a manifest re-attaches to its album instead of making a new one
+  flagsOn?: boolean // the two flags above were turned on by default (config files from before keep false)
 }
 
 const defaultConfig: AppConfig = {
@@ -17,8 +18,9 @@ const defaultConfig: AppConfig = {
   isFirstLaunch: true,
   userId: null,
   minimizeToTray: true, // Default to true for background operation
-  portableSnapshot: false,
-  reattach: false
+  portableSnapshot: true,
+  reattach: true,
+  flagsOn: true
 }
 
 let config: AppConfig = { ...defaultConfig }
@@ -33,19 +35,33 @@ export function initConfig(): void {
     mkdirSync(userDataPath, { recursive: true })
   }
 
-  // Load config if exists, otherwise create with defaults
+  // Load config if exists, otherwise create with defaults. Saving here only logs: a locked or
+  // read-only config.json (antivirus, a restored backup) must not stop the app starting
+  const trySave = (): void => {
+    try {
+      saveConfig()
+    } catch {
+      // logged in saveConfig; the next change tries again
+    }
+  }
+  let save = true
   if (existsSync(configPath)) {
     try {
       const data = readFileSync(configPath, 'utf-8')
-      config = { ...defaultConfig, ...JSON.parse(data) }
+      const saved = JSON.parse(data)
+      // Earlier builds saved both flags at their old default (false): turn them on once
+      save = !saved.flagsOn
+      if (save) {
+        delete saved.portableSnapshot
+        delete saved.reattach
+      }
+      config = { ...defaultConfig, ...saved, flagsOn: true }
     } catch (error) {
       console.error('Failed to load config, using defaults:', error)
       config = { ...defaultConfig }
-      saveConfig()
     }
-  } else {
-    saveConfig()
   }
+  if (save) trySave()
 
   // Auto-configure default storage location if not set
   if (!config.storageLocation) {
@@ -59,7 +75,7 @@ export function initConfig(): void {
 
     config.storageLocation = defaultStoragePath
     config.isFirstLaunch = false
-    saveConfig()
+    trySave()
     console.log('[Config] Auto-configured default storage location:', defaultStoragePath)
   }
 }

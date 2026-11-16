@@ -5,7 +5,8 @@
  * crash resumes from the start of matching, which is idempotent).
  */
 import { BrowserWindow } from 'electron'
-import { copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, rmSync } from 'fs'
+import { copyFile } from 'fs/promises'
 import { basename, extname, join } from 'path'
 import { albumsApi, type ServerAlbum } from './api-client'
 import { getConfig, getStorageLocation } from './config'
@@ -71,7 +72,13 @@ export async function matchFolder(folder: string): Promise<FolderMatch> {
   }
 }
 
-const stem = (name: string): string => basename(name, extname(name)).normalize('NFC')
+/** The pipeline's own output name (compressImageTask): raw, as the disk spells it */
+const rawStem = (name: string): string => basename(name, extname(name))
+/** For matching only: macOS may hand back NFD where Windows has NFC, and both ignore case */
+const stem = (name: string): string => {
+  const k = rawStem(name).normalize('NFC')
+  return process.platform === 'linux' ? k : k.toLowerCase()
+}
 
 /**
  * Match the folder's files to the album online and write the local rows. Order: source hash,
@@ -81,12 +88,16 @@ const stem = (name: string): string => basename(name, extname(name)).normalize('
  */
 async function matchImages(
   albumId: string,
-  server: ServerAlbum
+  server: ServerAlbum,
+  mainWindow: BrowserWindow | null
 ): Promise<{ matched: number; remote: number }> {
   const album = getAlbum(albumId)!
   const folder = album.sourceFolderPath
+  // A manifest naming another album (a stale or foreign one): its paths and previews say
+  // nothing about this album's photos, so match by hash only
   const manifest = readManifest(folder)?.manifest
-  const byPath = new Map((manifest?.images ?? []).map((i) => [i.path, i.serverId]))
+  const ours = manifest?.albumId === albumId
+  const byPath = new Map((ours ? manifest.images : []).map((i) => [i.path, i.serverId]))
   const byHash = new Map(
     server.images.filter((s) => s.sourceImageHash).map((s) => [s.sourceImageHash!, s])
   )
@@ -112,14 +123,22 @@ async function matchImages(
   // Hash every file first, then match in passes so a stronger match is never taken by a weaker
   // one of an earlier file: source hash, then the manifest's id for the path, then the name
   const hashes: Array<string | null> = []
+  const progress = (done: number): void => {
+    if (mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send('album:attach-progress', { albumId, done, total: files.length })
+  }
   for (const [index, file] of files.entries()) {
-    if (index % 10 === 0) await new Promise((r) => setImmediate(r)) // keep the UI responsive
+    if (index % 10 === 0) {
+      progress(index)
+      await new Promise((r) => setImmediate(r)) // keep the main process responsive
+    }
     try {
       hashes.push(await hashFile(join(folder, file.filename)))
     } catch {
       hashes.push(null) // unreadable: a new photo that fails in the pipeline like any other
     }
   }
+  progress(files.length)
   const hits: Array<ServerAlbum['images'][number] | undefined> = files.map(() => undefined)
   const claim = (i: number, s: ServerAlbum['images'][number] | undefined): void => {
     if (!hits[i] && s && !used.has(s.id)) {
@@ -132,12 +151,20 @@ async function matchImages(
     const id = byPath.get(portablePath(f.filename))
     claim(i, id != null ? byId.get(id) : undefined)
   })
-  // By name only when one local file has that name (IMG_1.jpg + IMG_1.png: neither)
+  // By name only when one local file has that name (IMG_1.jpg + IMG_1.png: neither), and only
+  // when the folder's snapshot has this file's preview: that file was compressed and uploaded
+  // from here. ponytail: a name match without that preview stays new, so the same photo may be
+  // uploaded a second time instead of overwriting its old upload; the user can delete one.
+  const hasPreview = (h: string | null): boolean =>
+    !!h && existsSync(join(previews, `${h}.webp`)) && existsSync(join(thumbs, `${h}.webp`))
   const stemCount = new Map<string, number>()
   for (const f of files) stemCount.set(stem(f.filename), (stemCount.get(stem(f.filename)) ?? 0) + 1)
   files.forEach((f, i) => {
-    if (stemCount.get(stem(f.filename)) === 1) claim(i, hashless.get(stem(f.filename)))
+    if (ours && stemCount.get(stem(f.filename)) === 1 && hasPreview(hashes[i]))
+      claim(i, hashless.get(stem(f.filename)))
   })
+  // New photos go after the server's last one (its orders can have gaps, or exceed its count)
+  const nextOrder = server.images.reduce((m, s) => Math.max(m, s.uploadOrder), -1) + 1
 
   for (const [index, file] of files.entries()) {
     const hash = hashes[index]
@@ -151,7 +178,7 @@ async function matchImages(
       height: hit?.height ?? 0,
       mtime: file.mtime,
       sourceFileHash: hash,
-      uploadOrder: hit?.uploadOrder ?? server.images.length + index
+      uploadOrder: hit?.uploadOrder ?? nextOrder + index
     }
     if (!hit) {
       rows.push({
@@ -164,13 +191,13 @@ async function matchImages(
     }
     matched++
     // The compressed copy and thumbnail, from the folder's previews (the pipeline's own names)
-    const out = join(album.localFolderPath, `${stem(file.filename)}.webp`)
-    const thumb = join(album.localFolderPath, '.thumbnail', `${stem(file.filename)}.webp`)
+    const out = join(album.localFolderPath, `${rawStem(file.filename)}.webp`)
+    const thumb = join(album.localFolderPath, '.thumbnail', `${rawStem(file.filename)}.webp`)
     const p = hash ? join(previews, `${hash}.webp`) : ''
     const t = hash ? join(thumbs, `${hash}.webp`) : ''
     if (hash && existsSync(p) && existsSync(t)) {
-      copyFileSync(p, out)
-      copyFileSync(t, thumb)
+      await copyFile(p, out)
+      await copyFile(t, thumb)
       rows.push({ ...base, serverId: hit.id, localFilePath: out, uploadStatus: 'complete' })
     } else {
       // ponytail: no preview in the folder, so the pipeline compresses it and uploads it again
@@ -202,6 +229,7 @@ async function matchImages(
 }
 
 const inFlight = new Map<string, Promise<{ matched: number; remote: number; total: number }>>()
+export const adoptionRunning = (albumId: string): boolean => inFlight.has(albumId)
 
 /** Steps 5 to 7, once at a time per album (startup resume and sign-in can both ask) */
 export function finishAdoption(
@@ -221,7 +249,15 @@ async function runAdoption(
   mainWindow: BrowserWindow | null
 ): Promise<{ matched: number; remote: number; total: number }> {
   let server: ServerAlbum
+  let pulledSets: Awaited<ReturnType<typeof albumsApi.getSets>>
+  let pulledPeople: Awaited<ReturnType<typeof albumsApi.getPeople>>
   try {
+    // Sets and people before the photos: every member they name is then in the photo list, and
+    // a change after this read bumps their version, so our first push gets a 409 and re-pulls
+    ;[pulledSets, pulledPeople] = await Promise.all([
+      albumsApi.getSets(albumId),
+      albumsApi.getPeople(albumId)
+    ])
     server = await albumsApi.getAlbumWithImages(albumId)
   } catch (error) {
     const status = (error as { status?: number }).status
@@ -234,7 +270,7 @@ async function runAdoption(
     log.info(`Adoption of ${albumId} abandoned: the album is not online (${status})`)
     throw new AdoptionGoneError()
   }
-  const { matched, remote } = await matchImages(albumId, server)
+  const { matched, remote } = await matchImages(albumId, server, mainWindow)
   const serverToLocal = new Map(
     getAlbumImages(albumId)
       .filter((i) => i.serverId != null)
@@ -242,7 +278,7 @@ async function runAdoption(
   )
   const toLocal = (ids: number[]): number[] =>
     ids.map((id) => serverToLocal.get(id)).filter((id): id is number => id != null)
-  const { sets, version: setsVersion } = await albumsApi.getSets(albumId)
+  const { sets, version: setsVersion } = pulledSets
   addPulledSets(
     albumId,
     sets.map((s) => ({
@@ -251,7 +287,7 @@ async function runAdoption(
       imageIds: toLocal(s.imageIds)
     }))
   )
-  const { people, version: peopleVersion } = await albumsApi.getPeople(albumId)
+  const { people, version: peopleVersion } = pulledPeople
   setRemotePeople(albumId, people) // no faces here yet: they ride along in pushes unchanged
   updateAlbum(albumId, {
     adopting: 0,

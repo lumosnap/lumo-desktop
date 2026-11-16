@@ -19,7 +19,9 @@ const db = vi.hoisted(() => ({
 }))
 
 vi.mock('../database', () => ({
-  getAlbum: () => db.album,
+  // 'other': an album whose own folder is gone (its card is the one mounted at this path now)
+  getAlbum: (id: string) =>
+    id === 'other' ? { id, sourceFolderPath: join(tmpdir(), 'lumo-gone-folder') } : db.album,
   getAlbumImages: () => db.images,
   getAllAlbums: () => (db.album ? [db.album] : []),
   updateAlbum: (_id: string, u: Record<string, unknown>) => Object.assign(db.album!, u),
@@ -38,7 +40,11 @@ vi.mock('../pipeline', () => ({ uploadPipeline: { startPipeline: vi.fn() } }))
 vi.mock('../album-analysis', () => ({ forgetPushedVectors: vi.fn(), regroupAlbum: vi.fn() }))
 vi.mock('../people', () => ({ peoplePhotosChanged: vi.fn() }))
 vi.mock('../notifications', () => ({ notificationService: { syncComplete: vi.fn() } }))
-vi.mock('../portable', () => ({ scheduleManifest: vi.fn() }))
+vi.mock('../volumes', () => ({ isNetworkDrive: () => false, isRemovableVolume: () => false }))
+vi.mock('../portable', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../portable')>()),
+  scheduleManifest: vi.fn()
+}))
 
 import { detectAlbumChanges, executeAlbumSync, diffFolder } from './sync'
 import { hashFile } from '../hash'
@@ -97,6 +103,16 @@ describe('missing source folder', () => {
     expect(r.changes!.deleted).toHaveLength(0)
     expect(db.album!.isOrphaned).toBe(1)
     expect(watcher.unwatch).toHaveBeenCalledWith('a')
+  })
+
+  it("another album's folder at the same path (its manifest names it) counts as missing", async () => {
+    seed(10, 0) // this album's photos aren't in it
+    mkdirSync(join(src(), '.lumosnap'))
+    writeFileSync(join(src(), '.lumosnap', 'manifest.json'), '{"schema":1,"albumId":"other","imag')
+    const r = await detectAlbumChanges('a') // album 'other' exists, its own folder doesn't
+    expect(r.orphaned).toBe(true)
+    expect(r.changes!.deleted).toHaveLength(0)
+    expect(db.album!.isOrphaned).toBe(1)
   })
 
   it('clears the flag and re-watches when the folder is back', async () => {

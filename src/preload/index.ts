@@ -7,6 +7,7 @@ import type { FileStats } from '../main/storage'
 import type { UploadProgress } from '../main/pipeline'
 import type { Booking, ApiFavoriteImage } from '../main/api-client'
 import type { TagConfig, RelinkPreview, CreateAlbumResult } from '../main/ipc/albums'
+import type { ListCloudResult, AttachCloudResult } from '../main/ipc/cloud'
 import type { PeopleConfig, PersonSummary, PickPhoto, ReviewFace } from '../main/people'
 
 type NotesResult =
@@ -163,7 +164,10 @@ const api = {
     retryFailed: (albumId: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('album:retryFailed', albumId),
     forceRefresh: (): Promise<{ success: boolean; error?: string }> =>
-      ipcRenderer.invoke('albums:forceRefresh')
+      ipcRenderer.invoke('albums:forceRefresh'),
+    listCloud: (): Promise<ListCloudResult> => ipcRenderer.invoke('albums:listCloud'),
+    attachCloud: (albumId: string, folder: string): Promise<AttachCloudResult> =>
+      ipcRenderer.invoke('albums:attachCloud', albumId, folder)
   },
   sets: {
     list: (albumId: string): Promise<SetsResult> => ipcRenderer.invoke('sets:list', albumId),
@@ -501,6 +505,8 @@ const api = {
       'upload:error',
       'album:status-changed',
       'albums:refresh',
+      'album:reattached',
+      'album:attach-progress',
       'network:status-changed',
       'update-status'
     ]

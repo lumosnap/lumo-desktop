@@ -16,6 +16,7 @@ import { registerApiHandlers } from './api'
 import { registerSettingsHandlers } from './settings'
 import { registerPlansHandlers } from './plans'
 import { registerNetworkHandlers } from './network'
+import { registerCloudHandlers } from './cloud'
 import { createLogger } from '../logger'
 
 const logger = createLogger('IPC')
@@ -53,6 +54,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   // Network handlers (connectivity status)
   registerNetworkHandlers()
+  registerCloudHandlers(mainWindow) // account albums not on this computer
 
   logger.info('✓ All IPC handlers registered')
 }

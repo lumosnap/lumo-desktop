@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, unlinkSync } from 'fs'
+import { currentUser, systemLetter } from './volumes'
+import { existsSync, readFileSync, realpathSync, unlinkSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { createLogger, getErrorMessage } from './logger'
 import { effectiveTags } from './tags/select'
@@ -38,6 +39,64 @@ export interface Album {
   people_version?: number // migration 15: same for people
   adopting?: number // migration 16: 1 while re-attaching to an album from another computer; pushes wait
   people_pushed?: string | null // migration 16: JSON person ids of the last people push (a deleted one stays deleted)
+  volume_label?: string | null // migration 17: the folder's drive label ("NO NAME"); null = internal disk or not read yet
+  volume_path?: string | null // migration 17: the folder relative to its drive's root, '/'-separated; null = internal disk
+}
+
+let users: Set<string> | null = null
+/** Linux: /media/<name> is a user's folder (holding drives), not a drive. ponytail: /etc/passwd only, not LDAP users */
+const isUser = (name: string): boolean => {
+  if (name === currentUser()) return true
+  if (!users) {
+    try {
+      users = new Set(
+        readFileSync('/etc/passwd', 'utf-8')
+          .split('\n')
+          .map((l) => l.split(':')[0])
+      )
+    } catch {
+      users = new Set()
+    }
+  }
+  return users.has(name)
+}
+
+/** /Volumes/Macintosh HD/... is the startup disk: resolves to /... Missing (unplugged): as written */
+export function resolvedPath(folder: string): string {
+  try {
+    return realpathSync.native(folder)
+  } catch {
+    return folder
+  }
+}
+
+/**
+ * The removable drive a folder is on: its label (when the path names it) and the folder relative
+ * to the drive's root. Null on the internal disk. Windows labels aren't in the path: drives.ts
+ * fills them in.
+ */
+export function volumeOf(folder: string): { label: string | null; path: string } | null {
+  const p = resolvedPath(folder)
+  const rel = (rest: string | undefined): string =>
+    (rest ?? '')
+      .split(/[\\/]+/)
+      .filter(Boolean)
+      .join('/')
+  const mac = p.match(/^\/Volumes\/([^/]+)(?:\/(.*))?$/)
+  if (mac) return { label: mac[1], path: rel(mac[2]) }
+  // /run/media/<user>/<LABEL> and /media/<user>/<LABEL>; Debian mounts /media/<LABEL>
+  const linux = p.match(/^\/(run\/)?media\/([^/]+)(?:\/([^/]+))?(?:\/(.*))?$/)
+  if (linux && !linux[1] && !isUser(linux[2]))
+    return { label: linux[2], path: rel([linux[3], linux[4]].filter(Boolean).join('/')) }
+  if (linux?.[3]) return { label: linux[3], path: rel(linux[4]) }
+  const win = p.match(/^([A-Za-z]):[\\/](.*)$/)
+  if (win && win[1].toUpperCase() !== systemLetter()) return { label: null, path: rel(win[2]) }
+  return null
+}
+
+const volumeColumns = (folder: string): Pick<Album, 'volume_label' | 'volume_path'> => {
+  const v = volumeOf(folder)
+  return { volume_label: v?.label ?? null, volume_path: v?.path ?? null }
 }
 
 export interface AlbumSet {
@@ -326,6 +385,23 @@ const migrations: Array<(database: Database.Database) => void> = [
         PRIMARY KEY (album_id, id)
       );
     `)
+  },
+  // 17: the drive an album's folder is on, so it is found again under another drive letter or
+  // /Volumes name. Existing albums get theirs from their path here.
+  (database) => {
+    database.exec(`
+      ALTER TABLE albums ADD COLUMN volume_label TEXT;
+      ALTER TABLE albums ADD COLUMN volume_path TEXT;
+    `)
+    if (!hasColumn(database, 'albums', 'sourceFolderPath')) return // test schemas only
+    const set = database.prepare('UPDATE albums SET volume_label = ?, volume_path = ? WHERE id = ?')
+    const rows = database.prepare('SELECT id, sourceFolderPath FROM albums').all() as Array<
+      Pick<Album, 'id' | 'sourceFolderPath'>
+    >
+    for (const r of rows) {
+      const v = volumeColumns(r.sourceFolderPath ?? '')
+      set.run(v.volume_label, v.volume_path, r.id)
+    }
   }
 ]
 
@@ -493,11 +569,11 @@ export function createAlbum(album: Omit<Album, 'createdAt'>): Album {
   if (!db) throw new Error('Database not initialized')
 
   const createdAt = new Date().toISOString()
-  const fullAlbum = { ...album, createdAt }
+  const fullAlbum = { ...album, ...volumeColumns(album.sourceFolderPath), createdAt }
 
   const stmt = db.prepare(`
-    INSERT INTO albums (id, title, eventDate, startTime, endTime, localFolderPath, sourceFolderPath, albumType, totalImages, lastSyncedAt, needsSync, createdAt, event_type, adopting)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO albums (id, title, eventDate, startTime, endTime, localFolderPath, sourceFolderPath, albumType, totalImages, lastSyncedAt, needsSync, createdAt, event_type, adopting, volume_label, volume_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   stmt.run(
@@ -514,7 +590,9 @@ export function createAlbum(album: Omit<Album, 'createdAt'>): Album {
     fullAlbum.needsSync,
     fullAlbum.createdAt,
     fullAlbum.event_type ?? null,
-    fullAlbum.adopting ?? 0 // re-attach inserts the album held (1) until its rows are matched
+    fullAlbum.adopting ?? 0, // re-attach inserts the album held (1) until its rows are matched
+    fullAlbum.volume_label,
+    fullAlbum.volume_path
   )
 
   return fullAlbum
@@ -592,6 +670,13 @@ export function rekeyAlbumForReupload(oldId: string, newId: string): void {
 
 export function updateAlbum(id: string, updates: Partial<Album>): void {
   if (!db) throw new Error('Database not initialized')
+  // A new folder: its drive too (every relink, re-attach and attach goes through here). Only
+  // when it changed: a Windows label filled in by drives.ts stays
+  if (
+    updates.sourceFolderPath !== undefined &&
+    updates.sourceFolderPath !== getAlbum(id)?.sourceFolderPath
+  )
+    updates = { ...volumeColumns(updates.sourceFolderPath), ...updates }
 
   const fields = Object.keys(updates)
     .map((key) => `${key} = ?`)

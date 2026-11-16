@@ -347,10 +347,13 @@ app.whenReady().then(() => {
   // IPC test
   ipcMain.on('ping', () => logger.debug('pong'))
 
-  ipcMain.handle('dialog:openDirectory', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-      properties: ['openDirectory']
-    })
+  ipcMain.handle('dialog:openDirectory', async (event) => {
+    // Modal to the window: a second click can't open a second picker
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    const options = { properties: ['openDirectory' as const] }
+    const { canceled, filePaths } = await (parent
+      ? dialog.showOpenDialog(parent, options)
+      : dialog.showOpenDialog(options))
     if (canceled) {
       return null
     } else {
