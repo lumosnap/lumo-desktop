@@ -1,5 +1,6 @@
 import { updateAlbum, getAllAlbums, getAlbum } from './database'
-import { detectAlbumChanges, executeAlbumSync } from './ipc/sync'
+import { checkSourceFolder, detectAlbumChanges, executeAlbumSync } from './ipc/sync'
+import { clearScanCache } from './storage'
 import { BrowserWindow } from 'electron'
 import { existsSync, watch as fsWatch, type FSWatcher } from 'fs'
 import { join } from 'path'
@@ -14,6 +15,8 @@ const FILE_CHANGE_DEBOUNCE_MS = 100
 class WatcherService {
   private watchers: Map<string, FSWatcher> = new Map()
   private mainWindow: BrowserWindow | null = null
+  private volumes: FSWatcher | null = null
+  private volumesTimer: ReturnType<typeof setTimeout> | undefined
 
   // Debounced file change handler - batches rapid events
   private debouncedHandleFileChange = debounceByKey((albumId: string) => {
@@ -31,6 +34,45 @@ class WatcherService {
         this.watch(album.id, album.sourceFolderPath)
       }
     })
+    this.watchVolumes()
+  }
+
+  /**
+   * macOS: a drive mounting or going away shows as an entry in /Volumes. Re-check every
+   * album's folder then, so "Drive unplugged" and watching it again don't wait for a list.
+   * ponytail: macOS only; Windows drive letters and Linux /media still wait for album:list
+   */
+  private watchVolumes(): void {
+    if (process.platform !== 'darwin' || this.volumes) return
+    try {
+      this.volumes = fsWatch('/Volumes', () => {
+        clearTimeout(this.volumesTimer)
+        // A drive lists late while it mounts: wait for it to settle
+        this.volumesTimer = setTimeout(() => this.recheckFolders(), 1000)
+      })
+      this.volumes.on('error', () => {
+        this.volumes?.close()
+        this.volumes = null
+      })
+    } catch (error) {
+      logger.warn('Could not watch /Volumes:', error)
+    }
+  }
+
+  private recheckFolders(): void {
+    for (const album of getAllAlbums()) {
+      if (album.adopting) continue
+      const present = checkSourceFolder(album)
+      // Back: anything copied in while it was away (a listing from before the unplug is stale)
+      if (present && album.isOrphaned) {
+        clearScanCache(album.sourceFolderPath)
+        this.checkSyncStatus(album.id)
+      }
+    }
+    // Always: on an unplug the folder's own watch usually flagged the album first, so nothing
+    // above changes, yet the list still shows it as there
+    if (this.mainWindow && !this.mainWindow.isDestroyed())
+      this.mainWindow.webContents.send('albums:refresh')
   }
 
   watch(albumId: string, folderPath: string): void {
@@ -48,8 +90,11 @@ class WatcherService {
     try {
       watcher = fsWatch(folderPath, (event, name) => {
         // No name (Windows, when its event buffer overflows during a big copy): rescan anyway
-        if (!name || !isIgnoredPath(folderPath, join(folderPath, name)))
+        if (!name || !isIgnoredPath(folderPath, join(folderPath, name))) {
+          // The next scan must list the folder again, not reuse one from before this change
+          clearScanCache(folderPath)
           this.handleFileChange(albumId, event, name ?? folderPath)
+        }
       })
     } catch (error) {
       console.error(`[Watcher] Could not watch ${albumId}:`, error)
@@ -148,6 +193,9 @@ class WatcherService {
       if (!result.success || !result.changes) {
         return
       }
+      // needsSync as it is now, not from before the detection (another check may have set it)
+      const current = getAlbum(albumId)
+      if (!current) return
 
       const { new: newFiles, modified, deleted, renamed } = result.changes
       const hasRealChanges = newFiles.length > 0 || modified.length > 0 || deleted.length > 0
@@ -163,7 +211,7 @@ class WatcherService {
         // executeAlbumSync will update needsSync to 0
       } else {
         // Just update status if changed
-        if (album.needsSync !== needsSync) {
+        if (current.needsSync !== needsSync) {
           updateAlbum(albumId, { needsSync })
 
           if (this.mainWindow) {
@@ -209,16 +257,20 @@ class WatcherService {
     // Process all albums immediately without delays
     const promises = albums.map((album) => this.processFileChange(album.id))
     await Promise.all(promises)
-
-    // Notify renderer to refresh album list
-    if (this.mainWindow) {
-      this.mainWindow.webContents.send('albums:refresh')
-    }
+    // The renderer reloads the list itself once this returns
 
     logger.info('Force refresh completed')
   }
 
+  /** Watch again after closeAll (a reset that stopped part way) */
+  restart(): void {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) this.initialize(this.mainWindow)
+  }
+
   closeAll(): void {
+    clearTimeout(this.volumesTimer)
+    this.volumes?.close()
+    this.volumes = null
     this.watchers.forEach((watcher) => watcher.close())
     this.watchers.clear()
   }

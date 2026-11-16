@@ -272,3 +272,68 @@ describe('expired sign-in', () => {
     expect(clearAuth).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('one detection and one sync per album at a time', () => {
+  it('a call during a detection waits for one fresh re-run, shared by every waiting caller', async () => {
+    seed(2, 2)
+    const first = detectAlbumChanges('a') // has listed the folder already
+    writeFileSync(join(src(), 'NEW.jpg'), 'new photo')
+    clearScanCache(src()) // as the watcher does on the event
+    const second = detectAlbumChanges('a')
+    const third = detectAlbumChanges('a')
+    expect(third).toBe(second)
+    expect((await first).changes!.new).toHaveLength(0)
+    expect((await second).changes!.new.map((f) => f.filename)).toEqual(['NEW.jpg'])
+  })
+
+  it('the same rename from two checks at once is applied once', async () => {
+    seed(1, 0)
+    writeFileSync(join(src(), 'RENAMED.jpg'), 'x')
+    const { updateImage } = await import('../database')
+    vi.mocked(updateImage).mockImplementation((id, u) => {
+      Object.assign(db.images.find((i) => i.id === id)!, u)
+    })
+    const renamed = [{ id: 1, oldFilename: 'IMG_0.jpg', newFilename: 'RENAMED.jpg' }]
+    const changes = { renamed } as unknown as Parameters<typeof executeAlbumSync>[1]
+    await Promise.all([executeAlbumSync('a', changes), executeAlbumSync('a', changes)])
+    expect(updateImage).toHaveBeenCalledTimes(1)
+    expect(db.images[0].originalFilename).toBe('RENAMED.jpg')
+  })
+
+  it('the same new photos from two syncs at once are added once (a double click)', async () => {
+    seed(0, 0)
+    writeFileSync(join(src(), 'NEW.jpg'), 'n')
+    const { createImage } = await import('../database')
+    vi.mocked(createImage).mockImplementation((img) => {
+      db.images.push({ ...(img as unknown as Row), id: db.images.length + 1 })
+      return 0 as never
+    })
+    const changes = {
+      new: [{ filename: 'NEW.jpg', size: 1, mtime: new Date().toISOString() }]
+    } as Parameters<typeof executeAlbumSync>[1]
+    await Promise.all([executeAlbumSync('a', changes), executeAlbumSync('a', changes)])
+    expect(createImage).toHaveBeenCalledTimes(1)
+  })
+
+  it('still adds a new photo named like an online-only one (it joins that row after upload)', async () => {
+    seed(0, 0)
+    writeFileSync(join(src(), 'NEW.jpg'), 'n')
+    db.images.push({
+      id: 9,
+      serverId: 5,
+      originalFilename: 'NEW.jpg',
+      localFilePath: '',
+      sourceFileHash: 'x',
+      mtime: '',
+      fileSize: 1,
+      uploadOrder: 0,
+      uploadStatus: 'remote'
+    } as Row)
+    const changes = {
+      new: [{ filename: 'NEW.jpg', size: 1, mtime: new Date().toISOString() }]
+    } as Parameters<typeof executeAlbumSync>[1]
+    await executeAlbumSync('a', changes)
+    const { createImage } = await import('../database')
+    expect(createImage).toHaveBeenCalledTimes(1)
+  })
+})

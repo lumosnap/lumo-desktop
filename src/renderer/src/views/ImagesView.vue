@@ -1250,6 +1250,7 @@ async function reloadPhotos(): Promise<void> {
 // Grouping changed in main: swap in the new fields in place, keeping picks and scroll position
 let offAnalyzed: (() => void) | null = null
 let offSetsChanged: (() => void) | null = null
+let offStatusChanged: (() => void) | null = null
 let offPeopleChanged: (() => void) | undefined
 // Quiet: runs on its own after analysis, so a failure keeps the grid as it is.
 // One at a time: a call while one runs asks for one more pass after it.
@@ -1924,7 +1925,7 @@ onMounted(() => {
   loadAlbumImages()
   initLightbox()
   window.addEventListener('keydown', onKeydown, true)
-  if (window.api && window.api.on) window.api.on('album:status-changed', onAlbumStatusChanged)
+  offStatusChanged = window.api.on('album:status-changed', onAlbumStatusChanged)
   offAnalyzed = window.api.albums.onAnalyzed((id) => {
     if (id === albumId && !loading.value) refreshGrouping()
   })
@@ -1947,7 +1948,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown, true)
-  if (window.api && window.api.off) window.api.off('album:status-changed', onAlbumStatusChanged)
+  offStatusChanged?.()
   resizeObserver.disconnect()
   bannerObserver.disconnect()
   offAnalyzed?.()

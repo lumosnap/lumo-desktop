@@ -424,18 +424,22 @@ const onAlbumsRefresh = (): void => {
   loadAlbums()
 }
 
+// Unsubscribes for the IPC listeners below
+let offIpc: Array<() => void> = []
+
 onMounted(() => {
-  loadAlbums()
+  // On a first visit AppLayout is loading the list already
+  if (albumStore.status === 'ready') loadAlbums()
   profileStore.fetchProfile()
 
-  if (window.api && window.api.on) {
-    window.api.on('upload:batch-start', onBatchStart)
-    window.api.on('upload:progress', onProgress)
-    window.api.on('upload:complete', onComplete)
-    window.api.on('upload:error', onError)
-    window.api.on('album:status-changed', onAlbumStatusChanged)
+  offIpc = [
+    window.api.on('upload:batch-start', onBatchStart),
+    window.api.on('upload:progress', onProgress),
+    window.api.on('upload:complete', onComplete),
+    window.api.on('upload:error', onError),
+    window.api.on('album:status-changed', onAlbumStatusChanged),
     window.api.on('albums:refresh', onAlbumsRefresh)
-  }
+  ]
   document.addEventListener('pointerdown', onDocPointer)
   document.addEventListener('keydown', onDocKey)
   document.addEventListener('scroll', closeMenu, true)
@@ -443,14 +447,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (loadDebounceTimer) clearTimeout(loadDebounceTimer)
-  if (window.api && window.api.off) {
-    window.api.off('upload:batch-start', onBatchStart)
-    window.api.off('upload:progress', onProgress)
-    window.api.off('upload:complete', onComplete)
-    window.api.off('upload:error', onError)
-    window.api.off('album:status-changed', onAlbumStatusChanged)
-    window.api.off('albums:refresh', onAlbumsRefresh)
-  }
+  offIpc.forEach((off) => off())
   document.removeEventListener('pointerdown', onDocPointer)
   document.removeEventListener('keydown', onDocKey)
   document.removeEventListener('scroll', closeMenu, true)

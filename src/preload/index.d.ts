@@ -404,20 +404,11 @@ declare global {
         checkConnectivity: () => Promise<{ online: boolean }>
         onStatusChange: (callback: (online: boolean) => void) => () => void
       }
-      onUploadProgress: (
-        callback: (event: IpcRendererEvent, progress: UploadProgress) => void
-      ) => void
-      offUploadProgress: (
-        callback: (event: IpcRendererEvent, progress: UploadProgress) => void
-      ) => void
+      /** Returns the unsubscribe */
       on: <A extends unknown[]>(
         channel: string,
         callback: (event: IpcRendererEvent, ...args: A) => void
-      ) => void
-      off: <A extends unknown[]>(
-        channel: string,
-        callback: (event: IpcRendererEvent, ...args: A) => void
-      ) => void
+      ) => () => void
     }
   }
 }

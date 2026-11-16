@@ -147,6 +147,7 @@ export function registerConfigHandlers(): void {
       if (failedCloudDeletes.length > 0) {
         const errorMessage = `Failed to delete ${failedCloudDeletes.length} album(s) from cloud. Local data was preserved to prevent inconsistency.`
         logger.error(errorMessage)
+        watcherService.restart() // the albums stay, so keep watching them
         return {
           success: false,
           error: errorMessage,

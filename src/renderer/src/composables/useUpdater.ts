@@ -10,8 +10,7 @@ export function useUpdater() {
 
   onMounted(() => {
     if (window.api && window.api.on) {
-      removeListener = () => window.api.off('update-status', handleUpdateStatus)
-      window.api.on('update-status', handleUpdateStatus)
+      removeListener = window.api.on('update-status', handleUpdateStatus)
     }
   })
 

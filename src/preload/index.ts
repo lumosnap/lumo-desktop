@@ -488,10 +488,12 @@ const api = {
 
   // Progress events listener
   // Event listeners
+  // Returns the unsubscribe. A callback from the renderer reaches here wrapped anew on every
+  // call (contextBridge), so removing it by identity never matched and listeners piled up.
   on: <A extends unknown[]>(
     channel: string,
     callback: (event: IpcRendererEvent, ...args: A) => void
-  ) => {
+  ): (() => void) => {
     const validChannels = [
       'upload:progress',
       'upload:batch-start',
@@ -502,27 +504,11 @@ const api = {
       'network:status-changed',
       'update-status'
     ]
-    if (validChannels.includes(channel)) {
-      ipcRenderer.on(channel, callback)
-    }
-  },
-  off: <A extends unknown[]>(
-    channel: string,
-    callback: (event: IpcRendererEvent, ...args: A) => void
-  ) => {
-    const validChannels = [
-      'upload:progress',
-      'upload:batch-start',
-      'upload:complete',
-      'upload:error',
-      'album:status-changed',
-      'albums:refresh',
-      'network:status-changed',
-      'update-status'
-    ]
-    if (validChannels.includes(channel)) {
-      ipcRenderer.removeListener(channel, callback)
-    }
+    if (!validChannels.includes(channel)) return () => {}
+    const handler = (event: IpcRendererEvent, ...args: unknown[]): void =>
+      callback(event, ...(args as A))
+    ipcRenderer.on(channel, handler)
+    return () => ipcRenderer.removeListener(channel, handler)
   }
 }
 

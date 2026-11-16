@@ -35,16 +35,12 @@ export type SyncChanges = {
     filename: string
     size: number
     mtime: string
-    width?: number
-    height?: number
     hash?: string
   }>
   modified: Array<{
     filename: string
     size: number
     mtime: string
-    width?: number
-    height?: number
     existingId: number
     serverId: number | null
   }>
@@ -311,10 +307,34 @@ export async function diffFolder(
   return changes
 }
 
+// One detection per album at a time. A call while one runs waits for a single re-run after it
+// (the running one may have listed the folder before the change it was called for)
+const detecting = new Map<string, Promise<SyncResult>>()
+const detectAgain = new Map<string, Promise<SyncResult>>()
+
 /**
  * Detect changes for an album
  */
-export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
+export function detectAlbumChanges(albumId: string): Promise<SyncResult> {
+  const again = detectAgain.get(albumId)
+  if (again) return again
+  const running = detecting.get(albumId)
+  if (running) {
+    const next = running
+      .catch(() => undefined)
+      .then(() => {
+        detectAgain.delete(albumId)
+        return detectAlbumChanges(albumId)
+      })
+    detectAgain.set(albumId, next)
+    return next
+  }
+  const run = detectOnce(albumId).finally(() => detecting.delete(albumId))
+  detecting.set(albumId, run)
+  return run
+}
+
+async function detectOnce(albumId: string): Promise<SyncResult> {
   logger.debug(`Detecting changes for album: ${albumId}`)
   try {
     const album = getAlbum(albumId)
@@ -366,10 +386,35 @@ export async function detectAlbumChanges(albumId: string): Promise<SyncResult> {
   }
 }
 
+// Syncs of one album run one after another: two at once could apply the same changes twice
+const syncing = new Map<string, Promise<unknown>>()
+
 /**
  * Execute sync for an album
  */
-export async function executeAlbumSync(
+export function executeAlbumSync(
+  albumId: string,
+  changes: Partial<SyncChanges>,
+  mainWindow?: BrowserWindow | null,
+  confirmMassDelete = false
+): Promise<ExecuteSyncResult> {
+  const run = (syncing.get(albumId) ?? Promise.resolve()).then(() =>
+    syncOnce(albumId, changes, mainWindow, confirmMassDelete)
+  )
+  // The queue never rejects: the caller sees this sync's error, the next sync still runs
+  const tail: Promise<void> = run
+    .then(
+      () => {},
+      () => {}
+    )
+    .finally(() => {
+      if (syncing.get(albumId) === tail) syncing.delete(albumId)
+    })
+  syncing.set(albumId, tail)
+  return run
+}
+
+async function syncOnce(
   albumId: string,
   changes: Partial<SyncChanges>,
   mainWindow?: BrowserWindow | null,
@@ -404,11 +449,7 @@ export async function executeAlbumSync(
     if (deleted.length > 0 && !confirmMassDelete) {
       const many = deleted.length >= 10 && deleted.length >= 0.5 * dbImages.length
       // Bypass the scan cache: a drive still mounting can list an empty folder
-      if (
-        many ||
-        scanImagesInFolder(album.sourceFolderPath, { useCache: false, skipDimensions: true })
-          .length === 0
-      ) {
+      if (many || scanImagesInFolder(album.sourceFolderPath, { useCache: false }).length === 0) {
         logger.warn(`Holding back ${deleted.length}/${dbImages.length} deletions for confirmation`)
         return {
           success: false,
@@ -449,6 +490,8 @@ export async function executeAlbumSync(
     if (changes.renamed && changes.renamed.length > 0) {
       logger.info(`Processing ${changes.renamed.length} renamed files`)
       for (const rename of changes.renamed) {
+        // Already applied (by a sync just before this one), or the row is gone
+        if (dbById.get(rename.id)?.originalFilename !== rename.oldFilename) continue
         updateImage(rename.id, {
           originalFilename: rename.newFilename,
           localFilePath: join(album.localFolderPath, rename.newFilename)
@@ -467,8 +510,18 @@ export async function executeAlbumSync(
     if (changes.new && changes.new.length > 0) {
       logger.info(`Adding ${changes.new.length} new images`)
 
+      // A sync queued behind one with the same list (a double click) must not add them twice
+      // Online-only rows don't count: a local file with one's name joins it after upload
+      const have = new Set(
+        getAlbumImages(albumId)
+          .filter((img) => img.uploadStatus !== 'remote')
+          .map((img) => img.originalFilename)
+      )
+      const fresh = changes.new.filter((f) => !have.has(f.filename))
+      changes = { ...changes, new: fresh }
+
       // Check image limit before processing
-      let filesToProcess = changes.new
+      let filesToProcess = fresh
 
       try {
         const profile = await profileApi.get()
@@ -480,10 +533,10 @@ export async function executeAlbumSync(
           )
           syncLimitWarning = `Image limit reached (${profile.totalImages.toLocaleString()}/${profile.imageLimit.toLocaleString()}). No new images were synced. Please upgrade your plan.`
           filesToProcess = []
-        } else if (changes.new.length > remaining) {
+        } else if (fresh.length > remaining) {
           logger.warn(`User can only add ${remaining} more images. Limiting sync.`)
-          syncLimitWarning = `Only ${remaining} of ${changes.new.length} images were synced due to your plan limit. Upgrade to sync more.`
-          filesToProcess = changes.new.slice(0, remaining)
+          syncLimitWarning = `Only ${remaining} of ${fresh.length} images were synced due to your plan limit. Upgrade to sync more.`
+          filesToProcess = fresh.slice(0, remaining)
         }
       } catch (err) {
         // The plan-limit check failed. Do not silently proceed as if the user has
@@ -515,8 +568,8 @@ export async function executeAlbumSync(
           originalFilename: file.filename,
           localFilePath,
           fileSize: file.size,
-          width: file.width || 0,
-          height: file.height || 0,
+          width: 0, // until compression measures it
+          height: 0,
           mtime: file.mtime,
           sourceFileHash: file.hash || null, // Use pre-computed hash from detection
           uploadStatus: 'pending',
@@ -550,9 +603,8 @@ export async function executeAlbumSync(
         updateImage(file.existingId, {
           uploadStatus: 'pending',
           mtime: file.mtime,
-          fileSize: file.size,
-          width: file.width || 0,
-          height: file.height || 0
+          fileSize: file.size
+          // width/height: the last measured ones until compression measures the new pixels
         })
         edited.push(file.existingId)
       }
