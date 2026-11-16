@@ -14,8 +14,7 @@ import {
   createAlbumFolder,
   ensureBaseDirectory,
   formatBytes,
-  clearScanCache,
-  getImageStats
+  clearScanCache
 } from './storage'
 
 describe('Storage Module', () => {
@@ -129,20 +128,4 @@ describe('Storage Module', () => {
     })
   })
 
-  describe('getImageStats', () => {
-    it('should return null for non-existent file', () => {
-      const stats = getImageStats('/non/existent/file.jpg')
-      expect(stats).toBeNull()
-    })
-
-    it('should return stats for existing file', () => {
-      const filePath = join(testPath, 'stats-test.jpg')
-      writeFileSync(filePath, 'test image data')
-
-      const stats = getImageStats(filePath)
-      expect(stats).toBeDefined()
-      expect(stats?.filename).toBe('stats-test.jpg')
-      expect(stats?.size).toBeGreaterThan(0)
-    })
-  })
 })

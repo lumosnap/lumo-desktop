@@ -3,8 +3,6 @@ import { promisify } from 'util'
 import { existsSync, mkdirSync, readdirSync, statSync } from 'fs'
 import { join, extname } from 'path'
 
-const imageSize = require('image-size')
-
 const statfsAsync = promisify(statfs)
 
 export interface FileStats {
@@ -12,8 +10,6 @@ export interface FileStats {
   filename: string
   size: number
   mtime: string
-  width?: number
-  height?: number
 }
 
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp']
@@ -64,10 +60,8 @@ export function clearScanCache(folderPath?: string): void {
   }
 }
 
-// Update function signature to support options
 interface ScanOptions {
   useCache?: boolean
-  skipDimensions?: boolean
 }
 
 export function scanImagesInFolder(
@@ -76,7 +70,6 @@ export function scanImagesInFolder(
 ): FileStats[] {
   // Handle legacy boolean argument
   const useCache = typeof options === 'boolean' ? options : options.useCache !== false
-  const skipDimensions = typeof options === 'object' ? options.skipDimensions : false
 
   // Check cache first
   if (useCache) {
@@ -116,51 +109,16 @@ export function scanImagesInFolder(
         continue
       }
 
-      // Verbose logging only if not skipping dimensions (implying full import)
-      if (!skipDimensions) {
-        console.log(`[Storage] Processing image file: ${filename}`)
-      }
-
+      // Dimensions come from compression (sharp), which reads every photo anyway
       try {
         const stats = statSync(filePath)
-
-        // Skip directories
-        if (stats.isDirectory()) {
-          continue
-        }
-
-        // Get image dimensions (optional - use defaults if can't read)
-        let width: number | undefined = 1920
-        let height: number | undefined = 1080
-
-        // Only read dimensions if not skipped
-        if (!skipDimensions) {
-          try {
-            if (typeof imageSize === 'function') {
-              const dimensions = imageSize(filePath)
-              width = dimensions?.width || 1920
-              height = dimensions?.height || 1080
-              console.log(`[Storage] Image dimensions for ${filename}: ${width}x${height}`)
-            }
-          } catch {
-            console.warn(`[Storage] Could not read dimensions for ${filename}, using defaults`)
-            // Silently use defaults - dimensions are not critical
-          }
-        }
-
-        const fileStats: FileStats = {
+        if (stats.isDirectory()) continue
+        images.push({
           path: filePath,
           filename,
           size: stats.size,
-          mtime: stats.mtime.toISOString(),
-          width,
-          height
-        }
-
-        images.push(fileStats)
-        if (!skipDimensions) {
-          console.log(`[Storage] Added image: ${filename} (${formatBytes(stats.size)})`)
-        }
+          mtime: stats.mtime.toISOString()
+        })
       } catch {
         console.warn(`[Storage] Failed to read file ${filename}`)
         continue
@@ -177,43 +135,6 @@ export function scanImagesInFolder(
   scanCache.set(folderPath, { result: images, timestamp: Date.now() })
 
   return images
-}
-
-export function getImageStats(filePath: string): FileStats | null {
-  if (!existsSync(filePath)) {
-    return null
-  }
-
-  try {
-    const stats = statSync(filePath)
-    const filename = filePath.split('/').pop() || filePath.split('\\').pop() || ''
-
-    // Get image dimensions (optional - use defaults if can't read)
-    let width: number | undefined = 1920
-    let height: number | undefined = 1080
-
-    try {
-      if (typeof imageSize === 'function') {
-        const dimensions = imageSize(filePath)
-        width = dimensions?.width || 1920
-        height = dimensions?.height || 1080
-      }
-    } catch (error) {
-      // Silently use defaults - dimensions are not critical
-    }
-
-    return {
-      path: filePath,
-      filename,
-      size: stats.size,
-      mtime: stats.mtime.toISOString(),
-      width,
-      height
-    }
-  } catch (error) {
-    console.error('Failed to get file stats:', error)
-    return null
-  }
 }
 
 export function formatBytes(bytes: number): string {

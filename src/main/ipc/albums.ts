@@ -238,8 +238,8 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
               originalFilename: file.filename,
               localFilePath: join(localFolderPath, file.filename),
               fileSize: file.size,
-              width: file.width || 0,
-              height: file.height || 0,
+              width: 0, // until compression measures it
+              height: 0,
               mtime: file.mtime,
               sourceFileHash: null,
               uploadStatus: 'pending' as const,
@@ -642,7 +642,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
     const changes = await diffFolder(
       album,
       folder,
-      scanImagesInFolder(folder, { useCache: false, skipDimensions: true }),
+      scanImagesInFolder(folder, { useCache: false }),
       dbImages
     )
     const missing = changes.deleted.length

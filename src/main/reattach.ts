@@ -146,8 +146,9 @@ async function matchImages(
       albumId,
       originalFilename: file.filename,
       fileSize: file.size,
-      width: file.width || 0,
-      height: file.height || 0,
+      // A matched photo keeps the size measured when it was compressed; others get it then
+      width: hit?.width ?? 0,
+      height: hit?.height ?? 0,
       mtime: file.mtime,
       sourceFileHash: hash,
       uploadOrder: hit?.uploadOrder ?? server.images.length + index

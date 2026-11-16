@@ -336,6 +336,8 @@ class UploadPipeline {
             // Get metadata from existing file
             const stats = await stat(expectedOutputPath)
             const metadata = await sharp(expectedOutputPath).metadata()
+            // The row may be new (0x0 until measured): keep the size for retries and the lightbox
+            updateImage(image.id, { width: metadata.width || 0, height: metadata.height || 0 })
 
             return {
               id: image.id,
