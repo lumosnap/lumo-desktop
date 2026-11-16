@@ -1,9 +1,8 @@
-import chokidar from 'chokidar'
-import type { FSWatcher } from 'chokidar'
 import { updateAlbum, getAllAlbums, getAlbum } from './database'
 import { detectAlbumChanges, executeAlbumSync } from './ipc/sync'
 import { BrowserWindow } from 'electron'
-import { existsSync } from 'fs'
+import { existsSync, watch as fsWatch, type FSWatcher } from 'fs'
+import { join } from 'path'
 import { debounceByKey, isIgnoredPath } from './utils'
 import { createLogger } from './logger'
 
@@ -42,20 +41,26 @@ class WatcherService {
 
     console.log(`[Watcher] Starting watch for album ${albumId} at ${folderPath}`)
 
-    // Initialize watcher
-    // ignoreInitial: true prevents firing 'add' events for existing files on startup
-    const watcher = chokidar.watch(folderPath, {
-      ignored: (path: string) => isIgnoredPath(folderPath, path),
-      persistent: true,
-      ignoreInitial: true,
-      depth: 0 // Only watch the immediate directory
+    // The folder itself only, never each file: on macOS a per-file watch (kqueue, which chokidar
+    // always adds) aborts the whole process inside libuv when the drive is pulled out. A directory
+    // watch (FSEvents) survives it and still reports adds, changes and deletes of its photos.
+    let watcher: FSWatcher
+    try {
+      watcher = fsWatch(folderPath, (event, name) => {
+        // No name (Windows, when its event buffer overflows during a big copy): rescan anyway
+        if (!name || !isIgnoredPath(folderPath, join(folderPath, name)))
+          this.handleFileChange(albumId, event, name ?? folderPath)
+      })
+    } catch (error) {
+      console.error(`[Watcher] Could not watch ${albumId}:`, error)
+      return
+    }
+    // Windows reports a lost folder here (macOS and Linux send an event instead): drop it, a later
+    // check watches it again
+    watcher.on('error', (error) => {
+      console.error(`[Watcher] Error watching ${albumId}:`, error)
+      if (this.watchers.get(albumId) === watcher) this.unwatch(albumId)
     })
-
-    watcher
-      .on('add', (path) => this.handleFileChange(albumId, 'add', path))
-      .on('change', (path) => this.handleFileChange(albumId, 'change', path))
-      .on('unlink', (path) => this.handleFileChange(albumId, 'unlink', path))
-      .on('error', (error) => console.error(`[Watcher] Error watching ${albumId}:`, error))
 
     this.watchers.set(albumId, watcher)
   }
