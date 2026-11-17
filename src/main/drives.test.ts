@@ -17,7 +17,7 @@ vi.mock('./ipc/sync', () => ({ checkSourceFolder: () => true }))
 vi.mock('./ipc/albums', () => ({ samePath: (a: string, b: string) => a === b }))
 
 import { initDatabase, closeDatabase, createAlbum, getAlbum, updateAlbum } from './database'
-import { reattachMoved, relinkAlbum } from './drives'
+import { driveAlbums, reattachMoved, relinkAlbum } from './drives'
 
 let loadable = true
 try {
@@ -32,6 +32,13 @@ function manifestAt(folder: string, albumId: string): void {
   const body = { schema: 1, albumId, writtenAt: '', app: '', images: [], sets: [], people: [] }
   const checksum = createHash('sha256').update(JSON.stringify(body)).digest('hex')
   writeFileSync(join(folder, '.lumosnap', 'manifest.json'), JSON.stringify({ ...body, checksum }))
+}
+function indexAt(root: string, driveId: string, albums: Record<string, string>): void {
+  mkdirSync(join(root, '.lumosnap'), { recursive: true })
+  writeFileSync(
+    join(root, '.lumosnap', 'drive.json'),
+    JSON.stringify({ schema: 1, driveId, albums })
+  )
 }
 function album(id: string, folder: string, volumePath: string, orphaned: number): void {
   createAlbum({
@@ -156,5 +163,53 @@ describe.skipIf(!loadable)('auto re-attach when a drive mounts', () => {
     await reattachMoved(win(), roots)
     expect(getAlbum('x')?.isOrphaned).toBe(1)
     closeDatabase()
+  })
+
+  it("finds the drive by its index id whatever it's called; a label match elsewhere loses", async () => {
+    initDatabase(':memory:')
+    const [usb, noName] = ['USB DRIVE', 'NO NAME 1'].map((r) => join(tmp, 'id', r))
+    manifestAt(join(usb, 'X'), 'i')
+    indexAt(usb, 'd1', { i: 'X' })
+    manifestAt(join(noName, 'X'), 'i') // a copy on a drive that only looks like its own
+    album('i', join(tmp, 'id', 'NO NAME', 'X'), 'X', 1)
+    updateAlbum('i', { volume_label: 'NO NAME', volume_id: 'd1' })
+    await reattachMoved(win(), [noName, usb])
+    expect(getAlbum('i')).toMatchObject({ sourceFolderPath: join(usb, 'X'), isOrphaned: 0 })
+    expect(getAlbum('i')?.volume_id).toBeNull() // a new folder: noted again on the next write
+    closeDatabase()
+  })
+
+  it('two drives with one id (a clone): none is picked, not even by label', async () => {
+    initDatabase(':memory:')
+    const roots = ['A', 'B', 'NO NAME'].map((r) => join(tmp, 'clone', r))
+    for (const r of roots) manifestAt(join(r, 'X'), 'c')
+    indexAt(roots[0], 'd2', { c: 'X' })
+    indexAt(roots[1], 'd2', { c: 'X' })
+    album('c', join(tmp, 'clone', 'GONE', 'X'), 'X', 1)
+    updateAlbum('c', { volume_label: 'NO NAME', volume_id: 'd2' })
+    await reattachMoved(win(), roots)
+    expect(getAlbum('c')?.isOrphaned).toBe(1)
+    closeDatabase()
+  })
+
+  it('no drive has its id: falls back to the label', async () => {
+    initDatabase(':memory:')
+    const card = join(tmp, 'noid', 'NO NAME 1')
+    manifestAt(join(card, 'X'), 'n')
+    album('n', join(tmp, 'noid', 'NO NAME', 'X'), 'X', 1)
+    updateAlbum('n', { volume_label: 'NO NAME', volume_id: 'elsewhere' })
+    await reattachMoved(win(), [card])
+    expect(getAlbum('n')).toMatchObject({ sourceFolderPath: join(card, 'X'), isOrphaned: 0 })
+    closeDatabase()
+  })
+
+  it("lists a drive's albums whose folders' manifests name them", async () => {
+    const root = join(tmp, 'list', 'CARD')
+    manifestAt(join(root, 'Shoots', 'V'), 'v')
+    manifestAt(join(root, 'W'), 'someone-else') // the folder now holds another album
+    indexAt(root, 'd4', { v: 'Shoots/V', w: 'W', gone: 'Nowhere' })
+    expect([...(await driveAlbums([root]))]).toEqual([
+      ['v', { folder: join(root, 'Shoots', 'V'), drive: 'CARD' }]
+    ])
   })
 })

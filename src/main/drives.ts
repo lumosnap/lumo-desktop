@@ -5,11 +5,27 @@
 import type { BrowserWindow } from 'electron'
 import { watch as fsWatch, type FSWatcher } from 'fs'
 import { access, readdir, realpath } from 'fs/promises'
-import { basename, dirname, join } from 'path'
+import { basename, join } from 'path'
 import { getConfig } from './config'
-import { getAlbum, getAllAlbums, resolvedPath, updateAlbum } from './database'
-import { currentUser, forgetDrives, readMacMounts, systemLetter, windowsDrives } from './volumes'
-import { folderOwner, folderUser, readManifest, sourcePresent } from './portable'
+import { getAlbum, getAllAlbums, updateAlbum } from './database'
+import {
+  currentUser,
+  forgetDrives,
+  isNetworkDrive,
+  readMacMounts,
+  systemLetter,
+  windowsDrives
+} from './volumes'
+import {
+  driveRootOf,
+  folderOnDrive,
+  folderOwner,
+  folderUser,
+  manifestAlbumId,
+  readDriveIndex,
+  readManifest,
+  sourcePresent
+} from './portable'
 import { uploadPipeline } from './pipeline'
 import { watcherService } from './watcher'
 import { checkSourceFolder } from './ipc/sync'
@@ -105,7 +121,7 @@ export async function relinkAlbum(
 const baseLabel = (label: string | null | undefined): string | null =>
   label == null ? null : label.replace(/ \d+$/, '')
 
-async function labelOf(root: string): Promise<string | null> {
+export async function labelOf(root: string): Promise<string | null> {
   if (process.platform !== 'win32') return basename(root)
   return (await windowsDrives())?.get(root[0].toUpperCase())?.label || null
 }
@@ -114,8 +130,10 @@ async function labelOf(root: string): Promise<string | null> {
  * A drive mounted: every album whose folder is missing looks for its folder at the same place on
  * each mounted drive; one whose manifest names it is a candidate. No missing-photos check: the
  * manifest proves it is the same folder, and any differences show as "Folder changed".
- * Which candidate: the album's drive label known → only a drive with that label ("NO NAME" back
- * as /Volumes/NO NAME 1); a copy on another drive (a backup) is never it. Label unknown (Windows,
+ * Which candidate: the drive whose index (drive.json) has the album's volume_id, whatever it is
+ * called now; two such (a cloned drive) → none. No drive has it → by label: the album's drive
+ * label known → only a drive with that label ("NO NAME" back as /Volumes/NO NAME 1); a copy on
+ * another drive (a backup) is never it. Label unknown (Windows,
  * not read yet) → only while its own drive is away, and only one candidate. Two: the person relinks.
  * Returns true when an album was skipped because it was uploading (look again once it ends).
  */
@@ -125,35 +143,46 @@ export async function reattachMoved(mainWindow: BrowserWindow, roots?: string[])
   if (lost.length === 0) return false
   forgetDrives() // drives just changed: read their labels again
   const mounted = roots ?? (await mountedRoots())
+  const indexes = mounted.map((root) => ({ root, index: readDriveIndex(root) }))
   const done: Array<{ albumId: string; title: string; folder: string }> = []
   let busy = false
   for (const album of lost) {
-    const rel = album.volume_path!.split('/').filter(Boolean)
-    const found: Array<{ folder: string; label: string | null }> = []
-    for (const root of mounted) {
-      const folder = join(root, ...rel)
-      if (readManifest(folder)?.manifest.albumId !== album.id || folderUser(folder, album.id))
-        continue
-      found.push({ folder, label: baseLabel(await labelOf(root)) })
-    }
-    if (found.length === 0) continue
-    const own = baseLabel(album.volume_label)
-    // The same resolved path volumeOf took volume_path from
-    let ownRoot = resolvedPath(album.sourceFolderPath)
-    for (let i = 0; i < rel.length; i++) ownRoot = dirname(ownRoot)
-    const fits =
-      own != null
-        ? found.filter((f) => f.label === own)
-        : mounted.some((r) => samePath(r, ownRoot))
-          ? [] // its drive is here, the folder moved on it: a copy elsewhere is not it
-          : found
-    if (fits.length !== 1) {
-      logger.info(
-        `${album.id} is in ${found.map((f) => f.folder).join(', ')}: not re-attaching (${fits.length} fit)`
-      )
+    const names = (folder: string): boolean =>
+      readManifest(folder)?.manifest.albumId === album.id && !folderUser(folder, album.id)
+    const byId = album.volume_id
+      ? indexes
+          .filter((d) => d.index?.driveId === album.volume_id)
+          .map((d) => folderOnDrive(d.root, d.index!.albums[album.id] ?? album.volume_path!))
+          .filter(names)
+      : []
+    if (byId.length > 1) {
+      logger.info(`${album.id} is in ${byId.join(', ')}, drives with one id: not re-attaching`)
       continue
     }
-    const folder = fits[0].folder
+    let folder = byId[0]
+    if (!folder) {
+      const found: Array<{ folder: string; label: string | null }> = []
+      for (const root of mounted) {
+        const at = folderOnDrive(root, album.volume_path!)
+        if (names(at)) found.push({ folder: at, label: baseLabel(await labelOf(root)) })
+      }
+      if (found.length === 0) continue
+      const own = baseLabel(album.volume_label)
+      const ownRoot = driveRootOf(album)!
+      const fits =
+        own != null
+          ? found.filter((f) => f.label === own)
+          : mounted.some((r) => samePath(r, ownRoot))
+            ? [] // its drive is here, the folder moved on it: a copy elsewhere is not it
+            : found
+      if (fits.length !== 1) {
+        logger.info(
+          `${album.id} is in ${found.map((f) => f.folder).join(', ')}: not re-attaching (${fits.length} fit)`
+        )
+        continue
+      }
+      folder = fits[0].folder
+    }
     // A relink by hand, or the folder coming back, may have settled it meanwhile
     const now = getAlbum(album.id)
     if (!now?.isOrphaned || sourcePresent(now)) continue
@@ -172,6 +201,32 @@ export async function reattachMoved(mainWindow: BrowserWindow, roots?: string[])
     mainWindow.webContents.send('album:reattached', { ...d, volumeLabel })
   }
   return busy
+}
+
+/**
+ * Albums found on mounted drives by their index, each verified by its folder's manifest: album id
+ * → its folder and the drive's label (null on Windows till read). For a new computer's account list.
+ * ponytail: the same album on two drives (a backup): the first drive listed wins; the person
+ * still picks by hand if it is the wrong one.
+ */
+export async function driveAlbums(
+  roots?: string[]
+): Promise<Map<string, { folder: string; drive: string | null }>> {
+  const out = new Map<string, { folder: string; drive: string | null }>()
+  if (!getConfig().reattach) return out
+  // Windows: drive types read first, so a mapped share isn't read as a local drive
+  if (process.platform === 'win32') await windowsDrives()
+  for (const root of roots ?? (await mountedRoots())) {
+    if (isNetworkDrive(root)) continue // another computer's share, not a drive here
+    const index = readDriveIndex(root)
+    for (const [id, rel] of Object.entries(index?.albums ?? {})) {
+      const folder = folderOnDrive(root, rel)
+      // The id from the manifest's first bytes: a hint for the list; attach reads it in full
+      if (!out.has(id) && manifestAlbumId(folder) === id)
+        out.set(id, { folder, drive: await labelOf(root) })
+    }
+  }
+  return out
 }
 
 const labelTried = new Set<string>()

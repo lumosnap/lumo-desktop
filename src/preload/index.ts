@@ -506,6 +506,7 @@ const api = {
       'album:status-changed',
       'albums:refresh',
       'album:reattached',
+      'drives:changed',
       'album:attach-progress',
       'network:status-changed',
       'update-status'

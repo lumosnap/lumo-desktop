@@ -10,13 +10,14 @@ import {
 } from 'fs'
 import { tmpdir } from 'os'
 import { createHash } from 'crypto'
-import { join } from 'path'
+import { join, relative, sep } from 'path'
 
 const db = vi.hoisted(() => ({
   album: null as null | Record<string, unknown>,
   others: {} as Record<string, Record<string, unknown> | undefined>, // undefined: not local
   onImages: null as null | (() => void) // runs once on the next image listing
 }))
+const drive = vi.hoisted(() => ({ root: '' }))
 const images = vi.hoisted(() => [] as Array<Record<string, unknown>>)
 vi.mock('./database', () => ({
   getAlbum: (id: string) => (id in db.others ? db.others[id] : db.album),
@@ -28,7 +29,14 @@ vi.mock('./database', () => ({
   },
   getAlbumTags: () => new Map([[1, ['bride']]]),
   listSets: () => [{ id: 's', name: 'S', position: 0, coverImageId: 1, imageIds: [1] }],
-  getAlbumPeople: () => [{ id: 'p', name: 'Pat', hidden: 0, faces: [{ imageId: 1 }] }]
+  getAlbumPeople: () => [{ id: 'p', name: 'Pat', hidden: 0, faces: [{ imageId: 1 }] }],
+  resolvedPath: (p: string) => p,
+  // Folders under drive.root are on a drive (its path from the root, as the real volumeOf)
+  volumeOf: (p: string) =>
+    drive.root && (p + sep).startsWith(drive.root + sep)
+      ? { label: null, path: relative(drive.root, p).split(sep).join('/') }
+      : null,
+  updateAlbum: (_id: string, u: Record<string, unknown>) => Object.assign(db.album!, u)
 }))
 vi.mock('./config', () => ({ getConfig: () => ({ portableSnapshot: true }) }))
 const disk = vi.hoisted(() => ({
@@ -75,6 +83,8 @@ import {
   folderOwner,
   isCloudSynced,
   legacyAlbumId,
+  noteOnDrive,
+  readDriveIndex,
   sourcePresent,
   previewsSettled,
   readManifest,
@@ -355,5 +365,90 @@ describe('portable snapshot', () => {
     expect(statSync(join(folder, SNAPSHOT_DIR)).isDirectory()).toBe(true)
     expect(existsSync(join(folder, SNAPSHOT_DIR, '.lumosnap-legacy.json'))).toBe(true)
     expect(legacyAlbumId(folder)).toBe('old-id')
+  })
+
+  describe('drive index', () => {
+    const index = (): string => join(folder, SNAPSHOT_DIR, 'drive.json')
+    beforeEach(() => {
+      // folder is the drive's root; the album sits at Shoots/A on it
+      mkdirSync(join(folder, 'Shoots', 'A'), { recursive: true })
+      drive.root = folder
+      db.album = { id: 'A', sourceFolderPath: join(folder, 'Shoots', 'A'), volume_path: 'Shoots/A' }
+    })
+    it('creates the index once and keeps its driveId in volume_id', () => {
+      noteOnDrive('A')
+      const d = readDriveIndex(folder)!
+      expect(d).toMatchObject({ schema: 1, albums: { A: 'Shoots/A' } })
+      expect(db.album!.volume_id).toBe(d.driveId)
+      const before = readFileSync(index(), 'utf-8')
+      noteOnDrive('A') // unchanged: not written again (no .bak appears)
+      expect(readFileSync(index(), 'utf-8')).toBe(before)
+      expect(existsSync(`${index()}.bak`)).toBe(false)
+    })
+    it('adds to an existing index and drops entries whose folder is gone', () => {
+      mkdirSync(join(folder, SNAPSHOT_DIR))
+      mkdirSync(join(folder, 'B'))
+      const albums = { B: 'B', Gone: 'Nowhere' }
+      writeFileSync(index(), JSON.stringify({ schema: 1, driveId: 'd1', albums }))
+      noteOnDrive('A')
+      expect(readDriveIndex(folder)).toEqual({
+        schema: 1,
+        driveId: 'd1',
+        albums: { B: 'B', A: 'Shoots/A' }
+      })
+      expect(db.album!.volume_id).toBe('d1')
+    })
+    it('an album at the drive root shares .lumosnap with its manifest', () => {
+      db.album = { id: 'A', sourceFolderPath: folder, volume_path: '' }
+      expect(writeManifest('A', true)).toBe(true) // notes the drive too
+      expect(readDriveIndex(folder)?.albums).toEqual({ A: '' })
+      expect(readManifest(folder)?.manifest.albumId).toBe('A')
+    })
+    afterEach(() => (drive.root = ''))
+    it("leaves an unreadable or newer index byte-identical, and uses a newer one's id", () => {
+      mkdirSync(join(folder, SNAPSHOT_DIR))
+      for (const body of [
+        '{"schema":1,"driveId":"d","alb',
+        '{"schema":1,"driveId":"d","albums":[]}'
+      ]) {
+        writeFileSync(index(), body)
+        noteOnDrive('A')
+        expect(readFileSync(index(), 'utf-8')).toBe(body)
+        expect(db.album!.volume_id).toBeUndefined()
+      }
+      const newer = JSON.stringify({ schema: 2, driveId: 'd9', disks: {} })
+      writeFileSync(index(), newer)
+      noteOnDrive('A')
+      expect(readFileSync(index(), 'utf-8')).toBe(newer)
+      expect(db.album!.volume_id).toBe('d9')
+    })
+    it('a torn drive.json with a good .bak keeps its driveId', () => {
+      mkdirSync(join(folder, SNAPSHOT_DIR))
+      writeFileSync(`${index()}.bak`, JSON.stringify({ schema: 1, driveId: 'd5', albums: {} }))
+      writeFileSync(index(), '{"schema":1,"dri')
+      noteOnDrive('A')
+      expect(readDriveIndex(folder)).toMatchObject({ driveId: 'd5', albums: { A: 'Shoots/A' } })
+    })
+    it('a folder whose path no longer leads to its drive (a retargeted link) is not noted', () => {
+      drive.root = join(folder, 'elsewhere') // the path now resolves off the drive
+      noteOnDrive('A')
+      expect(existsSync(index())).toBe(false)
+      drive.root = folder
+      db.album!.volume_path = 'A' // stored at another depth than its path today
+      noteOnDrive('A')
+      expect(existsSync(index())).toBe(false)
+    })
+    it('never writes on a network drive, an internal disk, or a bad index', () => {
+      disk.network = true
+      noteOnDrive('A')
+      expect(existsSync(index())).toBe(false)
+      disk.network = false
+      db.album = { id: 'A', sourceFolderPath: join(folder, 'Shoots', 'A'), volume_path: null }
+      noteOnDrive('A')
+      expect(existsSync(index())).toBe(false)
+      mkdirSync(join(folder, SNAPSHOT_DIR))
+      writeFileSync(index(), JSON.stringify({ schema: 1, driveId: 'd', albums: { A: 3 } }))
+      expect(readDriveIndex(folder)).toBeNull()
+    })
   })
 })

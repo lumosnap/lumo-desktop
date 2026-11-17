@@ -4,9 +4,16 @@ import { clearScanCache, IMAGE_EXTENSIONS } from './storage'
 import { BrowserWindow } from 'electron'
 import { existsSync, watch as fsWatch } from 'fs'
 import { readdir, stat } from 'fs/promises'
-import { reattachMoved, watchMounts } from './drives'
-import { cancelPreviews, resumePreviews } from './portable'
-import { systemLetter } from './volumes'
+import { mountedRoots, reattachMoved, watchMounts } from './drives'
+import {
+  cancelPreviews,
+  manifestAlbumId,
+  noteOnDrive,
+  readDriveIndex,
+  resumePreviews,
+  sourcePresent
+} from './portable'
+import { isNetworkDrive, systemLetter, windowsDrives } from './volumes'
 import { extname, join } from 'path'
 import { debounceByKey, isIgnoredPath } from './utils'
 import { createLogger } from './logger'
@@ -145,7 +152,31 @@ class WatcherService {
     // above changes, yet the list still shows it as there
     if (this.mainWindow && !this.mainWindow.isDestroyed())
       this.mainWindow.webContents.send('albums:refresh')
+    // Albums on a drive not in its index yet (from before it, or just moved): noted now. Only a
+    // folder whose manifest already names the album: a stranger card at the same path is not it
+    const toNote = getAllAlbums().filter(
+      (a) =>
+        !a.adopting &&
+        a.volume_path != null &&
+        !a.volume_id &&
+        sourcePresent(a) &&
+        manifestAlbumId(a.sourceFolderPath) === a.id
+    )
+    // Windows: noteOnDrive waits for the drive types (a mapped share reads as local till then)
+    if (toNote.length && process.platform === 'win32') await windowsDrives()
+    for (const a of toNote) noteOnDrive(a.id)
+    // The account list looks for its albums on the drives again, only when the drives changed.
+    // With each drive's id: a card swapped for another with the same name still counts
+    const roots = (await mountedRoots())
+      .sort()
+      .map((r) => `${r}|${isNetworkDrive(r) ? '' : (readDriveIndex(r)?.driveId ?? '')}`)
+      .join('\n')
+    if (roots !== this.lastRoots && this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.lastRoots = roots
+      this.mainWindow.webContents.send('drives:changed')
+    }
   }
+  private lastRoots: string | null = null
 
   watch(albumId: string, folderPath: string): void {
     if (this.closed) return

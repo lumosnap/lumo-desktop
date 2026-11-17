@@ -41,6 +41,7 @@ export interface Album {
   people_pushed?: string | null // migration 16: JSON person ids of the last people push (a deleted one stays deleted)
   volume_label?: string | null // migration 17: the folder's drive label ("NO NAME"); null = internal disk or not read yet
   volume_path?: string | null // migration 17: the folder relative to its drive's root, '/'-separated; null = internal disk
+  volume_id?: string | null // migration 18: driveId from <drive>/.lumosnap/drive.json the album was last seen on
 }
 
 let users: Set<string> | null = null
@@ -402,6 +403,11 @@ const migrations: Array<(database: Database.Database) => void> = [
       const v = volumeColumns(r.sourceFolderPath ?? '')
       set.run(v.volume_label, v.volume_path, r.id)
     }
+  },
+  // 18: the id of the drive the album was last seen on (portable.ts noteOnDrive), so it is found
+  // again whatever the drive is called. Filled in as each album's drive is seen.
+  (database) => {
+    database.exec('ALTER TABLE albums ADD COLUMN volume_id TEXT')
   }
 ]
 
@@ -676,7 +682,7 @@ export function updateAlbum(id: string, updates: Partial<Album>): void {
     updates.sourceFolderPath !== undefined &&
     updates.sourceFolderPath !== getAlbum(id)?.sourceFolderPath
   )
-    updates = { ...volumeColumns(updates.sourceFolderPath), ...updates }
+    updates = { ...volumeColumns(updates.sourceFolderPath), volume_id: null, ...updates }
 
   const fields = Object.keys(updates)
     .map((key) => `${key} = ?`)

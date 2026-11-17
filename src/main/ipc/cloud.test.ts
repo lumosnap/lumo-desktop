@@ -26,7 +26,8 @@ vi.mock('../watcher', () => ({ watcherService: { watch: vi.fn() } }))
 vi.mock('../drives', () => ({
   isNetworkDrive: () => false,
   isRemovableVolume: () => false,
-  relinkAlbum: vi.fn()
+  relinkAlbum: vi.fn(),
+  driveAlbums: vi.fn(async () => new Map())
 }))
 vi.mock('./sync', () => ({ checkSourceFolder: () => true, diffFolder: vi.fn() }))
 
@@ -34,6 +35,7 @@ import { initDatabase, closeDatabase, getAlbum, getAllAlbums, getAlbumImages } f
 import { hashFile } from '../hash'
 import { finishAdoption } from '../reattach'
 import { attachCloud, listCloud } from './cloud'
+import { driveAlbums } from '../drives'
 
 let loadable = true
 try {
@@ -102,16 +104,25 @@ describe.skipIf(!loadable)('attach a cloud album to a folder', () => {
   it('once local: refused as LOCAL, and hidden from the list', async () => {
     await attachCloud('SRV', folder, null)
     expect(await attachCloud('SRV', folder, null)).toEqual({ success: false, error: 'LOCAL' })
-    api.list.mockResolvedValueOnce([
+    const list = [
       { id: 'SRV', title: 'Wedding', eventDate: null, totalImages: 2, preview_link: null },
       { id: 'B', title: 'Party', eventDate: '2026-01-01', totalImages: 3, preview_link: 'u' }
-    ])
+    ]
+    api.list.mockResolvedValue(list)
     expect(await listCloud()).toEqual({
       success: true,
       albums: [
         { id: 'B', title: 'Party', eventDate: '2026-01-01', totalImages: 3, thumbnailUrl: 'u' }
       ]
     })
+    // On a plugged-in drive: offered with its folder; reading the drives failing loses only that
+    const found = { folder: '/Volumes/CARD/Party', drive: 'CARD' }
+    vi.mocked(driveAlbums).mockResolvedValueOnce(new Map([['B', found]]))
+    expect(await listCloud()).toMatchObject({ success: true, albums: [{ id: 'B', found }] })
+    vi.mocked(driveAlbums).mockRejectedValueOnce(new Error('EIO'))
+    const lost = await listCloud()
+    expect(lost.success && lost.albums[0].found).toBeUndefined()
+    api.list.mockReset()
   })
 
   it('refuses a folder whose manifest names another album as OTHER_ALBUM, asked with a short wait', async () => {

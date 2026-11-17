@@ -8,6 +8,7 @@ import { albumsApi } from '../api-client'
 import { deleteAlbum, getAlbum, getAllAlbums } from '../database'
 import { createLogger, getErrorMessage } from '../logger'
 import { legacyAlbumId, readManifest } from '../portable'
+import { driveAlbums } from '../drives'
 import { adopt, adoptionRunning, AdoptionGoneError, finishAdoption } from '../reattach'
 import { samePath } from './albums'
 
@@ -19,6 +20,8 @@ export interface CloudAlbum {
   eventDate: string | null
   totalImages: number
   thumbnailUrl: string | null
+  /** Its folder on a plugged-in drive, from that drive's index; its manifest names this album */
+  found?: { folder: string; drive: string | null }
 }
 
 /** FAILED: anything else (disk, a bad reply); its message is in the main log */
@@ -75,7 +78,12 @@ export async function listCloud(): Promise<ListCloudResult> {
   try {
     // ponytail: the server returns only its newest 50 albums, so an older one isn't offered
     // here. Add paging to the worker's GET /albums (and a "more" row) when accounts outgrow it.
-    const albums = (await albumsApi.list())
+    // Found on a plugged-in drive: offered with its folder. A failure here only loses the hint
+    const onDrives = driveAlbums().catch((error) => {
+      logger.warn('Drive albums not read:', getErrorMessage(error))
+      return new Map<string, { folder: string; drive: string | null }>()
+    })
+    const albums: CloudAlbum[] = (await albumsApi.list())
       // An attach cut short (adopting) isn't on this computer yet
       .filter((a) => !getAlbum(a.id) || getAlbum(a.id)!.adopting)
       .map((a) => ({
@@ -85,6 +93,11 @@ export async function listCloud(): Promise<ListCloudResult> {
         totalImages: a.totalImages,
         thumbnailUrl: a.preview_link
       }))
+    const found = await onDrives
+    for (const a of albums) {
+      const f = found.get(a.id)
+      if (f) a.found = f
+    }
     return { success: true, albums }
   } catch (error) {
     return { success: false, error: failure('albums:listCloud', error) }

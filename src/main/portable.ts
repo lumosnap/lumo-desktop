@@ -8,7 +8,7 @@
  *   .lumosnap/previews/<hash>.webp, thumbs/<hash>.webp
  *   .lumosnap/.lumosnap-legacy.json   the old single-file .lumosnap, moved here
  */
-import { createHash, randomBytes } from 'crypto'
+import { createHash, randomBytes, randomUUID } from 'crypto'
 import {
   closeSync,
   existsSync,
@@ -26,7 +26,7 @@ import {
 } from 'fs'
 import { copyFile, mkdir, readdir, rename, rm, stat, statfs } from 'fs/promises'
 import { execFile } from 'child_process'
-import { basename, extname, join, resolve } from 'path'
+import { basename, dirname, extname, join, resolve } from 'path'
 import { app } from 'electron'
 import { getConfig } from './config'
 import {
@@ -35,7 +35,10 @@ import {
   getAlbumPeople,
   getAlbumTags,
   getAllAlbums,
-  listSets
+  listSets,
+  resolvedPath,
+  updateAlbum,
+  volumeOf
 } from './database'
 import type { Album } from './database'
 import { drivesKnown, isNetworkDrive, isRemovableVolume } from './volumes'
@@ -549,10 +552,102 @@ export function writeManifest(albumId: string, force = false): boolean {
       !!existing?.current
     )
     if (!isCloudSynced(folder)) kickPreviews(albumId, dir) // not awaited: the manifest is written
+    noteOnDrive(albumId)
     return true
   } catch (error) {
     log.warn(`Snapshot write failed for ${albumId}: ${getErrorMessage(error)}`)
     return false
+  }
+}
+
+export interface DriveIndex {
+  schema: number
+  driveId: string
+  albums: Record<string, string> // album id → its folder from the drive root, as volume_path
+}
+const DRIVE_INDEX = 'drive.json'
+
+function parseIndex(file: string): DriveIndex | null {
+  try {
+    const d = JSON.parse(readFileSync(file, 'utf-8'))
+    const albums = d?.albums
+    if (typeof d?.schema !== 'number' || typeof d.driveId !== 'string' || !d.driveId) return null
+    const ok =
+      !!albums &&
+      typeof albums === 'object' &&
+      !Array.isArray(albums) &&
+      Object.values(albums).every((v) => typeof v === 'string')
+    // A newer app's file: its id counts, its albums only if they read as ours (never rewritten)
+    if (d.schema > 1) return { ...d, albums: ok ? albums : {} }
+    return ok ? (d as DriveIndex) : null
+  } catch {
+    return null // missing, torn or not JSON
+  }
+}
+
+/** The drive's index at its root: drive.json, else its .bak. null when neither is valid. */
+export function readDriveIndex(root: string): DriveIndex | null {
+  const file = join(root, SNAPSHOT_DIR, DRIVE_INDEX)
+  return parseIndex(file) ?? parseIndex(`${file}.bak`)
+}
+
+/** An index entry (or volume_path) as a folder under the drive's root */
+export const folderOnDrive = (root: string, rel: string): string =>
+  join(root, ...rel.split('/').filter((s) => s && s !== '..')) // never off the drive
+
+/**
+ * The root of the drive the album's folder is on: its resolved path less volume_path's
+ * segments (the same path volumeOf took volume_path from). null on the internal disk.
+ */
+export function driveRootOf(album: Pick<Album, 'sourceFolderPath' | 'volume_path'>): string | null {
+  if (album.volume_path == null || !album.sourceFolderPath) return null
+  let root = resolvedPath(album.sourceFolderPath)
+  for (let n = album.volume_path.split('/').filter(Boolean).length; n > 0; n--) root = dirname(root)
+  return root
+}
+
+/**
+ * Record the album in its drive's index (made with a new driveId if none), drop entries whose
+ * folder is gone, and keep the driveId in volume_id. Written only when it changed (cards).
+ * Never throws. Sync on purpose: two albums noted back to back can't interleave.
+ * ponytail: a cloned drive keeps the same driveId; re-attach then refuses to pick (drives.ts).
+ * Re-roll the id on a clash if cloning turns out common.
+ * ponytail: macOS reads its network mounts just after launch; an SMB share under /Volumes noted
+ * in that first second gets an index (as writeManifest writes there). Await readMacMounts if seen.
+ */
+export function noteOnDrive(albumId: string): void {
+  if (!getConfig().portableSnapshot) return
+  const album = getAlbum(albumId)
+  // Its path still leads to the drive it was stored on: a link retargeted to the home folder or
+  // C:\ would make driveRootOf strip the wrong segments
+  const v = album?.sourceFolderPath ? volumeOf(album.sourceFolderPath) : null
+  const root = album && v && v.path === album.volume_path ? driveRootOf(album) : null
+  // Windows: a mapped network letter reads as local until the drive types are read
+  if (!album || !root || (process.platform === 'win32' && !drivesKnown())) return
+  try {
+    // read-only, locked card, network, a sync client's folder
+    if (!existsSync(root) || isCloudSynced(root) || !probeWritable(root)) return
+    const file = join(root, SNAPSHOT_DIR, DRIVE_INDEX)
+    const current = parseIndex(file)
+    const had = current ?? parseIndex(`${file}.bak`)
+    // There but unreadable (locked, failing, not ours): a new id would split the drive in two
+    if (!had && (existsSync(file) || existsSync(`${file}.bak`))) {
+      log.warn(`Drive index at ${root} unreadable: left alone`)
+      return
+    }
+    const index: DriveIndex = had ?? { schema: 1, driveId: randomUUID(), albums: {} }
+    if (index.schema <= 1) {
+      const before = JSON.stringify(index)
+      for (const [id, rel] of Object.entries(index.albums)) {
+        if (!existsSync(folderOnDrive(root, rel))) delete index.albums[id]
+      }
+      index.albums[albumId] = album.volume_path!
+      const after = JSON.stringify(index)
+      if (!had || after !== before) writeDurable(ensureDir(root), DRIVE_INDEX, after, !!current)
+    } // else written by a newer app: its id is used, the file left alone
+    if (album.volume_id !== index.driveId) updateAlbum(albumId, { volume_id: index.driveId })
+  } catch (error) {
+    log.warn(`Drive index not written for ${albumId}: ${getErrorMessage(error)}`)
   }
 }
 
