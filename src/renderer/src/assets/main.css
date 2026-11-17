@@ -746,6 +746,10 @@ img[data-missing] {
   font-size: 13px;
   color: var(--ink-3);
 }
+/* On a narrow card the line breaks between fields, never inside a date or a size */
+.album .info .m span {
+  white-space: nowrap;
+}
 .album .info .hint {
   font-size: 12px;
   color: var(--ink-3);

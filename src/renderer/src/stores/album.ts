@@ -32,6 +32,7 @@ export interface Album {
   unplugged?: boolean // folder missing because its whole drive is gone (album:list's guess)
   volumeName?: string // that drive: the /Volumes name on macOS, "D:" on Windows
   volumeLabel?: string | null // the drive's label ("NO NAME"), kept from when it was last seen
+  cloudSize?: number | null // bytes of its copies in the cloud (the server's count); null = not known yet
   albumType?: 'watch_folder' | 'standalone' // watch_folder = in master folder, standalone = custom path
   // For backward compatibility with frontend
   photoCount?: number
@@ -50,6 +51,12 @@ import type { RowCode } from '../utils/cloud'
 // Shared so the sidebar (counts, print stack) and the Albums view read one list.
 export const useAlbumStore = defineStore('album', () => {
   const albums = ref<Album[]>([])
+  // The online size of each local album from the last account list. Patched into the list in
+  // place: listing again would pick new random covers and check every folder again
+  let sizes: Record<string, number | null> = {}
+  function applySizes(): void {
+    for (const a of albums.value) if (a.id in sizes) a.cloudSize = sizes[a.id]
+  }
   const status = ref<'loading' | 'ready' | 'error'>('loading')
 
   async function load(): Promise<void> {
@@ -57,6 +64,8 @@ export const useAlbumStore = defineStore('album', () => {
       const result = await window.api.albums.list()
       if (!result.success) throw new Error(result.error || 'album:list failed')
       albums.value = result.albums || []
+      // An album:list asked before the sizes were written can answer after them
+      applySizes()
       status.value = 'ready'
     } catch (e) {
       console.error('Failed to load albums:', e)
@@ -82,6 +91,10 @@ export const useAlbumStore = defineStore('album', () => {
       console.error('Failed to list account albums:', res.error)
     if (opts?.keep && !res.success && res.error !== 'AUTH') return false
     cloud.value = res.success ? ordered(res.albums) : []
+    if (res.success) {
+      sizes = res.sizes ?? {}
+      applySizes()
+    }
     cloudFailed.value = !res.success && res.error !== 'AUTH'
     // The drive is back: its old "isn't there any more" line would hide where it is now
     if (res.success)
@@ -152,6 +165,7 @@ export const useAlbumStore = defineStore('album', () => {
     attachSeq++
     cloud.value = null
     cloudFailed.value = false
+    sizes = {}
     attaching.value = null
     attachErrors.value = {}
   }

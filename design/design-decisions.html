@@ -174,6 +174,54 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-11-17-prices-and-cloud-size">
+<h2>Session 2026-11-17 (2): plan prices in dollars, one name for the free plan, and the online size of each album</h2>
+<p>Existing work, Minimal level, component scope: the plan cards and plan heading in Settings (<code>views/SettingsView.vue</code>), the plan name in the sidebar (<code>layouts/AppLayout.vue</code>), the meta line of each album card (<code>views/AlbumView.vue</code>), the file sizes in the sync dialog (<code>components/SyncModal.vue</code>). The look is kept: no new colour, type size, line, chip or icon. Screens: 960 px to 2560 px, desktop only (Electron). Windows first, then macOS.</p>
+<ul>
+<li><b>Who and when:</b> a photographer who looks at the plans before an upgrade, and who looks at the album list each day.</li>
+<li><b>Direction:</b> unchanged, delivery tracking. The size is a fact on the parcel label, not a new part of the parcel.</li>
+</ul>
+<h3 id="decisions-2026-11-17-2">Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected or kept</th><th>Layer</th></tr>
+<tr><td>Plan price</td><td>US dollars: "$5", "$4.99" (cents only when there are cents). 0 or no number: "Free", with no "/mo". One function, <code>planPrice</code> in <code>utils/format.ts</code></td><td>The worker sends whole dollars as a decimal string ("5", "0.00"), and the admin app shows USD. The old code read paise and showed "₹0/mo" for Pro and "Free/mo" for Starter ("0.00" is not "0")</td><td class="rejected">₹ from paise (wrong unit); "$5.00" (cents that are not there)</td><td>1</td></tr>
+<tr><td>"Your plan" with no subscription (review fix)</td><td>Only when the profile says "Trial" (what the worker sends with no subscription) and the free plan has the profile's photo limit, the free plan is "Your plan". Another name that no plan has (a paid plan that was retired) marks no card</td><td>6 of 7 people have no subscription, so no card was marked. A paid person on a retired plan is not on the free plan: calling them "Starter" is false</td><td class="rejected">Mark nothing (the person cannot see where they are); the free plan for any unknown name (first version)</td><td>1</td></tr>
+<tr><td>Plan name</td><td>The heading in Settings and the sidebar say the free plan's name ("Starter"), not "Trial". The plans list loads once with the profile (<code>stores/profile.ts</code>), so both places use one name. Until the list comes, the profile's name shows</td><td>One name for one thing: a heading "Trial" above a card "Starter · Your plan" says two plans. The card names are the names the person can buy and the admin app uses</td><td class="rejected">Keep "Trial" in the heading (two names on one screen); fix only Settings (the sidebar beside it still says "Trial plan")</td><td>1</td></tr>
+<tr><td>Sidebar: "Pro Plan plan"</td><td>No second "plan" when the name ends in "Plan"</td><td>The paid plan is called "Pro Plan"</td><td>Kept: "Starter plan"</td><td>6</td></tr>
+<tr><td>Album size: where</td><td>At the end of the meta line, in its ink and size: "1,240 photos · 12 Oct 2026 · 2.3 GB". Hidden when not known, when 0, and when LumoSnap no longer has the album</td><td>The person asked for it quiet. The meta line is the album's facts; the size is the least used one, so it is last</td><td class="rejected">A new line, a chip, a cloud icon or a bar (each pulls the eye on every card)</td><td>1</td></tr>
+<tr><td>Album size: what it says</td><td>Only the size. The tooltip says "2.3 GB of photos online"</td><td>"online" is the app's word for the server (the "Nothing online was changed." lines). The words would make the line longer on each card</td><td class="rejected">"2.3 GB online" on the card (longer on all cards); "in the cloud" (not the app's word)</td><td>6</td></tr>
+<tr><td>Size units</td><td>1024 bytes to a KB, with KB, MB, GB: "840 MB", "2.3 GB", one decimal under 10. <code>fileSize</code> in <code>utils/format.ts</code>. The sync dialog's own copy (two decimals) now uses it too</td><td>Windows Explorer counts this way, and Windows comes first. The free space in Settings (<code>storage.ts</code>) already counts 1024. Nobody can compare this number with Finder: it is the server's copies, not a folder</td><td class="rejected">1000 (macOS Finder); a different count on each computer (one album, two numbers)</td><td>3</td></tr>
+<tr><td>Size comes on the first visit (review fix)</td><td>The account list gives the sizes of the local albums, and the store puts them on the cards in place. A list of albums that answers after them gets them too. No second list of albums</td><td>Listing the albums again picks new random covers (each cover changed a second after the page opened) and checks each folder again</td><td class="rejected">List the albums again when a size changed (first version)</td><td>5</td></tr>
+<tr><td>Sign-out (review fix)</td><td>Sign-out and an expired sign-in clear the profile (plan, photos used). The plans list stays: it is the same for all</td><td>The next person on this computer saw the last person's plan and use; with the plan name now in the sidebar, more so</td><td class="rejected">Keep the profile until the next fetch (shown to the wrong person)</td><td>5</td></tr>
+<tr><td>Size words (review fix)</td><td>"1 byte" for one; nothing for a size that is not a number or is less than 0</td><td>A bad value from the server must not show "NaN bytes"</td><td>Kept: "512 bytes"</td><td>6</td></tr>
+<tr><td>Narrow card (fix after the look)</td><td>The line breaks only between fields, and the dot stays at the end of a line: each field does not wrap, the dot is held to the field before it</td><td>At 240 px the old line broke inside the date ("12 Oct / 2026"); with the size, a line started with "·"</td><td class="rejected">Let it wrap anywhere (the date broke in two)</td><td>3</td></tr>
+</table>
+<h3>States</h3>
+<table>
+<tr><th>State</th><th>What shows</th></tr>
+<tr><td>Size not known yet (new album, offline, older than the server's newest 50)</td><td>The meta line as before</td></tr>
+<tr><td>Nothing uploaded (size 0)</td><td>The meta line as before</td></tr>
+<tr><td>First visit to Albums</td><td>The list shows; when the account list comes, the sizes come on the cards in place. The covers do not change</td></tr>
+<tr><td>Signed out</td><td>The profile and the sizes are cleared; the next person sees nothing of the last one</td></tr>
+<tr><td>Plans list fails</td><td>The heading says the profile's name ("Trial"); no card is "Your plan" (no cards)</td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>How often</th><th>Tier</th><th>Rule</th><th>Reduced motion</th></tr>
+<tr><td>Size appears on a card</td><td>Once per change</td><td>none</td><td>The text comes in place</td><td>Same</td></tr>
+</table>
+<h3>Look notes</h3>
+<p>A capture of three cards at 240, 348 and 300 px with the app's own <code>main.css</code> (not the running app): the size reads as part of the line, in the same grey. At 240 px the line breaks after "1,240 photos ·". The plan cards and the sidebar are not captured: owed. The running app with a signed-in account is owed for both.</p>
+<h3>Checks</h3>
+<p>vue-tsc and tsc pass. 77 renderer tests pass (new: <code>planPrice</code>, <code>currentPlanOf</code> with a retired plan, <code>fileSize</code> with 1, NaN and less than 0, sizes put in place and kept on a late list). Main tests: 154 pass, 2 fail (the known "ai tags" ones); new: migration 19 and the stored size. ESLint: 0 errors; 2 old warnings in <code>SettingsView.vue</code>. <code>check.py</code>: 0 errors, 4 older ASKs. The middle-dot ASK is kept for the meta line: each card's line is one phrase, not fields read across rows.</p>
+<h3>For the owner</h3>
+<ul>
+<li>A person on a retired paid plan sees that plan's name, and no card is "Your plan".</li>
+<li>The worker sends "Trial" for a person with no subscription. If it sent the free plan's name, the desktop fallback would not be needed.</li>
+<li>The size is a little low: it does not count the thumbnails on the server.</li>
+</ul>
+</article>
+
 <article id="session-2026-11-17-found-on-drive">
 <h2>Session 2026-11-17: an account album on a plugged-in drive is added from that drive</h2>
 <p>Existing work, Minimal level, component scope: the rows of account albums (<code>components/CloudAlbums.vue</code>), their order (<code>stores/album.ts</code>), the words (<code>utils/cloud.ts</code>) and a toast when a drive with account albums is plugged in (<code>App.vue</code>). The back end (<code>src/main</code>, <code>src/preload</code>) is done by another agent: each account album can have <code>found</code> (its folder on a plugged-in drive, and the drive's label), and <code>drives:changed</code> comes after each plug or unplug. The look is kept: the row, <code>.btn.ghost</code>, <code>.btn.quiet</code>, <code>.m</code> line and the toast are the app's own. No new colour, radius or type size. Screens: 960 px to 2560 px, desktop only (Electron). Windows first, then macOS.</p>

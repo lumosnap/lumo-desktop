@@ -4,6 +4,7 @@ import { ChevronRight, Folder, Cloud, ArrowUp, Check } from 'lucide-vue-next'
 import Modal from './ui/Modal.vue'
 import { useNetworkStore } from '../stores/network'
 import { toast } from '../composables/useToast'
+import { fileSize } from '../utils/format'
 
 const networkStore = useNetworkStore()
 
@@ -58,14 +59,6 @@ const title = computed(() =>
         ? `Remove ${massDelete.value.count} photos?`
         : 'Review folder changes'
 )
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 Bytes'
-  const k = 1024
-  const sizes = ['Bytes', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
 
 async function handleSync(confirmMassDelete = false): Promise<void> {
   if (!props.changes) return
@@ -196,7 +189,7 @@ watch(
           </summary>
           <ul>
             <li v-for="f in changes.new" :key="f.filename">
-              {{ f.filename }} <small>{{ formatBytes(f.size) }}</small>
+              {{ f.filename }} <small>{{ fileSize(f.size) }}</small>
             </li>
           </ul>
         </details>

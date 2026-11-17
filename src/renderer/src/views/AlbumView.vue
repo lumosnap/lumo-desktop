@@ -29,7 +29,7 @@ import { useAlbumStore } from '../stores/album'
 import { useProfileStore } from '../stores/profile'
 import { useNetworkStore } from '../stores/network'
 import { toast } from '../composables/useToast'
-import { albumDay, fileManager, nf } from '../utils/format'
+import { albumDay, fileManager, fileSize, nf } from '../utils/format'
 import { relinkError as relinkWords } from '../utils/cloud'
 
 const albumStore = useAlbumStore()
@@ -407,6 +407,8 @@ function closeRelink(): void {
   relinkAlbum.value = null
 }
 
+// Between the fields of an album's line: the dot stays at the end of a line, never starts one
+const sep = '\u00a0· '
 const photoCount = (n: number): string => `${nf(n)} photo${n === 1 ? '' : 's'}`
 
 // Upload pill
@@ -673,8 +675,16 @@ onUnmounted(() => {
             <div>
               <div class="t">{{ album.title }}</div>
               <div class="m num">
-                {{ album.totalImages ? `${nf(album.totalImages)} photos` : 'Empty'
-                }}{{ albumDate(album) ? ` · ${albumDate(album)}` : '' }}
+                <span>{{ album.totalImages ? `${nf(album.totalImages)} photos` : 'Empty' }}</span>
+                <template v-if="albumDate(album)"
+                  >{{ sep }}<span>{{ albumDate(album) }}</span></template
+                >
+                <template v-if="album.cloudSize && !album.server_missing"
+                  >{{ sep
+                  }}<span :title="`${fileSize(album.cloudSize)} of photos online`">{{
+                    fileSize(album.cloudSize)
+                  }}</span></template
+                >
               </div>
               <div v-if="album.isOrphaned" class="hint">
                 {{

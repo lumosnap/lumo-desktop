@@ -42,6 +42,7 @@ export interface Album {
   volume_label?: string | null // migration 17: the folder's drive label ("NO NAME"); null = internal disk or not read yet
   volume_path?: string | null // migration 17: the folder relative to its drive's root, '/'-separated; null = internal disk
   volume_id?: string | null // migration 18: driveId from <drive>/.lumosnap/drive.json the album was last seen on
+  cloud_size?: number | null // migration 19: bytes of the album's copies in the cloud (server totalSize); null = not known yet
 }
 
 let users: Set<string> | null = null
@@ -408,6 +409,11 @@ const migrations: Array<(database: Database.Database) => void> = [
   // again whatever the drive is called. Filled in as each album's drive is seen.
   (database) => {
     database.exec('ALTER TABLE albums ADD COLUMN volume_id TEXT')
+  },
+  // 19: the bytes the server keeps for the album (its totalSize), copied in when the Albums page
+  // lists the cloud. Local file sizes are the originals, so this can't be computed here.
+  (database) => {
+    database.exec('ALTER TABLE albums ADD COLUMN cloud_size INTEGER')
   }
 ]
 

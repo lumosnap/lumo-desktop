@@ -35,6 +35,19 @@ beforeEach(() => {
 })
 
 describe('album store: account albums', () => {
+  it('puts the online sizes on the albums in place, also on a list that answers later', async () => {
+    const s = useAlbumStore()
+    s.albums = [{ id: 'a' } as never, { id: 'b' } as never]
+    api.albums.listCloud.mockResolvedValue({ success: true, albums: [], sizes: { a: 2048 } })
+    await s.loadCloud()
+    expect(s.albums.map((x) => x.cloudSize)).toEqual([2048, undefined])
+    expect(api.albums.list).not.toHaveBeenCalled()
+    // An album:list asked before the sizes were stored answers now, without them
+    api.albums.list.mockResolvedValue({ success: true, albums: [{ id: 'a', cloudSize: null }] })
+    await s.load()
+    expect(s.albums[0].cloudSize).toBe(2048)
+  })
+
   it('cloudShown hides albums already here and keeps the one being matched', async () => {
     const s = useAlbumStore()
     s.albums = [{ id: 'a' } as never]

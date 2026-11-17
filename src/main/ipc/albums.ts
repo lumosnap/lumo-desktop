@@ -362,6 +362,7 @@ export function registerAlbumHandlers(mainWindow: BrowserWindow): void {
             needsSync: present ? album.needsSync : 0,
             ...(present ? {} : folderAbsence(album.sourceFolderPath)),
             volumeLabel: album.volume_label ?? null,
+            cloudSize: album.cloud_size ?? null,
             thumbnail
           }
         })

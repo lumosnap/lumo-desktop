@@ -105,7 +105,14 @@ describe.skipIf(!loadable)('attach a cloud album to a folder', () => {
     await attachCloud('SRV', folder, null)
     expect(await attachCloud('SRV', folder, null)).toEqual({ success: false, error: 'LOCAL' })
     const list = [
-      { id: 'SRV', title: 'Wedding', eventDate: null, totalImages: 2, preview_link: null },
+      {
+        id: 'SRV',
+        title: 'Wedding',
+        eventDate: null,
+        totalImages: 2,
+        preview_link: null,
+        totalSize: 2048
+      },
       { id: 'B', title: 'Party', eventDate: '2026-01-01', totalImages: 3, preview_link: 'u' }
     ]
     api.list.mockResolvedValue(list)
@@ -113,8 +120,11 @@ describe.skipIf(!loadable)('attach a cloud album to a folder', () => {
       success: true,
       albums: [
         { id: 'B', title: 'Party', eventDate: '2026-01-01', totalImages: 3, thumbnailUrl: 'u' }
-      ]
+      ],
+      sizes: { SRV: 2048 }
     })
+    // The local album keeps the server's size of its cloud copies
+    expect(getAlbum('SRV')?.cloud_size).toBe(2048)
     // On a plugged-in drive: offered with its folder; reading the drives failing loses only that
     const found = { folder: '/Volumes/CARD/Party', drive: 'CARD' }
     vi.mocked(driveAlbums).mockResolvedValueOnce(new Map([['B', found]]))

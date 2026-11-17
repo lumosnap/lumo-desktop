@@ -5,7 +5,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { existsSync, rmSync } from 'fs'
 import { albumsApi } from '../api-client'
-import { deleteAlbum, getAlbum, getAllAlbums } from '../database'
+import { deleteAlbum, getAlbum, getAllAlbums, updateAlbum } from '../database'
 import { createLogger, getErrorMessage } from '../logger'
 import { legacyAlbumId, readManifest } from '../portable'
 import { driveAlbums } from '../drives'
@@ -28,7 +28,8 @@ export interface CloudAlbum {
 type Failure = 'OFFLINE' | 'AUTH' | 'SERVER' | 'FAILED'
 
 export type ListCloudResult =
-  | { success: true; albums: CloudAlbum[] }
+  /** sizes: each local album's cloud_size (bytes online; null = not known), as stored now */
+  | { success: true; albums: CloudAlbum[]; sizes: Record<string, number | null> }
   | { success: false; error: Failure }
 
 export type AttachCloudResult =
@@ -83,7 +84,17 @@ export async function listCloud(): Promise<ListCloudResult> {
       logger.warn('Drive albums not read:', getErrorMessage(error))
       return new Map<string, { folder: string; drive: string | null }>()
     })
-    const albums: CloudAlbum[] = (await albumsApi.list())
+    const server = await albumsApi.list()
+    // The size of each local album's copies in the cloud, for its row on the Albums page. The
+    // server keeps it; the sizes here are the originals'. Written only when it changed
+    const sizes: Record<string, number | null> = {}
+    for (const a of server) {
+      const local = getAlbum(a.id)
+      if (!local || local.adopting) continue
+      sizes[a.id] = a.totalSize ?? null
+      if ((local.cloud_size ?? null) !== sizes[a.id]) updateAlbum(a.id, { cloud_size: sizes[a.id] })
+    }
+    const albums: CloudAlbum[] = server
       // An attach cut short (adopting) isn't on this computer yet
       .filter((a) => !getAlbum(a.id) || getAlbum(a.id)!.adopting)
       .map((a) => ({
@@ -98,7 +109,7 @@ export async function listCloud(): Promise<ListCloudResult> {
       const f = found.get(a.id)
       if (f) a.found = f
     }
-    return { success: true, albums }
+    return { success: true, albums, sizes }
   } catch (error) {
     return { success: false, error: failure('albums:listCloud', error) }
   }

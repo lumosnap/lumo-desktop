@@ -83,12 +83,12 @@ describe.skipIf(!loadable)('runMigrations', () => {
 
     const cols = (t: string): string[] =>
       (db.pragma(`table_info(${t})`) as Array<{ name: string }>).map((c) => c.name)
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(cols('albums')).toContain('private_note')
     expect(cols('albums')).toContain('vectors_hash')
     expect(cols('albums')).toContain('vectors_ids')
     expect(cols('albums')).toEqual(
-      expect.arrayContaining(['volume_label', 'volume_path', 'volume_id'])
+      expect.arrayContaining(['volume_label', 'volume_path', 'volume_id', 'cloud_size'])
     )
     expect(cols('image_notes')).toEqual(['image_id', 'body', 'updated_at'])
     expect(cols('image_done')).toEqual(['image_id', 'done_at'])
