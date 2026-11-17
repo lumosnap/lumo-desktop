@@ -4,9 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import Modal from '../components/ui/Modal.vue'
 import { useAuthStore } from '../stores/auth'
-import { useProfileStore } from '../stores/profile'
+import { useProfileStore, type Plan } from '../stores/profile'
 import { useUpdater } from '../composables/useUpdater'
 import { useBookingUrl } from '../composables/useBookingUrl'
+import { planPrice } from '../utils/format'
 import {
   UserRound,
   Receipt,
@@ -105,15 +106,7 @@ function toggleStack(): void {
 }
 
 /* ---- billing ---- */
-interface Plan {
-  id: number
-  name: string
-  displayName: string
-  imageLimit: number
-  priceMonthly: string
-  description: string
-}
-const availablePlans = ref<Plan[]>([])
+const availablePlans = computed(() => profileStore.plans)
 const isLoadingPlans = ref(false)
 const selectedPlanId = ref<number | null>(null)
 const requestedPlanId = ref<number | null>(null)
@@ -129,29 +122,16 @@ function formatExpiryDate(date: string | null): string {
   })
 }
 
-// priceMonthly is in paise, as a string
-function formatPrice(priceMonthly: string): string {
-  const cents = parseInt(priceMonthly, 10)
-  if (cents === 0) return 'Free'
-  return `₹${(cents / 100).toFixed(0)}`
-}
-
-const isCurrentPlan = (plan: Plan): boolean => plan.displayName === profileStore.profile?.planName
+const isCurrentPlan = (plan: Plan): boolean => plan === profileStore.currentPlan
 const isPlanUpgrade = (plan: Plan): boolean =>
   !!profileStore.profile && plan.imageLimit > profileStore.profile.imageLimit
 const isBelowUsage = (plan: Plan): boolean =>
   !!profileStore.profile && plan.imageLimit < profileStore.profile.totalImages
 
 async function loadPlans(): Promise<void> {
-  isLoadingPlans.value = true
-  try {
-    const result = await window.api.plans.list()
-    if (result.success && result.data) availablePlans.value = result.data
-  } catch (err: unknown) {
-    console.error('Failed to load plans:', err)
-  } finally {
-    isLoadingPlans.value = false
-  }
+  isLoadingPlans.value = !availablePlans.value.length
+  await profileStore.loadPlans()
+  isLoadingPlans.value = false
 }
 
 async function requestUpgrade(planId: number): Promise<void> {
@@ -417,7 +397,7 @@ onMounted(() => {
           <!-- Plan and billing -->
           <template v-else-if="tab === 'billing'">
             <div class="card">
-              <h2>{{ profileStore.profile?.planName || 'Loading…' }}</h2>
+              <h2>{{ profileStore.planName || 'Loading…' }}</h2>
               <div class="sub">
                 Expires {{ formatExpiryDate(profileStore.profile?.planExpiry || null) }}
               </div>
@@ -480,8 +460,8 @@ onMounted(() => {
                     >
                   </div>
                   <div class="p num">
-                    {{ formatPrice(plan.priceMonthly)
-                    }}<small v-if="plan.priceMonthly !== '0'">/mo</small>
+                    {{ planPrice(plan.priceMonthly)
+                    }}<small v-if="planPrice(plan.priceMonthly) !== 'Free'">/mo</small>
                   </div>
                   <div class="num" style="font-size: 14px">
                     {{ plan.imageLimit.toLocaleString() }} photos

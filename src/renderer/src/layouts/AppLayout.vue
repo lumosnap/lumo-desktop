@@ -105,7 +105,11 @@ onMounted(() => {
       <div class="side-foot">
         <div v-if="limit" class="usage">
           <div class="usage-row">
-            <span>{{ profileStore.profile?.planName }} plan</span>
+            <!-- "Pro Plan" is not "Pro Plan plan" -->
+            <span
+              >{{ profileStore.planName
+              }}{{ /\bplan$/i.test(profileStore.planName ?? '') ? '' : ' plan' }}</span
+            >
             <span class="num">{{ Math.round((used / limit) * 100) }}%</span>
           </div>
           <div

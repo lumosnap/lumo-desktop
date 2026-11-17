@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useAlbumStore } from './album'
+import { useProfileStore } from './profile'
 
 interface User {
   id: string
@@ -80,6 +81,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     isAuthenticated.value = false
     useAlbumStore().resetCloud()
+    useProfileStore().clearProfile()
     console.log('[Auth] Logged out')
   }
 
@@ -88,6 +90,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     isAuthenticated.value = false
     useAlbumStore().resetCloud()
+    useProfileStore().clearProfile()
   }
 
   return {

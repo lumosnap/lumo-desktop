@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { currentPlanOf } from '../utils/format'
 
 interface ProfileData {
   id: number
@@ -17,6 +18,15 @@ interface ProfileData {
   updatedAt: string
 }
 
+export interface Plan {
+  id: number
+  name: string
+  displayName: string
+  imageLimit: number
+  priceMonthly: string
+  description: string
+}
+
 export const useProfileStore = defineStore('profile', () => {
   const profile = ref<ProfileData | null>(null)
   const loading = ref(false)
@@ -30,6 +40,20 @@ export const useProfileStore = defineStore('profile', () => {
     }
     return null // Let the component handle fallback
   })
+
+  // The plans on sale, so the plan is called by one name everywhere: with no subscription the
+  // worker says "Trial", while the plans list calls that free plan "Starter"
+  const plans = ref<Plan[]>([])
+  const currentPlan = computed(() => currentPlanOf(plans.value, profile.value))
+  const planName = computed(() => currentPlan.value?.displayName ?? profile.value?.planName ?? null)
+  async function loadPlans(): Promise<void> {
+    try {
+      const result = await window.api.plans.list()
+      if (result.success && result.data) plans.value = result.data
+    } catch (err: unknown) {
+      console.error('Failed to load plans:', err)
+    }
+  }
 
   // Computed: is user near their image limit (>80%)
   const isNearLimit = computed(() => {
@@ -66,6 +90,7 @@ export const useProfileStore = defineStore('profile', () => {
 
     loading.value = true
     error.value = null
+    if (!plans.value.length) loadPlans()
 
     try {
       const result = await window.api.profile.get()
@@ -125,6 +150,10 @@ export const useProfileStore = defineStore('profile', () => {
     isAtLimit,
     remainingImages,
     usagePercentage,
+    plans,
+    currentPlan,
+    planName,
+    loadPlans,
     fetchProfile,
     updateProfile,
     clearProfile
