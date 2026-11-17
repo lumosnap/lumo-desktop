@@ -52,6 +52,38 @@ describe('album store: account albums', () => {
     expect(s.attachErrors.c).toBe('OTHER_ALBUM')
   })
 
+  it('albums on a plugged-in drive come first, but not while a match runs', async () => {
+    const s = useAlbumStore()
+    const found = { folder: '/Volumes/NO NAME/b', drive: 'NO NAME' }
+    const f = (id: string): object => ({ ...cloudAlbum(id), found })
+    const list = [cloudAlbum('a'), f('b'), cloudAlbum('c'), f('d')]
+    api.albums.listCloud.mockResolvedValue({ success: true, albums: list })
+    await s.loadCloud()
+    expect(s.cloudShown.map((c) => c.id)).toEqual(['b', 'd', 'a', 'c'])
+
+    // A drive comes while c matches: the rows stay, a new album goes last
+    const m = later<unknown>()
+    api.albums.attachCloud.mockReturnValue(m.p)
+    const run = s.attach(cloudAlbum('c'), '/x')
+    api.albums.listCloud.mockResolvedValue({
+      success: true,
+      albums: [f('e'), f('a'), f('b'), cloudAlbum('c'), f('d')]
+    })
+    await s.loadCloud()
+    expect(s.cloudShown.map((c) => c.id)).toEqual(['b', 'd', 'a', 'c', 'e'])
+    m.done({ success: false, error: 'NO_FOLDER' })
+    await run
+    expect(s.attachErrors.c).toBe('NO_FOLDER')
+
+    // The drive is back: the old line goes; a failed ask with keep leaves the list
+    api.albums.listCloud.mockResolvedValue({ success: true, albums: [f('c')] })
+    expect(await s.loadCloud()).toBe(true)
+    expect(s.attachErrors.c).toBeUndefined()
+    api.albums.listCloud.mockResolvedValue({ success: false, error: 'SERVER' })
+    expect(await s.loadCloud({ keep: true })).toBe(false)
+    expect([s.cloud?.map((c) => c.id), s.cloudFailed]).toEqual([['c'], false])
+  })
+
   it('a late answer to an older ask is dropped', async () => {
     const s = useAlbumStore()
     const first = later<unknown>()

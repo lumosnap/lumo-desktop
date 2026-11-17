@@ -174,6 +174,82 @@ a { color: var(--brand); }
 </ul>
 </section>
 
+<article id="session-2026-11-17-found-on-drive">
+<h2>Session 2026-11-17: an account album on a plugged-in drive is added from that drive</h2>
+<p>Existing work, Minimal level, component scope: the rows of account albums (<code>components/CloudAlbums.vue</code>), their order (<code>stores/album.ts</code>), the words (<code>utils/cloud.ts</code>) and a toast when a drive with account albums is plugged in (<code>App.vue</code>). The back end (<code>src/main</code>, <code>src/preload</code>) is done by another agent: each account album can have <code>found</code> (its folder on a plugged-in drive, and the drive's label), and <code>drives:changed</code> comes after each plug or unplug. The look is kept: the row, <code>.btn.ghost</code>, <code>.btn.quiet</code>, <code>.m</code> line and the toast are the app's own. No new colour, radius or type size. Screens: 960 px to 2560 px, desktop only (Electron). Windows first, then macOS.</p>
+<ul>
+<li><b>Who and when:</b> a photographer on a new or reinstalled computer, with the shoot drive in hand. Before this work, they had to find each album's folder in a folder dialog, though LumoSnap can read where it is.</li>
+<li><b>Direction:</b> unchanged, delivery tracking. The parcel is already at the door: the row says where it is, and one press brings it in.</li>
+<li><b>Signature moment:</b> unchanged. The obvious-next-thing: LumoSnap names the drive and folder, so the person only says yes.</li>
+<li><b>Ending:</b> the same as "Choose folder…": the match, its progress, the "is on this computer now" toast with "Open".</li>
+</ul>
+<h3 id="decisions-2026-11-17">Decisions</h3>
+<table>
+<tr><th>Element</th><th>Decision</th><th>Because</th><th>Rejected or kept</th><th>Layer</th></tr>
+<tr><td>Row with a found folder: button</td><td>"Add from “NO NAME”" with the <code>HardDrive</code> icon, the same ghost small pill in the same place. It starts the match on <code>found.folder</code> at once; no folder dialog. With no label: "Add from “Asha &amp; Rohan”" (the folder name)</td><td>The label is the name the person sees on the drive in their hand (and in Explorer). A folder name is a real name too; "this drive" is not, when two drives are in</td><td class="rejected">"Add from this drive" (no name to check); a black pill on each found row (several black pills beside the black "New album")</td><td>1</td></tr>
+<tr><td>Row with a found folder: where</td><td>A second <code>.m</code> line: "In “Asha &amp; Rohan” on “NO NAME”" (no label: "on a plugged-in drive"). The full path is the line's tooltip. The matching line and the error line take its place, as before</td><td>The person can check the folder before the press; a wrong folder costs minutes of matching</td><td class="rejected">The full path in the row (long, and the same start on each row)</td><td>1</td></tr>
+<tr><td>Other folder</td><td>"Other folder…" (<code>.btn.quiet</code> small, left of the main button) opens the folder dialog, as "Choose folder…" did. Hidden while its own row matches; off with the others during any match</td><td>The found folder can be an older copy; the person must still be able to choose. Quiet, so the drive's button reads first</td><td class="rejected">Only in a menu (one more step for the fallback); no fallback</td><td>1</td></tr>
+<tr><td>One path for both</td><td>The pick and the found folder both go to one <code>attach(c, folder)</code>: one album at a time, the same progress line, status text, errors, toasts and focus return</td><td>Two copies of the error and focus rules drift</td><td>Kept: the old <code>choose()</code> rules</td><td>1</td></tr>
+<tr><td>Focus return (review fix)</td><td>Found by album id (<code>data-id</code> on each row), not by place: the album's own row if it stays (an error), else the row after it, else the row before it, else the last row. The main button (<code>.btn.ghost</code>) gets the focus, not "Other folder…". "Show all" also goes to the main button</td><td>A drive event can reorder or add rows during a match, so the old place can be a different album. The main button is the one the person most likely presses next</td><td class="rejected">The row at the old index (the 2026-11-16 rule)</td><td>6</td></tr>
+<tr><td>Order (review fix)</td><td>Found albums first; the rest keep the server's order (newest first). The order is set when the list comes, not on each render. While a match runs, a new list keeps the rows where they are and puts new albums last</td><td>The drive in hand is why the person is here now. With 50 albums, a found album at place 30 would be behind "Show all". A found row's button starts a match of some minutes with no dialog, so rows must not jump under the pointer during a match. With no match, rows move only after a plug, when the hand is on the drive</td><td class="rejected">Server order only; the order kept at all times (found albums stay hidden lower down)</td><td>3</td></tr>
+<tr><td>Reload on <code>drives:changed</code></td><td>In <code>App.vue</code>, beside <code>album:reattached</code>, removed on unmount. Only when signed in, online, and the list was asked for once (<code>cloud</code> not null). The store's <code>loadCloud()</code>; its request count drops an older answer if Albums asks at the same time</td><td>One listener for the whole app, so the list is right on every screen. A list never asked for is asked by Albums when it opens, with the new <code>found</code></td><td class="rejected">A listener in the store (no unmount, piles up on a hot reload); a listener in <code>AlbumView</code> (misses the plug on other screens)</td><td>5</td></tr>
+<tr><td>Toast when a drive has account albums</td><td>After that reload, albums that now have <code>found</code> and did not before: one album "Found “A” on “NO NAME”. It isn’t on this computer yet."; more "“NO NAME” has 2 of your albums that aren’t on this computer." With "Show". No label: "a drive you plugged in"; two drives: "The drives you plugged in have 3 of your albums…"</td><td>"Found … on “NO NAME”" is the same shape as the toast for an album that came back. The second sentence says why this one needs the person</td><td class="rejected">A toast per album (one toast at a time; the last wins)</td><td>5</td></tr>
+<tr><td>Toast: "Show"</td><td>Goes to Albums if not there, then puts the focus on the main button of the first newly found album's row, by its id (the focus scrolls it into view). While a match runs, the row itself gets the focus. If the row is not shown (behind "Show all"), it scrolls to the section heading (review fix)</td><td>Under a big library the section is below the fold. On Albums the toast still shows: the rows may not be in view</td><td class="rejected">No toast on Albums (the person may not see the rows change below the fold)</td><td>5</td></tr>
+<tr><td>Toast: first list</td><td>No toast for the first list after launch or sign-in. Only a change after a plug</td><td>The first list is asked for by Albums, the screen where the rows are, and found rows are at the top of it. A toast would repeat what the screen shows</td><td class="rejected">A toast once at launch for a drive plugged in before (says what the screen already shows)</td><td>5</td></tr>
+<tr><td>Reload fails (review fix)</td><td>A drive event's reload keeps the list it had when the ask fails (<code>loadCloud({ keep: true })</code>). After a failed ask from the page (the list is empty and failed), the next good list gives no toast</td><td>An empty list after a failure is "unknown", not "nothing found". Without this, the next good list said that long-found albums were new</td><td class="rejected">Every failure empties the list (the page's own rule, kept for the page)</td><td>5</td></tr>
+<tr><td>Two toasts from one plug (review fix)</td><td>No found toast in the 5 s after a "Found “A” on “NO NAME”." toast for a local album</td><td>One toast at a time: the found toast would replace that toast and its "Open". The found rows are still first in the list</td><td class="rejected">One combined toast (two actions do not fit the toast)</td><td>5</td></tr>
+<tr><td>Old error after the drive is back (review fix)</td><td>When a good list says an album is found, its old NO_FOLDER line ("That folder isn’t there any more…") goes</td><td>The line was true before the plug; now it hid where the folder is</td><td class="rejected">Keep the line until the next press</td><td>5</td></tr>
+<tr><td>Toast: never signed out</td><td>No reload and no toast when signed out or offline; and none if sign-out happens during the reload</td><td>The next person on this computer must not see this account's albums</td><td>Kept: the 2026-11-16 sign-out rule</td><td>5</td></tr>
+</table>
+<h3>States</h3>
+<table>
+<tr><th>State</th><th>What shows</th></tr>
+<tr><td>Found, with label</td><td>Meta; "In “Asha &amp; Rohan” on “NO NAME”"; "Other folder…" and "Add from “NO NAME”"</td></tr>
+<tr><td>Found, no label</td><td>"In “Asha &amp; Rohan” on a plugged-in drive"; "Add from “Asha &amp; Rohan”"</td></tr>
+<tr><td>Matching a found album</td><td>"Other folder…" goes; "Matching…" and the count line, as before</td></tr>
+<tr><td>Error on a found album</td><td>The red line in place of the "In …" line; both buttons stay</td></tr>
+<tr><td>Drive unplugged</td><td>The list reloads; the row goes back to "Choose folder…"; no toast</td></tr>
+<tr><td>Drive unplugged during its match</td><td>The match fails with the back end's error line (NO_FOLDER: "Plug the drive back in, or choose another folder.")</td></tr>
+<tr><td>Same drive plugged in again</td><td>The toast again: each plug is a new event</td></tr>
+<tr><td>Screen reader</td><td>Main button name "Add from “NO NAME”: Asha &amp; Rohan"; the other "Other folder for Asha &amp; Rohan". Both start with the visible words. When no match runs, the main button is described by the "In “Asha &amp; Rohan” on “NO NAME”" line (<code>aria-describedby</code>), so the person hears the folder before the press (review fix)</td></tr>
+<tr><td>Empty drive label</td><td>Treated as no label in every string: "Add from “Asha &amp; Rohan”" (review fix)</td></tr>
+</table>
+<h3>Motion map</h3>
+<table>
+<tr><th>Change</th><th>How often</th><th>Tier</th><th>Rule</th><th>Reduced motion</th></tr>
+<tr><td>Rows reorder after a plug</td><td>Rare</td><td>none</td><td>The list changes in place; the toast says why</td><td>Same</td></tr>
+<tr><td>Drive toast</td><td>Rare</td><td>micro</td><td>The app's toast, 4.2 s</td><td>Same</td></tr>
+<tr><td>"Show" scroll</td><td>Rare</td><td>none</td><td>Instant scroll by focus</td><td>Same</td></tr>
+</table>
+<h3>App-wide states</h3>
+<table>
+<tr><th>State</th><th>What happens</th></tr>
+<tr><td>Signed out</td><td><code>drives:changed</code> does nothing: no reload, no toast</td></tr>
+<tr><td>Offline</td><td>No reload (the section is hidden offline, as before); back online, Albums asks again and the found rows come first</td></tr>
+<tr><td>First launch, drive already in</td><td>Albums asks for the list; found rows are at the top; no toast</td></tr>
+<tr><td>Not found, no access, crash</td><td>Not changed by this work</td></tr>
+<tr><td>Keyboard only</td><td>Tab reaches "Other folder…" then the main button; "Show" in the toast puts the focus on the first found row's main button</td></tr>
+</table>
+<h3>Chunks</h3>
+<table>
+<tr><th>Chunk</th><th>Files</th><th>By</th><th>Contract</th><th>Parity</th></tr>
+<tr><td>Account album rows</td><td>components/CloudAlbums.vue, utils/cloud.ts</td><td>this session</td><td>Baseline: "Choose folder…" opens the folder dialog, then one match at a time with progress, errors, toasts and focus return</td><td>Same for every row without <code>found</code> (the code path is the same function). Changed on purpose: rows with <code>found</code> get "Add from …" and "Other folder…"</td></tr>
+<tr><td>List order</td><td>stores/album.ts (<code>cloudShown</code>)</td><td>this session</td><td>Baseline: server order, the album being matched first</td><td>Same when no album is found; found albums move up, but not during a match (unit test)</td></tr>
+<tr><td>Drive plug</td><td>App.vue</td><td>this session</td><td>New event</td><td>New. <code>album:reattached</code> and its toast are not changed</td></tr>
+</table>
+<h3>Removed</h3>
+<p>Nothing removed. The <code>folderName</code> helper moved from the component to <code>utils/cloud.ts</code> (one copy, now also used by the words).</p>
+<h3>Look notes</h3>
+<p>Owed. No capture exists of the found row or the drive toast.</p>
+<h3>Checks</h3>
+<p><code>pnpm typecheck:web</code> (<code>vue-tsc --noEmit -p tsconfig.web.json --composite false</code>) passes. 72 renderer unit tests pass, new ones for the button and line words, <code>newlyFound</code>, the toast words, the found-first order, the order kept during a match, the NO_FOLDER line cleared, and a failed ask that keeps the list. A reviewer agent read the code; its findings are in the rows marked "review fix". ESLint passes on the changed files. <code>check.py src/renderer/src</code>: 0 errors, 4 ASKs, all older and app-wide (the meta line "412 photos · 12 Oct 2026" is one phrase, kept). Owed: the visual review. I did not render the row in the running app (it needs a signed-in account and a drive), so no capture exists. Check at 960 px that "Other folder…" and a long label ("EOS_DIGITAL") leave room for the title. A critique by a fresh reviewer is also owed.</p>
+<h3>For the owner</h3>
+<ul>
+<li>The line under the heading still says "Choose the folder that has an album’s photos." It is right for the other rows. Change it only if most people see found rows.</li>
+<li>A found row's main button is ghost, as before. A filled button would make the drive's albums stand out more, but many found rows would give many black pills.</li>
+</ul>
+</article>
+
 <article id="session-2026-11-16-drive-attach-and-cloud-albums">
 <h2>Session 2026-11-16: an unplugged album waits for its drive, and albums on the account can come to this computer</h2>
 <p>Existing work, Minimal level, component and flow scope: the "Drive unplugged" and "Folder missing" album, opened (<code>AlbumView.vue</code>); the toast when a drive comes back (<code>App.vue</code>); a new section for albums on the account that are not on this computer (<code>components/CloudAlbums.vue</code>, words in <code>utils/cloud.ts</code>). The look is kept: every new part uses the app's <code>.card</code>, <code>Modal</code>, <code>.btn.primary</code>, <code>.btn.ghost</code>, <code>.btn.quiet</code>, <code>.wait</code>, <code>.spin</code>, <code>.err</code>, <code>.link</code> and toast. No new colour, radius or type size. Screens: 960 px to 2560 px, desktop only (Electron). The back end is done in <code>src/main</code> by another agent and is not changed here.</p>

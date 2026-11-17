@@ -70,16 +70,33 @@ export const useAlbumStore = defineStore('album', () => {
   // The last ask failed (not signed out: that goes to sign-in): an empty library says so
   const cloudFailed = ref(false)
   let cloudReq = 0
-  async function loadCloud(): Promise<void> {
+  /** keep: a failed ask leaves the list as it was (a drive event, not the page asking).
+   * true when this ask's answer is the list now */
+  async function loadCloud(opts?: { keep?: boolean }): Promise<boolean> {
     const req = ++cloudReq
     const res = await window.api.albums
       .listCloud()
       .catch((e) => (console.error(e), { success: false as const, error: 'FAILED' as const }))
-    if (req !== cloudReq) return
+    if (req !== cloudReq) return false
     if (!res.success && res.error !== 'OFFLINE')
       console.error('Failed to list account albums:', res.error)
-    cloud.value = res.success ? res.albums : []
+    if (opts?.keep && !res.success && res.error !== 'AUTH') return false
+    cloud.value = res.success ? ordered(res.albums) : []
     cloudFailed.value = !res.success && res.error !== 'AUTH'
+    // The drive is back: its old "isn't there any more" line would hide where it is now
+    if (res.success)
+      for (const c of res.albums)
+        if (c.found && attachErrors.value[c.id] === 'NO_FOLDER') delete attachErrors.value[c.id]
+    return res.success
+  }
+  // Albums whose folder is on a plugged-in drive come first: the drive in hand is why the
+  // person is here. The rest keep the server's order (newest first). While a match runs the
+  // rows stay where they are (new ones at the end), so nothing moves under the pointer
+  function ordered(list: CloudAlbum[]): CloudAlbum[] {
+    const was = attaching.value ? (cloud.value ?? []).map((c) => c.id) : null
+    const pos = (c: CloudAlbum): number =>
+      was ? was.indexOf(c.id) + 1 || was.length + 1 : Number(!c.found)
+    return [...list].sort((a, b) => pos(a) - pos(b))
   }
   // The one being matched with its folder, with its progress (album:attach-progress), and the
   // last error per album. Kept here, not in the view, so leaving the page neither hides them

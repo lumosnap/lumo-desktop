@@ -3,10 +3,10 @@
 // shoot from the other one). Each takes a folder; its photos are matched by content.
 import { ref, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { FolderInput, ImagePlus } from 'lucide-vue-next'
+import { FolderInput, HardDrive, ImagePlus } from 'lucide-vue-next'
 import { useAlbumStore } from '../stores/album'
 import { toast } from '../composables/useToast'
-import { attachedNote, attachError } from '../utils/cloud'
+import { addFromLabel, attachedNote, attachError, folderName, foundWhere } from '../utils/cloud'
 import { albumDay, nf } from '../utils/format'
 import type { CloudAlbum } from '../../../main/ipc/cloud'
 
@@ -32,7 +32,6 @@ function meta(c: CloudAlbum): string {
   const n = c.totalImages ? `${nf(c.totalImages)} photo${c.totalImages === 1 ? '' : 's'}` : 'Empty'
   return day ? `${n} · ${day}` : n
 }
-const folderName = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() || p
 
 // One match at a time: each reads every file in its folder. In the store, so it outlives the page
 const working = computed(() => albumStore.attaching)
@@ -51,8 +50,16 @@ const said = ref('')
 async function choose(c: CloudAlbum): Promise<void> {
   if (albumStore.attaching) return
   const folder = await window.api.dialog.openDirectory()
-  if (!folder || albumStore.attaching) return
-  const at = shown.value.findIndex((x) => x.id === c.id)
+  if (folder) await attach(c, folder)
+}
+
+// A row whose folder is on a plugged-in drive skips the folder dialog
+async function attach(c: CloudAlbum, folder: string): Promise<void> {
+  if (albumStore.attaching) return
+  // Its row if it stays (an error), else the row after it, else the one before
+  const ids = shown.value.map((x) => x.id)
+  const at = ids.indexOf(c.id)
+  const next = [c.id, ids[at + 1], ids[at - 1]]
   said.value = `Matching the photos in “${folderName(folder)}”.`
   const res = await albumStore.attach(c, folder)
   said.value = ''
@@ -70,8 +77,12 @@ async function choose(c: CloudAlbum): Promise<void> {
   // The row that had the focus may be gone: the row that took its place takes it
   await nextTick()
   if (document.activeElement !== document.body) return
-  const btns = el.value?.querySelectorAll<HTMLButtonElement>('.cloud-row .btn') ?? []
-  ;(btns[at] ?? btns[btns.length - 1])?.focus()
+  const row = next
+    .map((id) => id && el.value?.querySelector(`.cloud-row[data-id="${CSS.escape(id)}"]`))
+    .find(Boolean)
+  ;(row || el.value?.querySelector('.cloud-row:last-child'))
+    ?.querySelector<HTMLButtonElement>('.btn.ghost')
+    ?.focus()
 }
 
 // The rows that come in start at the 7th: the focus goes there, not back to the page
@@ -79,7 +90,7 @@ async function showAll(): Promise<void> {
   all.value = true
   await nextTick()
   const row = el.value?.querySelectorAll<HTMLElement>('.cloud-row')[FIRST]
-  const btn = row?.querySelector<HTMLButtonElement>('.btn')
+  const btn = row?.querySelector<HTMLButtonElement>('.btn.ghost')
   ;(btn && !btn.disabled ? btn : row)?.focus()
 }
 </script>
@@ -97,7 +108,7 @@ async function showAll(): Promise<void> {
       Choose the folder that has an album’s photos. Photos already online aren’t uploaded again.
     </p>
     <ul>
-      <li v-for="c in shown" :key="c.id" class="cloud-row" tabindex="-1">
+      <li v-for="c in shown" :key="c.id" class="cloud-row" :data-id="c.id" tabindex="-1">
         <div class="thumb">
           <img
             v-if="c.thumbnailUrl && !broken[c.id]"
@@ -117,21 +128,50 @@ async function showAll(): Promise<void> {
           <p v-else-if="albumStore.attachErrors[c.id]" class="err" role="alert">
             <span class="dot bad"></span>{{ attachError(albumStore.attachErrors[c.id]) }}
           </p>
+          <div v-else-if="c.found" :id="`found-${c.id}`" class="m" :title="c.found.folder">
+            {{ foundWhere(c.found) }}
+          </div>
         </div>
-        <button
-          class="btn ghost sm"
-          :disabled="!!working"
-          :aria-busy="working?.album.id === c.id"
-          :aria-label="working?.album.id === c.id ? undefined : `Choose folder for ${c.title}`"
-          :title="working && working.album.id !== c.id ? 'One album at a time' : ''"
-          :aria-describedby="working ? 'cloud-matching' : undefined"
-          @click="choose(c)"
-        >
-          <template v-if="working?.album.id === c.id"
-            ><span class="spin now"></span>Matching…</template
+        <div class="acts">
+          <button
+            v-if="c.found && working?.album.id !== c.id"
+            class="btn quiet sm"
+            :disabled="!!working"
+            :aria-label="`Other folder for ${c.title}`"
+            :title="working ? 'One album at a time' : ''"
+            :aria-describedby="working ? 'cloud-matching' : undefined"
+            @click="choose(c)"
           >
-          <template v-else><FolderInput />Choose folder…</template>
-        </button>
+            Other folder…
+          </button>
+          <button
+            class="btn ghost sm"
+            :disabled="!!working"
+            :aria-busy="working?.album.id === c.id"
+            :aria-label="
+              working?.album.id === c.id
+                ? undefined
+                : c.found
+                  ? `${addFromLabel(c.found)}: ${c.title}`
+                  : `Choose folder for ${c.title}`
+            "
+            :title="working && working.album.id !== c.id ? 'One album at a time' : ''"
+            :aria-describedby="
+              working
+                ? 'cloud-matching'
+                : c.found && !albumStore.attachErrors[c.id]
+                  ? `found-${c.id}`
+                  : undefined
+            "
+            @click="c.found ? attach(c, c.found.folder) : choose(c)"
+          >
+            <template v-if="working?.album.id === c.id"
+              ><span class="spin now"></span>Matching…</template
+            >
+            <template v-else-if="c.found"><HardDrive />{{ addFromLabel(c.found) }}</template>
+            <template v-else><FolderInput />Choose folder…</template>
+          </button>
+        </div>
       </li>
     </ul>
     <button v-if="!all && list.length > FIRST" class="btn quiet sm more" @click="showAll">
@@ -196,6 +236,10 @@ ul {
 .txt .err {
   margin-top: 4px;
   font-size: 13px;
+}
+.acts {
+  display: flex;
+  gap: 8px;
 }
 .more {
   margin: 8px 8px 0;

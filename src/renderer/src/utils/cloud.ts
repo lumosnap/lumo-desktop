@@ -1,7 +1,40 @@
 // Words for giving an album a folder: an account album (albums:attachCloud) and a missing
 // album's folder chosen again (album:relink)
-import type { AttachCloudResult } from '../../../main/ipc/cloud'
+import type { AttachCloudResult, CloudAlbum } from '../../../main/ipc/cloud'
 import { nf } from './format'
+
+export const folderName = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() || p
+
+type Found = NonNullable<CloudAlbum['found']>
+/** The row's button when its folder is on a plugged-in drive: the drive's label, else the folder */
+export const addFromLabel = (f: Found): string => `Add from “${f.drive || folderName(f.folder)}”`
+/** The line under the row's meta: where the folder is */
+export const foundWhere = (f: Found): string =>
+  `In “${folderName(f.folder)}” on ${f.drive ? `“${f.drive}”` : 'a plugged-in drive'}`
+
+/** Albums on a drive now that were not on one in the list before */
+export function newlyFound(before: CloudAlbum[], after: CloudAlbum[]): CloudAlbum[] {
+  const had = new Set(before.filter((c) => c.found).map((c) => c.id))
+  return after.filter((c) => c.found && !had.has(c.id))
+}
+
+/** The toast when the drives just plugged in have account albums that aren't here */
+export function foundNote(list: CloudAlbum[]): string {
+  const drives = new Set(list.map((c) => c.found?.drive ?? null))
+  const [drive] = drives
+  const one = drives.size === 1
+  if (list.length === 1) {
+    const on = drive ? `“${drive}”` : 'a drive you plugged in'
+    return `Found “${list[0].title}” on ${on}. It isn’t on this computer yet.`
+  }
+  const who =
+    one && drive
+      ? `“${drive}” has`
+      : one
+        ? 'A drive you plugged in has'
+        : 'The drives you plugged in have'
+  return `${who} ${nf(list.length)} of your albums that aren’t on this computer.`
+}
 
 export type AttachCode = Extract<AttachCloudResult, { success: false }>['error']
 /** The codes that leave the row with a line under it */

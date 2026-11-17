@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useNetworkStore } from './stores/network'
 import { useAlbumStore } from './stores/album'
 import AppToast from './components/ui/AppToast.vue'
 import { toast } from './composables/useToast'
+import { foundNote, newlyFound } from './utils/cloud'
 
 const router = useRouter()
 const route = useRoute()
@@ -24,6 +25,18 @@ async function reportBattery(): Promise<void> {
   battery.addEventListener('levelchange', send)
 }
 
+// The found album's row on Albums: its main button has the focus (the row, while a match runs)
+async function showCloud(id: string): Promise<void> {
+  if (route.path !== '/albums') await router.push('/albums')
+  await nextTick()
+  const row = document.querySelector<HTMLElement>(`.cloud-row[data-id="${CSS.escape(id)}"]`)
+  const btn = row?.querySelector<HTMLButtonElement>('.btn.ghost')
+  if (row) (btn && !btn.disabled ? btn : row).focus()
+  else document.getElementById('cloud-h')?.scrollIntoView()
+}
+// When the same plug brought a local album back, its toast (with "Open") is not replaced
+let reattachedAt = 0
+
 // Removed on unmount, so a hot reload doesn't stack a second copy of each listener
 let offIpc: Array<() => void> = []
 onUnmounted(() => offIpc.forEach((off) => off()))
@@ -41,6 +54,7 @@ onMounted(async () => {
     (_e, d: { albumId: string; title: string; volumeLabel: string | null }) => {
       albumStore.load()
       if (!authStore.isAuthenticated) return
+      reattachedAt = Date.now()
       toast(
         d.volumeLabel
           ? `Found “${d.title}” on “${d.volumeLabel}”.`
@@ -49,7 +63,20 @@ onMounted(async () => {
       )
     }
   )
-  offIpc = [offExpired, offReattached]
+  // A drive came or went: the account list says again which albums are on a plugged-in drive.
+  // Only once the list was asked for (Albums asks first, so the first list never toasts); a
+  // drive that newly has account albums is said on every screen
+  const offDrives = window.api.on('drives:changed', async () => {
+    if (!authStore.isAuthenticated || !networkStore.isOnline || !albumStore.cloud) return
+    // After a failed ask the list is empty, not "nothing found": no "new" to compare with
+    const before = albumStore.cloudFailed ? null : albumStore.cloudShown
+    // A failed ask keeps the list it had
+    if (!(await albumStore.loadCloud({ keep: true })) || !before) return
+    if (!authStore.isAuthenticated || Date.now() - reattachedAt < 5000) return
+    const now = newlyFound(before, albumStore.cloudShown)
+    if (now.length) toast(foundNote(now), { label: 'Show', run: () => showCloud(now[0].id) })
+  })
+  offIpc = [offExpired, offReattached, offDrives]
   // Initialize network monitoring
   networkStore.setupListener()
   await networkStore.checkStatus()

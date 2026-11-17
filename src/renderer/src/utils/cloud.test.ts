@@ -1,5 +1,52 @@
 import { describe, it, expect } from 'vitest'
-import { attachedNote, attachError, relinkError } from './cloud'
+import {
+  addFromLabel,
+  attachedNote,
+  attachError,
+  foundNote,
+  foundWhere,
+  newlyFound,
+  relinkError
+} from './cloud'
+import type { CloudAlbum } from '../../../main/ipc/cloud'
+
+const album = (id: string, found?: CloudAlbum['found']): CloudAlbum =>
+  ({ id, title: id, eventDate: null, totalImages: 1, thumbnailUrl: null, found }) as CloudAlbum
+
+describe('albums on a plugged-in drive', () => {
+  const nn = { folder: '/Volumes/NO NAME/2026/Asha & Rohan', drive: 'NO NAME' }
+  const win = { folder: 'E:\\Shoots\\Asha & Rohan\\', drive: null }
+  it('names the drive, else the folder', () => {
+    expect(addFromLabel(nn)).toBe('Add from “NO NAME”')
+    expect(addFromLabel(win)).toBe('Add from “Asha & Rohan”')
+    expect(addFromLabel({ ...win, drive: '' })).toBe('Add from “Asha & Rohan”')
+    expect(foundWhere(nn)).toBe('In “Asha & Rohan” on “NO NAME”')
+    expect(foundWhere(win)).toBe('In “Asha & Rohan” on a plugged-in drive')
+  })
+  it('newlyFound: only albums that were not on a drive before', () => {
+    const before = [album('a', nn), album('b')]
+    const after = [album('a', nn), album('b', nn), album('c', nn), album('d')]
+    expect(newlyFound(before, after).map((c) => c.id)).toEqual(['b', 'c'])
+    expect(newlyFound(after, [album('a')])).toEqual([])
+  })
+  it('foundNote: one or many, one drive or several', () => {
+    expect(foundNote([album('A', nn)])).toBe(
+      'Found “A” on “NO NAME”. It isn’t on this computer yet.'
+    )
+    expect(foundNote([album('A', win)])).toBe(
+      'Found “A” on a drive you plugged in. It isn’t on this computer yet.'
+    )
+    expect(foundNote([album('A', nn), album('B', nn)])).toBe(
+      '“NO NAME” has 2 of your albums that aren’t on this computer.'
+    )
+    expect(foundNote([album('A', win), album('B', win)])).toBe(
+      'A drive you plugged in has 2 of your albums that aren’t on this computer.'
+    )
+    expect(foundNote([album('A', nn), album('B', { folder: '/x', drive: 'EOS_DIGITAL' })])).toBe(
+      'The drives you plugged in have 2 of your albums that aren’t on this computer.'
+    )
+  })
+})
 
 describe('attachedNote', () => {
   const r = { title: 'Asha & Rohan', matched: 0, remote: 0, total: 0 }
